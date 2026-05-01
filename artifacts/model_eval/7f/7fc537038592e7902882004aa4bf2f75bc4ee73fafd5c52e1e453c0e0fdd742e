@@ -1,0 +1,11 @@
+{
+  "answer": "searched",
+  "artifacts": [
+    {
+      "content": "{\n  \"run_mode\": \"tool_execution_loop\",\n  \"steps\": [\n    {\n      \"content_present\": false,\n      \"kind\": \"model_turn\",\n      \"served_model\": \"openai/gpt-5.4-nano\",\n      \"served_provider\": \"azure\",\n      \"step\": 1,\n      \"tool_call_count\": 1\n    },\n    {\n      \"arguments\": {\n        \"query\": \"model eval authority\"\n      },\n      \"kind\": \"tool_call\",\n      \"step\": 1,\n      \"tool_name\": \"praxis_search\"\n    },\n    {\n      \"error\": null,\n      \"kind\": \"tool_result\",\n      \"ok\": true,\n      \"operation_name\": \"search.federated\",\n      \"receipt_id\": \"33333333-3333-3333-3333-333333333333\",\n      \"step\": 1,\n      \"tool_name\": \"praxis_search\"\n    },\n    {\n      \"content_present\": true,\n      \"kind\": \"model_turn\",\n      \"served_model\": \"openai/gpt-5.4-nano\",\n      \"served_provider\": \"azure\",\n      \"step\": 2,\n      \"tool_call_count\": 0\n    }\n  ],\n  \"task_id\": \"tool.loop_search_then_answer\"\n}",
+      "media_type": "application/json",
+      "path": "tool_transcript.json"
+    }
+  ],
+  "task_id": "tool.loop_search_then_answer"
+}

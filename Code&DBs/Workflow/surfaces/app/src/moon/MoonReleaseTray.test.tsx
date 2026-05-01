@@ -44,8 +44,8 @@ function buildPayload(prompt: string, options: BuildPayloadOptions = {}): BuildP
         ],
       },
     },
-    compiled_spec_projection: {
-      compiled_spec: {
+    materialized_spec_projection: {
+      materialized_spec: {
         jobs: [{ label: options.projectedJobLabel || 'Projected draft', agent: 'auto/draft' }],
         triggers,
       },
@@ -88,8 +88,8 @@ function buildGraphPayload(): BuildPayload {
         },
       ],
     },
-    compiled_spec_projection: {
-      compiled_spec: {
+    materialized_spec_projection: {
+      materialized_spec: {
         jobs: [{ label: 'Projected fetch', agent: 'integration/webhook/post' }],
         triggers: [{ event_type: 'manual' }],
       },
@@ -101,7 +101,7 @@ describe('MoonReleaseTray', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     buildControllerMocks.planDefinition.mockResolvedValue({
-      compiled_spec: {
+      materialized_spec: {
         jobs: [{ label: 'Planned draft', agent: 'auto/draft' }],
       },
     });
@@ -198,7 +198,7 @@ describe('MoonReleaseTray', () => {
   test('plans and dispatches graph-backed workflows through the canonical build_graph path', async () => {
     buildControllerMocks.planDefinition.mockResolvedValue({
       workflow: { id: 'wf_graph', name: 'Graph Alpha' },
-      compiled_spec: {
+      materialized_spec: {
         jobs: [{ label: 'Planned fetch', agent: 'integration/webhook/post' }],
       },
     });

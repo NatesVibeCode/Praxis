@@ -10,11 +10,11 @@ if str(_WORKFLOW_ROOT) not in sys.path:
 
 import pytest
 
-from runtime import spec_compiler
-from runtime.spec_compiler import (
+from runtime import spec_materializer
+from runtime.spec_materializer import (
     ApprovalHashMismatchError,
     ApprovedPlan,
-    CompiledSpec,
+    MaterializedSpec,
     CompilePlanError,
     LaunchReceipt,
     Plan,
@@ -33,7 +33,7 @@ from runtime.spec_compiler import (
 def _stub_compile_spec(intent_dict, *, conn):
     label = intent_dict.get("label") or intent_dict["description"].split()[0].lower()
     return (
-        CompiledSpec(
+        MaterializedSpec(
             prompt=f"PROMPT({intent_dict['description']})",
             scope_write=list(intent_dict.get("write") or []),
             scope_read=intent_dict.get("read"),
@@ -54,7 +54,7 @@ class _FakeConn:
 
 
 def test_compile_plan_translates_packets_into_multi_job_spec(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     plan = {
         "name": "wave_0_authority",
@@ -114,7 +114,7 @@ def test_compile_plan_translates_packets_into_multi_job_spec(monkeypatch) -> Non
 
 
 def test_launch_plan_routes_through_command_bus(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     captured: dict[str, object] = {}
 
@@ -190,7 +190,7 @@ def test_launch_plan_rejects_empty_packets() -> None:
 
 def test_job_prompt_is_enriched_with_bug_and_verify_context(monkeypatch) -> None:
     """Every job's prompt carries a Context: section when bug_refs + verify_refs exist."""
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     plan = {
         "name": "enriched",
@@ -222,7 +222,7 @@ def test_job_prompt_has_no_context_block_when_no_extras(monkeypatch) -> None:
 
     def _plain_stub(intent_dict, *, conn):
         return (
-            CompiledSpec(
+            MaterializedSpec(
                 prompt=f"PROMPT({intent_dict['description']})",
                 scope_write=list(intent_dict.get("write") or []),
                 capabilities=["cap"],
@@ -234,7 +234,7 @@ def test_job_prompt_has_no_context_block_when_no_extras(monkeypatch) -> None:
             [],
         )
 
-    monkeypatch.setattr(spec_compiler, "compile_spec", _plain_stub)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _plain_stub)
 
     plan = {
         "name": "plain",
@@ -256,7 +256,7 @@ def test_job_prompt_has_no_context_block_when_no_extras(monkeypatch) -> None:
 
 def test_job_prompt_enrichment_joins_multiple_bug_refs(monkeypatch) -> None:
     """When a cluster has bug_refs list, the Context lists all of them."""
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     plan = {
         "name": "cluster",
@@ -276,7 +276,7 @@ def test_job_prompt_enrichment_joins_multiple_bug_refs(monkeypatch) -> None:
 
 
 def test_launch_plan_deduplicates_colliding_labels(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     plan = {
         "name": "same_label_twice",
@@ -306,7 +306,7 @@ def _install_empty_binding(monkeypatch) -> None:
 
 
 def test_propose_plan_returns_spec_preview_and_declarations_without_submit(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
     _install_empty_binding(monkeypatch)
 
     # Preview stub — replicates the preview_workflow_execution payload shape
@@ -379,7 +379,7 @@ def test_propose_plan_returns_spec_preview_and_declarations_without_submit(monke
 
 
 def test_propose_plan_surfaces_unresolved_auto_routes_as_warning(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
     _install_empty_binding(monkeypatch)
 
     def _unresolved_preview(conn, *, inline_spec, **_kwargs):
@@ -423,7 +423,7 @@ def test_propose_plan_surfaces_unresolved_auto_routes_as_warning(monkeypatch) ->
 
 def test_propose_plan_appends_bound_data_fields_to_job_prompt(monkeypatch) -> None:
     """Bound pills from binding surface in the job prompt so agents see typed fields."""
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     import runtime.intent_binding as intent_binding_mod
 
@@ -484,7 +484,7 @@ def test_propose_plan_appends_bound_data_fields_to_job_prompt(monkeypatch) -> No
 
 def test_propose_plan_omits_bound_data_fields_line_when_no_bound_pills(monkeypatch) -> None:
     """No bound pills → no Bound data fields line in prompt."""
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
     _install_empty_binding(monkeypatch)
 
     import runtime.workflow._admission as admission_mod
@@ -515,7 +515,7 @@ def test_propose_plan_omits_bound_data_fields_line_when_no_bound_pills(monkeypat
 
 
 def test_propose_plan_surfaces_unbound_data_pills_as_warnings(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     import runtime.intent_binding as intent_binding_mod
 
@@ -697,7 +697,7 @@ def test_compile_plan_collects_all_packet_failures_before_raising(monkeypatch) -
         if intent_dict.get("label", "").startswith("bad-"):
             raise ValueError(f"synthetic failure for {intent_dict['label']}")
         return (
-            CompiledSpec(
+            MaterializedSpec(
                 prompt=f"PROMPT({intent_dict['description']})",
                 scope_write=list(intent_dict["write"]),
                 capabilities=["cap"],
@@ -709,7 +709,7 @@ def test_compile_plan_collects_all_packet_failures_before_raising(monkeypatch) -
             [],
         )
 
-    monkeypatch.setattr(spec_compiler, "compile_spec", _failing_on_marked_packets)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _failing_on_marked_packets)
 
     plan = {
         "name": "mixed",
@@ -737,7 +737,7 @@ def test_compile_plan_collects_all_packet_failures_before_raising(monkeypatch) -
 
 def test_compile_plan_deterministic_workflow_id_when_not_supplied(monkeypatch) -> None:
     """Same plan content → same workflow_id across repeated compiles."""
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     plan = {
         "name": "idempotent",
@@ -757,7 +757,7 @@ def test_compile_plan_deterministic_workflow_id_when_not_supplied(monkeypatch) -
 
 
 def test_compile_plan_different_plans_get_different_workflow_ids(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     plan_a = {
         "name": "plan_a",
@@ -775,7 +775,7 @@ def test_compile_plan_different_plans_get_different_workflow_ids(monkeypatch) ->
 
 
 def test_explicit_workflow_id_wins_over_hash(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     plan = {
         "name": "override_id",
@@ -915,7 +915,7 @@ def test_coerce_plan_from_bugs_derives_replay_state_without_bug_columns(monkeypa
 
 
 def test_fix_stage_routes_through_build_lane_without_losing_task_type(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     spec_dict, _ = compile_plan(
         {
@@ -1220,7 +1220,7 @@ def test_coerce_plan_combines_all_four_source_shortcuts(monkeypatch) -> None:
 
 
 def test_propose_plan_from_bugs_warns_on_workspace_root_scope(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
     _install_empty_binding(monkeypatch)
 
     import runtime.bug_resolution_program as bug_program_mod
@@ -1251,7 +1251,7 @@ def test_propose_plan_from_bugs_warns_on_workspace_root_scope(monkeypatch) -> No
 
 
 def test_launch_proposed_submits_previously_built_spec(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
     _install_empty_binding(monkeypatch)
 
     def _fake_preview(conn, *, inline_spec, **_kwargs):
@@ -1299,7 +1299,7 @@ def test_launch_proposed_submits_previously_built_spec(monkeypatch) -> None:
 
 def _build_proposed_for_approval(monkeypatch) -> ProposedPlan:
     """Build a fresh ProposedPlan to feed approval tests."""
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
     _install_empty_binding(monkeypatch)
 
     import runtime.workflow._admission as admission_mod
@@ -1359,7 +1359,7 @@ def test_approve_proposed_plan_requires_provider_freshness_gate() -> None:
     )
 
     with pytest.raises(
-        spec_compiler.ProviderFreshnessGateError,
+        spec_materializer.ProviderFreshnessGateError,
         match="fresh provider route truth or a recent provider availability refresh receipt",
     ):
         approve_proposed_plan(proposed, approved_by="nate@praxis")
@@ -1444,7 +1444,7 @@ def test_launch_approved_rejects_stale_provider_freshness(monkeypatch) -> None:
     monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
 
     with pytest.raises(
-        spec_compiler.ProviderFreshnessGateError,
+        spec_materializer.ProviderFreshnessGateError,
         match="provider freshness evidence is stale",
     ):
         launch_approved(approved, conn=_FakeConn())

@@ -169,14 +169,14 @@ def _compile_preview(intent: str | None, subsystems: Any) -> tuple[dict[str, Any
     if not intent:
         return None, None
     try:
-        from runtime.compile_cqrs import preview_compile
+        from runtime.materialize_cqrs import preview_compile
 
         conn = subsystems.get_pg_conn() if hasattr(subsystems, "get_pg_conn") else None
         preview = preview_compile(intent, conn=conn, match_limit=8).to_dict()
         return preview, None
     except Exception as exc:
         return None, {
-            "source": "runtime.compile_cqrs.preview_compile",
+            "source": "runtime.materialize_cqrs.preview_compile",
             "error": str(exc),
         }
 
@@ -460,7 +460,7 @@ def handle_query_legal_tools(query: QueryLegalTools, subsystems: Any) -> dict[st
         "data_dictionary_objects",
     ]
     if preview is not None or preview_error is not None:
-        authority_sources.append("runtime.compile_cqrs.preview_compile")
+        authority_sources.append("runtime.materialize_cqrs.preview_compile")
 
     payload: dict[str, Any] = {
         "view": "legal_tools",

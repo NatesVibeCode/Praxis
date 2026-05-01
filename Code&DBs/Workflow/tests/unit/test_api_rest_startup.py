@@ -506,7 +506,7 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
                     "unresolved_count": 0,
                     "capability_count": 2,
                     "reference_count": 1,
-                    "compiled_job_count": 0,
+                    "materialized_job_count": 0,
                     "trigger_count": 0,
                     "definition_hash": "defhash",
                     "definition_revision": "def_123",

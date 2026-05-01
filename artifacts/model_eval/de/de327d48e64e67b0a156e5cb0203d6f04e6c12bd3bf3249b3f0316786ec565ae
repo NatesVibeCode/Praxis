@@ -1,0 +1,39 @@
+{
+  "run_mode": "tool_execution_loop",
+  "steps": [
+    {
+      "content_present": false,
+      "kind": "model_turn",
+      "served_model": "openai/gpt-5.4-nano",
+      "served_provider": "azure",
+      "step": 1,
+      "tool_call_count": 1
+    },
+    {
+      "arguments": {
+        "query": "model eval authority"
+      },
+      "kind": "tool_call",
+      "step": 1,
+      "tool_name": "praxis_search"
+    },
+    {
+      "error": null,
+      "kind": "tool_result",
+      "ok": true,
+      "operation_name": "search.federated",
+      "receipt_id": "33333333-3333-3333-3333-333333333333",
+      "step": 1,
+      "tool_name": "praxis_search"
+    },
+    {
+      "content_present": true,
+      "kind": "model_turn",
+      "served_model": "openai/gpt-5.4-nano",
+      "served_provider": "azure",
+      "step": 2,
+      "tool_call_count": 0
+    }
+  ],
+  "task_id": "tool.loop_search_then_answer"
+}

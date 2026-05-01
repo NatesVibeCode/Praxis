@@ -1,7 +1,7 @@
 """Translator: authored plan_packets → workflow definition for the build canvas.
 
 The Praxis "Describe it" UI compile path historically called
-``runtime.compiler.compile_prose`` which produces a ``definition`` whose
+``runtime.materializer.compile_prose`` which produces a ``definition`` whose
 ``references`` + ``draft_flow`` are auto-converted to a ``build_graph`` and
 ``binding_ledger`` by ``runtime.build_authority.build_authority_bundle``.
 
@@ -263,7 +263,7 @@ def packets_to_definition(
         "workflow_id": workflow_id,
         "type": "operating_model",
         "source_prose": intent,
-        "compiled_prose": intent,  # compose_plan_via_llm doesn't rewrite prose
+        "materialized_prose": intent,  # compose_plan_via_llm doesn't rewrite prose
         "narrative_blocks": [],
         "references": references,
         "capabilities": capabilities,

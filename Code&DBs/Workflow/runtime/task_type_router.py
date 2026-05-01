@@ -98,8 +98,8 @@ def _is_deepseek_scoped_for_task_type(task_type: str) -> bool:
     normalized_task_type = task_type.strip().lower()
     return (
         normalized_task_type in _DEEPSEEK_SCOPE_TASK_TYPES
-        or normalized_task_type == "compile"
-        or normalized_task_type.startswith("compile_")
+        or normalized_task_type == "materialize"
+        or normalized_task_type.startswith("materialize_")
     )
 
 

@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from runtime import canonical_workflows
-from runtime.compile_index import CompileIndexAuthorityError
+from runtime.materialize_index import MaterializeIndexAuthorityError
 from runtime.operations.queries import handoff as handoff_queries
 from runtime.self_healing import SelfHealingOrchestrator
 from policy.workflow_lanes import (
@@ -418,7 +418,7 @@ class _RecordingPg:
                     "name": params[1],
                     "description": params[2],
                     "definition": json.loads(params[3]),
-                    "compiled_spec": json.loads(params[4]) if params[4] is not None else None,
+                    "materialized_spec": json.loads(params[4]) if params[4] is not None else None,
                     "tags": list(params[5]),
                     "version": int(row.get("version") or 0) + 1,
                     "is_template": params[6],
@@ -444,9 +444,9 @@ class _RecordingPg:
             if "definition =" in query:
                 updated["definition"] = json.loads(params[param_index])
                 param_index += 1
-            if "compiled_spec =" in query:
-                compiled_param = params[param_index]
-                updated["compiled_spec"] = json.loads(compiled_param) if compiled_param is not None else None
+            if "materialized_spec =" in query:
+                materialized_param = params[param_index]
+                updated["materialized_spec"] = json.loads(materialized_param) if materialized_param is not None else None
                 param_index += 1
             if "tags =" in query:
                 updated["tags"] = list(params[param_index])
@@ -571,7 +571,7 @@ class _RecordingPg:
 
 class _MutableWorkflowPg(_RecordingPg):
     def fetchrow(self, query: str, *params: Any) -> dict[str, Any] | None:
-        if query.strip().startswith("SELECT id, name, description, definition, compiled_spec, version, updated_at"):
+        if query.strip().startswith("SELECT id, name, description, definition, materialized_spec, version, updated_at"):
             workflow = self.workflow_rows.get(str(params[0]))
             return workflow
         if query.strip().startswith("UPDATE public.workflows"):
@@ -581,7 +581,7 @@ class _MutableWorkflowPg(_RecordingPg):
                 return None
             
             # Map parameters by parsing the UPDATE statement
-            # Format: SET name = $2, description = $3, definition = $4::jsonb, compiled_spec = $5::jsonb ...
+            # Format: SET name = $2, description = $3, definition = $4::jsonb, materialized_spec = $5::jsonb ...
             assignments = re.findall(r"(\w+)\s*=\s*\$(\d+)", query)
             for field, param_idx_str in assignments:
                 param_idx = int(param_idx_str) - 1
@@ -592,8 +592,8 @@ class _MutableWorkflowPg(_RecordingPg):
                     workflow["description"] = value
                 elif field == "definition":
                     workflow["definition"] = json.loads(value) if isinstance(value, str) else value
-                elif field == "compiled_spec":
-                    workflow["compiled_spec"] = json.loads(value) if isinstance(value, str) else value
+                elif field == "materialized_spec":
+                    workflow["materialized_spec"] = json.loads(value) if isinstance(value, str) else value
             
             workflow["version"] = int(workflow.get("version") or 1) + 1
             workflow["updated_at"] = "2026-04-09T20:00:00Z"
@@ -743,7 +743,7 @@ class _DashboardPg:
                         "type": "operating_model",
                         "trigger_intent": [{"event_type": "schedule"}],
                     },
-                    "compiled_spec": {"jobs": [{"label": "triage"}]},
+                    "materialized_spec": {"jobs": [{"label": "triage"}]},
                     "tags": [],
                     "version": 3,
                     "is_template": False,
@@ -771,7 +771,7 @@ class _DashboardPg:
                     "name": "Daily Report",
                     "description": "Generate the daily report.",
                     "definition": {"type": "pipeline"},
-                    "compiled_spec": {"jobs": [{"label": "report"}]},
+                    "materialized_spec": {"jobs": [{"label": "report"}]},
                     "tags": [],
                     "version": 2,
                     "is_template": False,
@@ -799,7 +799,7 @@ class _DashboardPg:
                     "name": "Unlaunched Draft",
                     "description": "A workflow draft.",
                     "definition": {"type": "pipeline"},
-                    "compiled_spec": None,
+                    "materialized_spec": None,
                     "tags": [],
                     "version": 1,
                     "is_template": False,
@@ -1011,7 +1011,7 @@ def test_handle_trigger_post_records_surface_usage_on_success(monkeypatch) -> No
             "wf_123": {
                 "id": "wf_123",
                 "definition": {"definition_revision": "def_trigger_usage"},
-                "compiled_spec": {"jobs": [{"label": "review"}], "triggers": []},
+                "materialized_spec": {"jobs": [{"label": "review"}], "triggers": []},
             }
         }
     )
@@ -1122,7 +1122,7 @@ def test_handle_workflow_build_post_harden_uses_workflow_scoped_build_state() ->
         "name": "Graph Draft",
         "description": "Graph Draft",
         "definition": {},
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-15T10:00:00Z",
     }
@@ -1186,7 +1186,7 @@ def test_handle_workflow_build_get_returns_authority_bundle() -> None:
         "definition": {
             "type": "operating_model",
             "source_prose": "Research #ticket/status and triage support issues",
-            "compiled_prose": "Research #ticket/status and triage support issues",
+            "materialized_prose": "Research #ticket/status and triage support issues",
             "narrative_blocks": [
                 {
                     "id": "block-001",
@@ -1226,7 +1226,7 @@ def test_handle_workflow_build_get_returns_authority_bundle() -> None:
             ],
             "definition_revision": "def_build_get",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -1245,7 +1245,7 @@ def test_handle_workflow_build_get_returns_authority_bundle() -> None:
     assert payload["build_state"] == "blocked"
     assert any(node["node_id"] == "step-001" for node in payload["build_graph"]["nodes"])
     assert payload["binding_ledger"][0]["binding_id"] == "binding:ref-001"
-    assert payload["compiled_spec_projection"] is None
+    assert payload["materialized_spec_projection"] is None
 
 
 def test_handle_workflow_build_get_surfaces_trigger_projection() -> None:
@@ -1256,7 +1256,7 @@ def test_handle_workflow_build_get_surfaces_trigger_projection() -> None:
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [
                 {
                     "id": "block-001",
@@ -1306,7 +1306,7 @@ def test_handle_workflow_build_get_surfaces_trigger_projection() -> None:
             ],
             "definition_revision": "def_build_trigger",
         },
-        "compiled_spec": {
+        "materialized_spec": {
             "name": "Inbox Triage",
             "definition_revision": "def_build_trigger",
             "plan_revision": "plan_build_trigger",
@@ -1354,8 +1354,8 @@ def test_handle_workflow_build_get_surfaces_trigger_projection() -> None:
     }
     assert payload["binding_ledger"][0]["state"] == "suggested"
     assert payload["binding_ledger"][0]["accepted_target"] is None
-    assert payload["compiled_spec_projection"]["graph_id"] == payload["build_graph"]["graph_id"]
-    assert payload["compiled_spec_projection"]["compiled_spec"]["triggers"] == [
+    assert payload["materialized_spec_projection"]["graph_id"] == payload["build_graph"]["graph_id"]
+    assert payload["materialized_spec_projection"]["materialized_spec"]["triggers"] == [
         {
             "event_type": "email.received",
             "filter": {"mailbox": "support"},
@@ -1373,7 +1373,7 @@ def test_handle_workflow_build_get_overlays_db_review_decisions_over_definition_
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [],
             "references": [
                 {
@@ -1424,7 +1424,7 @@ def test_handle_workflow_build_get_overlays_db_review_decisions_over_definition_
             ],
             "definition_revision": "def_build_review_overlay",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -1493,7 +1493,7 @@ def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [
                 {
                     "id": "block-001",
@@ -1534,7 +1534,7 @@ def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
             ],
             "definition_revision": "def_build_mutation",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -1582,8 +1582,8 @@ def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
         "emitted_by": "mutate_workflow_build",
     }
     assert payload["build_state"] == "blocked"
-    assert payload["compiled_spec"] is None
-    assert payload["compiled_spec_projection"] is None
+    assert payload["materialized_spec"] is None
+    assert payload["materialized_spec_projection"] is None
     assert payload["binding_ledger"][0]["state"] == "suggested"
     persisted_definition = pg.workflow_rows["wf_build_mutation"]["definition"]
     assert persisted_definition["authority_attachments"][0]["authority_ref"] == "@gmail/search"
@@ -1599,7 +1599,7 @@ def test_handle_workflow_build_post_rejects_legacy_binding_accept_alias() -> Non
             "definition_revision": "def_build_binding_alias",
             "binding_ledger": [],
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -1633,7 +1633,7 @@ def test_handle_workflow_build_post_rejects_legacy_import_admit_alias() -> None:
             "definition_revision": "def_build_import_alias",
             "import_snapshots": [],
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -1666,7 +1666,7 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [],
             "references": [],
             "capabilities": [],
@@ -1707,7 +1707,7 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
             ],
             "definition_revision": "def_build_binding_accept",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -1788,7 +1788,7 @@ def test_handle_workflow_build_post_records_proposal_request_without_binding_acc
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [],
             "references": [],
             "capabilities": [],
@@ -1829,7 +1829,7 @@ def test_handle_workflow_build_post_records_proposal_request_without_binding_acc
             ],
             "definition_revision": "def_build_binding_proposal",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -1894,7 +1894,7 @@ def test_handle_workflow_build_post_restores_attachment_record() -> None:
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [],
             "references": [],
             "capabilities": [],
@@ -1925,7 +1925,7 @@ def test_handle_workflow_build_post_restores_attachment_record() -> None:
             ],
             "definition_revision": "def_build_attachment_restore",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -1958,7 +1958,7 @@ def test_handle_workflow_build_post_review_restore_revokes_binding_approval() ->
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [],
             "references": [
                 {
@@ -1987,7 +1987,7 @@ def test_handle_workflow_build_post_review_restore_revokes_binding_approval() ->
             ],
             "definition_revision": "def_build_review_restore",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -2074,7 +2074,7 @@ def test_handle_workflow_build_post_restores_binding_record() -> None:
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [],
             "references": [],
             "capabilities": [],
@@ -2105,7 +2105,7 @@ def test_handle_workflow_build_post_restores_binding_record() -> None:
             ],
             "definition_revision": "def_build_binding_restore",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -2143,7 +2143,7 @@ def test_handle_workflow_build_post_removes_staged_import_and_binding_records() 
         "definition": {
             "type": "operating_model",
             "source_prose": "Use imported escalation policy evidence.",
-            "compiled_prose": "Use imported escalation policy evidence.",
+            "materialized_prose": "Use imported escalation policy evidence.",
             "narrative_blocks": [],
             "references": [],
             "capabilities": [],
@@ -2204,7 +2204,7 @@ def test_handle_workflow_build_post_removes_staged_import_and_binding_records() 
             ],
             "definition_revision": "def_build_import_restore",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -2269,7 +2269,7 @@ def test_handle_workflow_build_post_admit_import_emits_restore_receipt() -> None
         "definition": {
             "type": "operating_model",
             "source_prose": "Use imported escalation policy evidence.",
-            "compiled_prose": "Use imported escalation policy evidence.",
+            "materialized_prose": "Use imported escalation policy evidence.",
             "narrative_blocks": [],
             "references": [],
             "capabilities": [],
@@ -2311,7 +2311,7 @@ def test_handle_workflow_build_post_admit_import_emits_restore_receipt() -> None
             ],
             "definition_revision": "def_build_import_admit",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -2385,7 +2385,7 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [
                 {
                     "id": "block-001",
@@ -2426,7 +2426,7 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
             ],
             "definition_revision": "def_build_materialize",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -2486,8 +2486,8 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
         "emitted_by": "mutate_workflow_build",
     }
     assert payload["build_state"] == "blocked"
-    assert payload["compiled_spec"] is None
-    assert payload["compiled_spec_projection"] is None
+    assert payload["materialized_spec"] is None
+    assert payload["materialized_spec_projection"] is None
     binding = next(entry for entry in payload["binding_ledger"] if entry["binding_id"].startswith("binding:import:"))
     assert binding["state"] == "suggested"
     assert binding["accepted_target"] is None
@@ -2504,7 +2504,7 @@ def test_handle_workflow_build_post_materialize_here_stays_structural_without_re
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [],
             "references": [],
             "capabilities": [],
@@ -2523,7 +2523,7 @@ def test_handle_workflow_build_post_materialize_here_stays_structural_without_re
             ],
             "definition_revision": "def_build_materialize_idempotent",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -2580,7 +2580,7 @@ def test_handle_workflow_build_post_build_graph_emits_db_backed_restore_receipt(
         "definition": {
             "type": "operating_model",
             "source_prose": "triage-agent reviews the support inbox.",
-            "compiled_prose": "triage-agent reviews the support inbox.",
+            "materialized_prose": "triage-agent reviews the support inbox.",
             "narrative_blocks": [],
             "references": [],
             "capabilities": [],
@@ -2599,7 +2599,7 @@ def test_handle_workflow_build_post_build_graph_emits_db_backed_restore_receipt(
             ],
             "definition_revision": "def_build_graph_receipt",
         },
-        "compiled_spec": None,
+        "materialized_spec": None,
         "version": 1,
         "updated_at": "2026-04-09T19:00:00Z",
     }
@@ -2682,12 +2682,12 @@ def test_handle_workflow_build_post_delegates_to_runtime_owner() -> None:
             "name": "Build Workflow",
             "description": "desc",
             "definition": {},
-            "compiled_spec": {},
+            "materialized_spec": {},
             "version": 1,
             "updated_at": "2026-04-09T20:00:00Z",
         },
         "definition": {},
-        "compiled_spec": {},
+        "materialized_spec": {},
         "build_bundle": {"projection_status": {"state": "ready"}},
         "planning_notes": [],
     }
@@ -2704,7 +2704,7 @@ def test_handle_workflow_build_post_delegates_to_runtime_owner() -> None:
         runtime_result["row"],
         conn=pg,
         definition=runtime_result["definition"],
-        compiled_spec=runtime_result["compiled_spec"],
+        materialized_spec=runtime_result["materialized_spec"],
         build_bundle=runtime_result["build_bundle"],
         planning_notes=runtime_result["planning_notes"],
         intent_brief=runtime_result.get("intent_brief"),
@@ -2828,7 +2828,7 @@ def test_handle_workflows_get_leaves_definition_only_workflows_without_current_p
                     "type": "operating_model",
                     "definition_revision": "def_explicit_123",
                     "source_prose": "Run the explicit inbox flow",
-                    "compiled_prose": "Run the explicit inbox flow",
+                    "materialized_prose": "Run the explicit inbox flow",
                     "narrative_blocks": [],
                     "references": [],
                     "capabilities": [],
@@ -2837,7 +2837,7 @@ def test_handle_workflows_get_leaves_definition_only_workflows_without_current_p
                     "trigger_intent": [{"event_type": "email.received"}],
                     "jobs": [{"label": "search-inbox", "prompt": "Search the inbox"}],
                 },
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "tags": [],
                 "version": 1,
                 "is_template": False,
@@ -2876,7 +2876,7 @@ def test_handle_query_routes_never_run_workflows_to_workflow_records(
             "id": "wf_draft",
             "name": "Draft Flow",
             "description": "Not launched yet.",
-            "compiled_spec": None,
+            "materialized_spec": None,
             "invocation_count": 0,
             "last_invoked_at": None,
             "is_template": False,
@@ -2968,7 +2968,7 @@ def test_handle_workflows_get_marks_definition_only_packets_current_without_plan
                     "type": "operating_model",
                     "definition_revision": "def_explicit_123",
                     "source_prose": "Run the explicit inbox flow",
-                    "compiled_prose": "Run the explicit inbox flow",
+                    "materialized_prose": "Run the explicit inbox flow",
                     "narrative_blocks": [],
                     "references": [],
                     "capabilities": [],
@@ -2977,7 +2977,7 @@ def test_handle_workflows_get_marks_definition_only_packets_current_without_plan
                     "trigger_intent": [{"event_type": "email.received"}],
                     "jobs": [{"label": "search-inbox", "prompt": "Search the inbox"}],
                 },
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "tags": [],
                 "version": 1,
                 "is_template": False,
@@ -3087,7 +3087,7 @@ def test_handle_workflows_get_surfaces_saved_plan_and_latest_packet_revision_sta
                     "type": "operating_model",
                     "definition_revision": "def_current_123",
                     "source_prose": "Handle support email",
-                    "compiled_prose": "Use @gmail/search before triage-agent responds.",
+                    "materialized_prose": "Use @gmail/search before triage-agent responds.",
                     "narrative_blocks": [],
                     "references": [],
                     "capabilities": [],
@@ -3096,7 +3096,7 @@ def test_handle_workflows_get_surfaces_saved_plan_and_latest_packet_revision_sta
                     "trigger_intent": [],
                     "draft_flow": [],
                 },
-                "compiled_spec": {
+                "materialized_spec": {
                     "name": "Inbox Triage",
                     "definition_revision": "def_stale_123",
                     "plan_revision": "plan_old_123",
@@ -3357,7 +3357,7 @@ def test_handle_trigger_post_rejects_workflow_without_current_plan() -> None:
                 "id": "wf_123",
                 "name": "Inbox Triage",
                 "definition": {"definition_revision": "def_123"},
-                "compiled_spec": None,
+                "materialized_spec": None,
             }
         }
     )
@@ -3384,12 +3384,12 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
                 "definition": {
                     "type": "operating_model",
                     "definition_revision": "def_123",
-                    "compile_provenance": {
+                    "materialize_provenance": {
                         "compile_index_ref": "compile_index.alpha",
                         "compile_surface_revision": "compile_surface.alpha",
                     },
                 },
-                "compiled_spec": {
+                "materialized_spec": {
                     "definition_revision": "def_123",
                     "name": "Inbox Triage",
                     "workflow_id": "wf_123",
@@ -3429,7 +3429,7 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
             "_latest_execution_manifest",
             return_value={
                 "execution_manifest_ref": "execution_manifest:wf_123:def_123:1",
-                "compiled_spec": {
+                "materialized_spec": {
                     "definition_revision": "def_123",
                     "name": "Inbox Triage",
                     "workflow_id": "wf_123",
@@ -3470,12 +3470,12 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
             "definition": {
                 "type": "operating_model",
                 "definition_revision": "def_123",
-                "compile_provenance": {
+                "materialize_provenance": {
                     "compile_index_ref": "compile_index.alpha",
                     "compile_surface_revision": "compile_surface.alpha",
                 },
             },
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "def_123",
                 "name": "Inbox Triage",
                 "workflow_id": "wf_123",
@@ -3489,12 +3489,12 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
         "definition_row": {
             "type": "operating_model",
             "definition_revision": "def_123",
-            "compile_provenance": {
+            "materialize_provenance": {
                 "compile_index_ref": "compile_index.alpha",
                 "compile_surface_revision": "compile_surface.alpha",
             },
         },
-        "compiled_spec_row": {
+        "materialized_spec_row": {
             "definition_revision": "def_123",
             "name": "Inbox Triage",
             "workflow_id": "wf_123",
@@ -3506,7 +3506,7 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
         },
         "execution_manifest": {
             "execution_manifest_ref": "execution_manifest:wf_123:def_123:1",
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "def_123",
                 "name": "Inbox Triage",
                 "workflow_id": "wf_123",
@@ -3538,7 +3538,7 @@ def test_handle_trigger_post_rejects_definition_only_workflows_even_with_legacy_
                     "type": "operating_model",
                     "definition_revision": "def_explicit_123",
                     "source_prose": "Run the explicit inbox flow",
-                    "compiled_prose": "Run the explicit inbox flow",
+                    "materialized_prose": "Run the explicit inbox flow",
                     "narrative_blocks": [],
                     "references": [],
                     "capabilities": [],
@@ -3547,7 +3547,7 @@ def test_handle_trigger_post_rejects_definition_only_workflows_even_with_legacy_
                     "trigger_intent": [{"event_type": "email.received"}],
                     "jobs": [{"label": "search-inbox", "prompt": "Search the inbox"}],
                 },
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "invocation_count": 0,
                 "last_invoked_at": None,
             }
@@ -3592,11 +3592,11 @@ def test_handle_workflows_post_keeps_current_plan_stable_on_rename() -> None:
                 workflow = dict(self.workflow_rows[workflow_id])
                 if "name =" in query:
                     workflow["name"] = params[1]
-                compiled_match = re.search(r"compiled_spec = \$(\d+)::jsonb", query)
-                if compiled_match:
-                    compiled_param = params[int(compiled_match.group(1)) - 1]
-                    workflow["compiled_spec"] = (
-                        json.loads(compiled_param) if compiled_param is not None else None
+                materialized_match = re.search(r"materialized_spec = \$(\d+)::jsonb", query)
+                if materialized_match:
+                    materialized_param = params[int(materialized_match.group(1)) - 1]
+                    workflow["materialized_spec"] = (
+                        json.loads(materialized_param) if materialized_param is not None else None
                     )
                 self.workflow_rows[workflow_id] = workflow
                 return workflow
@@ -3612,7 +3612,7 @@ def test_handle_workflows_post_keeps_current_plan_stable_on_rename() -> None:
                     "type": "operating_model",
                     "definition_revision": "def_explicit_123",
                     "source_prose": "Run the explicit inbox flow",
-                    "compiled_prose": "Run the explicit inbox flow",
+                    "materialized_prose": "Run the explicit inbox flow",
                     "narrative_blocks": [],
                     "references": [],
                     "capabilities": [],
@@ -3621,7 +3621,7 @@ def test_handle_workflows_post_keeps_current_plan_stable_on_rename() -> None:
                     "trigger_intent": [{"event_type": "email.received"}],
                     "jobs": [{"label": "search-inbox", "prompt": "Search the inbox"}],
                 },
-                "compiled_spec": {
+                "materialized_spec": {
                     "name": "Explicit Inbox Triage",
                     "workflow_id": "explicit_inbox_triage",
                     "phase": "build",
@@ -3630,7 +3630,7 @@ def test_handle_workflows_post_keeps_current_plan_stable_on_rename() -> None:
                     "triggers": [{"event_type": "email.received", "filter": {}}],
                     "definition_revision": "def_explicit_123",
                     "plan_revision": "plan_explicit_123",
-                    "compile_provenance": {
+                    "materialize_provenance": {
                         "surface_revision": "planner.surface.test",
                         "input_fingerprint": "planner.input.test",
                     },
@@ -3654,11 +3654,11 @@ def test_handle_workflows_post_keeps_current_plan_stable_on_rename() -> None:
     assert request.sent is not None
     status, payload = request.sent
     assert status == 200
-    compiled_spec = payload["workflow"]["compiled_spec"]
-    assert compiled_spec["name"] == "Explicit Inbox Triage"
-    assert compiled_spec["workflow_id"] == "explicit_inbox_triage"
+    materialized_spec = payload["workflow"]["materialized_spec"]
+    assert materialized_spec["name"] == "Explicit Inbox Triage"
+    assert materialized_spec["workflow_id"] == "explicit_inbox_triage"
     assert payload["workflow"]["name"] == "Renamed Explicit Inbox Triage"
-    assert not any("compiled_spec =" in query for query, _ in pg.executed)
+    assert not any("materialized_spec =" in query for query, _ in pg.executed)
 
 
 def test_handle_workflows_post_rejects_blank_name_update() -> None:
@@ -3773,7 +3773,7 @@ def test_handle_trigger_post_does_not_fall_back_to_definition_only_workflows(mon
                 "id": "wf-canonical",
                 "name": "wf_name_only",
                 "definition": {"definition_revision": "def_123"},
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "invocation_count": 0,
                 "last_invoked_at": None,
             }
@@ -4745,7 +4745,7 @@ def test_handle_query_routes_canonical_import_path_prefix(monkeypatch) -> None:
     def _import_resolver(subs: Any, question: str) -> dict[str, Any]:
         captured["subsystems"] = subs
         captured["question"] = question
-        return {"routed_to": "import_resolver", "results": [{"import": "from runtime.compiler import SchemaProjector"}]}
+        return {"routed_to": "import_resolver", "results": [{"import": "from runtime.materializer import SchemaProjector"}]}
 
     monkeypatch.setattr(workflow_query_core, "_import_resolver", _import_resolver)
     subs = SimpleNamespace()
@@ -4760,7 +4760,7 @@ def test_handle_query_routes_canonical_import_path_prefix(monkeypatch) -> None:
         "question": "import path for schemaprojector",
     }
     assert result["routed_to"] == "import_resolver"
-    assert result["results"] == [{"import": "from runtime.compiler import SchemaProjector"}]
+    assert result["results"] == [{"import": "from runtime.materializer import SchemaProjector"}]
 
 
 def test_handle_query_returns_hint_for_removed_test_command_alias() -> None:

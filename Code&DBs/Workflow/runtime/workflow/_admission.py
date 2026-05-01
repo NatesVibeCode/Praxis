@@ -38,7 +38,7 @@ from runtime.workflow._workflow_execution import (
     WorkflowExecutionContext,
     execute_admitted_workflow_request,
 )
-from runtime.workflow_graph_compiler import (
+from runtime.workflow_graph_materializer import (
     GraphWorkflowCompileError,
     compile_graph_workflow_request,
     spec_uses_graph_runtime,
@@ -77,7 +77,7 @@ from runtime.dynamic_timeout import (
     calculate_timeout_seconds,
     max_complexity_tier,
 )
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
 from runtime.queue_admission import (
     DEFAULT_QUEUE_CRITICAL_THRESHOLD,
     QueueAdmissionGate,
@@ -301,9 +301,9 @@ def _graph_packet_definition_revision(
     packet_provenance: Mapping[str, object] | None,
 ) -> str:
     provenance = packet_provenance or {}
-    compiled_spec_row = (
-        provenance.get("compiled_spec_row")
-        if isinstance(provenance.get("compiled_spec_row"), Mapping)
+    materialized_spec_row = (
+        provenance.get("materialized_spec_row")
+        if isinstance(provenance.get("materialized_spec_row"), Mapping)
         else {}
     )
     definition_row = (
@@ -312,7 +312,7 @@ def _graph_packet_definition_revision(
         else {}
     )
     for candidate in (
-        compiled_spec_row.get("definition_revision"),
+        materialized_spec_row.get("definition_revision"),
         definition_row.get("definition_revision"),
         spec_dict.get("definition_revision"),
         request.workflow_definition_id,
@@ -330,13 +330,13 @@ def _graph_packet_plan_revision(
     packet_provenance: Mapping[str, object] | None,
 ) -> str:
     provenance = packet_provenance or {}
-    compiled_spec_row = (
-        provenance.get("compiled_spec_row")
-        if isinstance(provenance.get("compiled_spec_row"), Mapping)
+    materialized_spec_row = (
+        provenance.get("materialized_spec_row")
+        if isinstance(provenance.get("materialized_spec_row"), Mapping)
         else {}
     )
     for candidate in (
-        compiled_spec_row.get("plan_revision"),
+        materialized_spec_row.get("plan_revision"),
         spec_dict.get("plan_revision"),
         request.workflow_definition_id,
     ):
@@ -568,9 +568,9 @@ def _build_graph_execution_packet(
                     if isinstance(provenance.get("definition_row"), Mapping)
                     else {"definition_revision": definition_revision}
                 ),
-                "compiled_spec_row": (
-                    dict(provenance.get("compiled_spec_row"))
-                    if isinstance(provenance.get("compiled_spec_row"), Mapping)
+                "materialized_spec_row": (
+                    dict(provenance.get("materialized_spec_row"))
+                    if isinstance(provenance.get("materialized_spec_row"), Mapping)
                     else {
                         "definition_revision": definition_revision,
                         "plan_revision": plan_revision,
@@ -608,9 +608,9 @@ def _build_graph_execution_packet(
                     if isinstance(provenance.get("definition_row"), Mapping)
                     else {"definition_revision": definition_revision}
                 ),
-                "compiled_spec_row": (
-                    dict(provenance.get("compiled_spec_row"))
-                    if isinstance(provenance.get("compiled_spec_row"), Mapping)
+                "materialized_spec_row": (
+                    dict(provenance.get("materialized_spec_row"))
+                    if isinstance(provenance.get("materialized_spec_row"), Mapping)
                     else {
                         "definition_revision": definition_revision,
                         "plan_revision": plan_revision,
@@ -645,7 +645,7 @@ def _build_graph_execution_packet(
         "verify_refs": verify_refs,
         "authority_inputs": authority_inputs,
         "file_inputs": file_inputs,
-        "compile_provenance": {
+        "materialize_provenance": {
             "artifact_kind": "packet_lineage",
             "input_fingerprint": "",
             "surface_revision": "workflow_graph_runtime.packet_submit",
@@ -658,10 +658,10 @@ def _build_graph_execution_packet(
             "authority_inputs": reuse_authority_inputs,
         },
     }
-    compile_provenance = dict(packet_payload["compile_provenance"])
+    materialize_provenance = dict(packet_payload["materialize_provenance"])
     compile_input_payload = {
-        "artifact_kind": compile_provenance["artifact_kind"],
-        "surface_revision": compile_provenance["surface_revision"],
+        "artifact_kind": materialize_provenance["artifact_kind"],
+        "surface_revision": materialize_provenance["surface_revision"],
         "definition_revision": definition_revision,
         "plan_revision": plan_revision,
         "workflow_id": request.workflow_id,
@@ -671,13 +671,13 @@ def _build_graph_execution_packet(
         "reference_bindings": reference_bindings,
         "capability_bindings": capability_bindings,
         "verify_refs": verify_refs,
-        "file_inputs": compile_provenance["file_inputs"],
-        "authority_inputs": compile_provenance["authority_inputs"],
+        "file_inputs": materialize_provenance["file_inputs"],
+        "authority_inputs": materialize_provenance["authority_inputs"],
     }
-    compile_provenance["input_fingerprint"] = canonical_hash(compile_input_payload)
-    packet_payload["compile_provenance"] = compile_provenance
+    materialize_provenance["input_fingerprint"] = canonical_hash(compile_input_payload)
+    packet_payload["materialize_provenance"] = materialize_provenance
     try:
-        return CompileArtifactStore(conn).persist_execution_packet_with_reuse(
+        return MaterializeArtifactStore(conn).persist_execution_packet_with_reuse(
             packet=packet_payload,
             authority_refs=[definition_revision, plan_revision],
             parent_artifact_ref=plan_revision,
@@ -1648,15 +1648,15 @@ def _submit_graph_workflow_inline(
         packet_provenance=packet_provenance,
     )
     packet_reuse_provenance = None
-    compile_provenance = execution_packet.get("compile_provenance")
-    if isinstance(compile_provenance, dict) and isinstance(
-        compile_provenance.get("reuse"),
+    materialize_provenance = execution_packet.get("materialize_provenance")
+    if isinstance(materialize_provenance, dict) and isinstance(
+        materialize_provenance.get("reuse"),
         dict,
     ):
-        packet_reuse_provenance = dict(compile_provenance["reuse"])
+        packet_reuse_provenance = dict(materialize_provenance["reuse"])
         packet_reuse_provenance.setdefault(
             "input_fingerprint",
-            str(compile_provenance.get("input_fingerprint") or "").strip(),
+            str(materialize_provenance.get("input_fingerprint") or "").strip(),
         )
     payload = {
         "run_id": intake_outcome.run_id,
@@ -2151,12 +2151,12 @@ def _do_submit_workflow(
     )
     packet_reuse_provenance = None
     if execution_packet is not None:
-        compile_provenance = execution_packet.get("compile_provenance")
-        if isinstance(compile_provenance, dict) and isinstance(compile_provenance.get("reuse"), dict):
-            packet_reuse_provenance = dict(compile_provenance["reuse"])
+        materialize_provenance = execution_packet.get("materialize_provenance")
+        if isinstance(materialize_provenance, dict) and isinstance(materialize_provenance.get("reuse"), dict):
+            packet_reuse_provenance = dict(materialize_provenance["reuse"])
             packet_reuse_provenance.setdefault(
                 "input_fingerprint",
-                str(compile_provenance.get("input_fingerprint") or "").strip(),
+                str(materialize_provenance.get("input_fingerprint") or "").strip(),
             )
 
     persisted_job_labels = {label for _, label, _ in job_rows}
@@ -2526,7 +2526,7 @@ def load_execution_packets(
 ) -> tuple[dict[str, object], ...]:
     """Load shadow execution packet truth for runtime inspection."""
 
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     return tuple(dict(packet.payload) for packet in store.load_execution_packets(run_id=run_id))
 
 
@@ -2542,16 +2542,16 @@ def _retry_packet_reuse_provenance(
     reuse validation is strict and stale artifacts fail closed.
     """
 
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     packets = store.load_execution_packets(run_id=run_id)
     if not packets:
         return None
 
     input_fingerprints = {
-        str(packet.payload.get("compile_provenance", {}).get("input_fingerprint") or "").strip()
+        str(packet.payload.get("materialize_provenance", {}).get("input_fingerprint") or "").strip()
         for packet in packets
-        if isinstance(packet.payload.get("compile_provenance"), dict)
-        and str(packet.payload.get("compile_provenance", {}).get("input_fingerprint") or "").strip()
+        if isinstance(packet.payload.get("materialize_provenance"), dict)
+        and str(packet.payload.get("materialize_provenance", {}).get("input_fingerprint") or "").strip()
     }
     if len(input_fingerprints) > 1:
         raise RuntimeError(
@@ -2559,23 +2559,23 @@ def _retry_packet_reuse_provenance(
         )
 
     packet = packets[0]
-    compile_provenance = (
-        dict(packet.payload.get("compile_provenance"))
-        if isinstance(packet.payload.get("compile_provenance"), dict)
+    materialize_provenance = (
+        dict(packet.payload.get("materialize_provenance"))
+        if isinstance(packet.payload.get("materialize_provenance"), dict)
         else {}
     )
-    input_fingerprint = str(compile_provenance.get("input_fingerprint") or "").strip()
+    input_fingerprint = str(materialize_provenance.get("input_fingerprint") or "").strip()
     if not input_fingerprint:
         return None
 
-    recorded_lineage_revision = str(compile_provenance.get("packet_lineage_revision") or "").strip()
-    recorded_lineage_hash = str(compile_provenance.get("packet_lineage_hash") or "").strip()
+    recorded_lineage_revision = str(materialize_provenance.get("packet_lineage_revision") or "").strip()
+    recorded_lineage_hash = str(materialize_provenance.get("packet_lineage_hash") or "").strip()
     try:
         reusable_lineage = store.load_reusable_artifact(
             artifact_kind="packet_lineage",
             input_fingerprint=input_fingerprint,
         )
-    except CompileArtifactError as exc:
+    except MaterializeArtifactError as exc:
         raise RuntimeError(f"retry compile reuse failed closed: {exc}") from exc
     if reusable_lineage is None:
         raise RuntimeError(
@@ -2592,8 +2592,8 @@ def _retry_packet_reuse_provenance(
         )
 
     recorded_reuse = (
-        dict(compile_provenance.get("reuse"))
-        if isinstance(compile_provenance.get("reuse"), dict)
+        dict(materialize_provenance.get("reuse"))
+        if isinstance(materialize_provenance.get("reuse"), dict)
         else {}
     )
     return {

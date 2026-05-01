@@ -61,7 +61,7 @@ def _total_runs_reducer(subs: Any, *, source_ref: str, **_: Any) -> dict[str, An
 
 
 def _legal_templates_reducer(subs: Any, *, source_ref: str, **kwargs: Any) -> dict[str, Any]:
-    from runtime.surface_template_compiler import legal_templates_reducer as _reducer
+    from runtime.surface_template_materializer import legal_templates_reducer as _reducer
 
     return _reducer(subs, source_ref=source_ref, query_params=kwargs.get("query_params"))
 
@@ -275,7 +275,7 @@ REDUCERS: dict[str, Reducer] = {
     "runtime.surface_projections.pass_rate_reducer": _pass_rate_reducer,
     "runtime.surface_projections.open_bugs_reducer": _open_bugs_reducer,
     "runtime.surface_projections.total_runs_reducer": _total_runs_reducer,
-    "runtime.surface_template_compiler.legal_templates_reducer": _legal_templates_reducer,
+    "runtime.surface_template_materializer.legal_templates_reducer": _legal_templates_reducer,
     "runtime.surface_projections.reduce_ui_shell_state": _reduce_ui_shell_state,
 }
 

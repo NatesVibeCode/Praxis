@@ -572,7 +572,7 @@ def upsert_workflow_build_execution_manifest(
     definition_revision: str,
     manifest_ref: str,
     review_group_ref: str,
-    compiled_spec: dict[str, Any],
+    materialized_spec: dict[str, Any],
     resolved_bindings: list[dict[str, Any]],
     approved_bundle_refs: list[str],
     tool_allowlist: dict[str, Any],
@@ -588,7 +588,7 @@ def upsert_workflow_build_execution_manifest(
             definition_revision,
             manifest_ref,
             review_group_ref,
-            compiled_spec_json,
+            materialized_spec_json,
             resolved_bindings_json,
             approved_bundle_refs_json,
             tool_allowlist_json,
@@ -599,7 +599,7 @@ def upsert_workflow_build_execution_manifest(
             $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb
         )
         ON CONFLICT (execution_manifest_ref) DO UPDATE SET
-            compiled_spec_json = EXCLUDED.compiled_spec_json,
+            materialized_spec_json = EXCLUDED.materialized_spec_json,
             resolved_bindings_json = EXCLUDED.resolved_bindings_json,
             approved_bundle_refs_json = EXCLUDED.approved_bundle_refs_json,
             tool_allowlist_json = EXCLUDED.tool_allowlist_json,
@@ -614,7 +614,7 @@ def upsert_workflow_build_execution_manifest(
         _require_text(definition_revision, field_name="definition_revision"),
         _require_text(manifest_ref, field_name="manifest_ref"),
         _require_text(review_group_ref, field_name="review_group_ref"),
-        _encode_jsonb(dict(_require_mapping(compiled_spec, field_name="compiled_spec")), field_name="compiled_spec"),
+        _encode_jsonb(dict(_require_mapping(materialized_spec, field_name="materialized_spec")), field_name="materialized_spec"),
         _encode_jsonb(list(resolved_bindings or []), field_name="resolved_bindings"),
         _encode_jsonb(_string_list(approved_bundle_refs, field_name="approved_bundle_refs"), field_name="approved_bundle_refs"),
         _encode_jsonb(dict(_require_mapping(tool_allowlist, field_name="tool_allowlist")), field_name="tool_allowlist"),

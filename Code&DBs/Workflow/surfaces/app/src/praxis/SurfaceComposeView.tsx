@@ -43,7 +43,7 @@ interface LegalTemplatesOutput {
   pill_refs: string[];
   ranked_templates: RankedTemplate[];
   winner: string | null;
-  compiled_bundle: PraxisSurfaceBundleV4 | null;
+  materialized_bundle: PraxisSurfaceBundleV4 | null;
   typed_gap: TypedGap | null;
 }
 
@@ -139,14 +139,14 @@ export function SurfaceComposeView({ intent, pillRefs }: SurfaceComposeViewProps
     );
   }
 
-  if (output.typed_gap || !output.compiled_bundle) {
+  if (output.typed_gap || !output.materialized_bundle) {
     return <ComposeTypedGapCard output={output} />;
   }
 
-  const bundle = normalizePraxisBundle(output.compiled_bundle, {
+  const bundle = normalizePraxisBundle(output.materialized_bundle, {
     id: `compose:${output.intent_ref ?? 'unknown'}`,
-    title: output.compiled_bundle.title,
-    description: output.compiled_bundle.description ?? `Compiled from ${output.intent_ref} + ${output.pill_refs.length} pill(s).`,
+    title: output.materialized_bundle.title,
+    description: output.materialized_bundle.description ?? `Compiled from ${output.intent_ref} + ${output.pill_refs.length} pill(s).`,
   });
   const selectedTab = resolvePraxisBundleTab(bundle, null);
   const selectedSurface = resolvePraxisBundleSurface(bundle, null);

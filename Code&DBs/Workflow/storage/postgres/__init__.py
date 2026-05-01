@@ -41,10 +41,10 @@ from .evidence import (
     fetch_workflow_evidence_timeline,
 )
 if TYPE_CHECKING:
-    from runtime.compile_artifacts import (
-        CompileArtifactError,
-        CompileArtifactRecord,
-        CompileArtifactStore,
+    from runtime.materialize_artifacts import (
+        MaterializeArtifactError,
+        MaterializeArtifactRecord,
+        MaterializeArtifactStore,
         ExecutionPacketRecord,
     )
 
@@ -181,9 +181,9 @@ __all__ = [
     "PostgresVectorStore",
     "SyncPostgresConnection",
     "WORKFLOW_DATABASE_URL_ENV",
-    "CompileArtifactError",
-    "CompileArtifactRecord",
-    "CompileArtifactStore",
+    "MaterializeArtifactError",
+    "MaterializeArtifactRecord",
+    "MaterializeArtifactStore",
     "PostgresCompileArtifactRepository",
     "WorkflowAdmissionDecisionWrite",
     "WorkflowAdmissionSubmission",
@@ -233,22 +233,22 @@ __all__ = [
 
 def __getattr__(name: str):
     if name in {
-        "CompileArtifactError",
-        "CompileArtifactRecord",
-        "CompileArtifactStore",
+        "MaterializeArtifactError",
+        "MaterializeArtifactRecord",
+        "MaterializeArtifactStore",
         "ExecutionPacketRecord",
     }:
-        from runtime.compile_artifacts import (
-            CompileArtifactError,
-            CompileArtifactRecord,
-            CompileArtifactStore,
+        from runtime.materialize_artifacts import (
+            MaterializeArtifactError,
+            MaterializeArtifactRecord,
+            MaterializeArtifactStore,
             ExecutionPacketRecord,
         )
 
         return {
-            "CompileArtifactError": CompileArtifactError,
-            "CompileArtifactRecord": CompileArtifactRecord,
-            "CompileArtifactStore": CompileArtifactStore,
+            "MaterializeArtifactError": MaterializeArtifactError,
+            "MaterializeArtifactRecord": MaterializeArtifactRecord,
+            "MaterializeArtifactStore": MaterializeArtifactStore,
             "ExecutionPacketRecord": ExecutionPacketRecord,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

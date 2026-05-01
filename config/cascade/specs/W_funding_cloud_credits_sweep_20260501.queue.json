@@ -1,0 +1,100 @@
+{
+  "name": "Funding — Cloud / Inference Credits Sweep",
+  "phase": "W",
+  "queue_id": "funding_cloud_credits_sweep_20260501",
+  "outcome_goal": "artifacts/funding/cloud_credits_sweep_20260501/cloud_credits_sweep.md exists with: (a) ≥6 startup-credit programs covered (Anthropic, AWS Activate, Google for Startups Cloud, Microsoft for Startups, Cloudflare for Startups, OpenRouter / inference-broker tier), (b) per program — current credit amount, eligibility, application URL, expected approval timeline, required applicant info, (c) one-paragraph customized application narrative for Praxis per program, (d) flag for programs that require LLC/Inc.",
+  "anti_requirements": [
+    "Do NOT invent credit amounts — every dollar figure must cite the program's official page.",
+    "Do NOT include credit programs that are not currently accepting applications.",
+    "Do NOT submit any application — research and draft only.",
+    "Do NOT recommend hardcoding model selection inside the Praxis narrative (memory rule: dogfood task_type_routing).",
+    "Do NOT mention DeepSeek or Moonshot hosting in any credit narrative; if a broker exposes those models on a no-data-sharing tier, the narrative should not single them out."
+  ],
+  "jobs": [
+    {
+      "label": "program_anthropic_for_startups",
+      "task_type": "research",
+      "description": "Research Anthropic's startup credits program",
+      "outcome_goal": "artifacts/funding/cloud_credits_sweep_20260501/programs/anthropic.md has current credit amount, eligibility, application URL, approval timeline, required info.",
+      "prompt": "Research Anthropic's startup credits / for-startups program (current as of today). Find the official program page on anthropic.com.\n\nWrite `artifacts/funding/cloud_credits_sweep_20260501/programs/anthropic.md` with:\n- **Program name** (exact)\n- **Current credit amount** (cite source line)\n- **Eligibility** (stage, geography, equity-status, investor partnerships)\n- **Application URL**\n- **Approval timeline** (typical, if surfaced)\n- **Required applicant info** (company info, founder info, use case, projections — list every field they require)\n- **Notes** (gotchas: e.g. requires partner accelerator, requires LLC, requires API account already set up)\n\nIf a direct application is not the path (only available via partner accelerators), say so explicitly and list the partner accelerators.",
+      "read": [],
+      "write": ["artifacts/funding/cloud_credits_sweep_20260501/programs/anthropic.md"],
+      "verify_command": "test -s artifacts/funding/cloud_credits_sweep_20260501/programs/anthropic.md"
+    },
+    {
+      "label": "program_aws_activate",
+      "task_type": "research",
+      "description": "Research AWS Activate startup credits",
+      "outcome_goal": "artifacts/funding/cloud_credits_sweep_20260501/programs/aws_activate.md has current credit tiers, eligibility, application URL, approval timeline, required info.",
+      "prompt": "Research AWS Activate (current as of today). Find aws.amazon.com/activate or the equivalent.\n\nWrite `artifacts/funding/cloud_credits_sweep_20260501/programs/aws_activate.md` with the same structure as the Anthropic file:\n- **Program name** (exact tier names — Activate Founders, Activate Portfolio, etc.)\n- **Current credit amounts per tier** (cite source line)\n- **Eligibility per tier**\n- **Application URL**\n- **Approval timeline**\n- **Required applicant info**\n- **Notes** (gotchas: requires AWS account, requires investor referral for higher tiers, etc.)\n\nIf there are multiple tiers, document all of them and identify which tier a solo unfunded founder qualifies for.",
+      "read": [],
+      "write": ["artifacts/funding/cloud_credits_sweep_20260501/programs/aws_activate.md"],
+      "verify_command": "test -s artifacts/funding/cloud_credits_sweep_20260501/programs/aws_activate.md"
+    },
+    {
+      "label": "program_google_for_startups",
+      "task_type": "research",
+      "description": "Research Google for Startups Cloud Program",
+      "outcome_goal": "artifacts/funding/cloud_credits_sweep_20260501/programs/google_for_startups.md has tiers, eligibility, URL, timeline, required info.",
+      "prompt": "Research Google for Startups Cloud Program (current as of today). Find cloud.google.com/startup or the equivalent.\n\nWrite `artifacts/funding/cloud_credits_sweep_20260501/programs/google_for_startups.md` with:\n- **Program name and tier** (Start, Scale, AI Trailblazer, etc.)\n- **Current credit amounts per tier** (cite source line)\n- **Eligibility per tier**\n- **Application URL**\n- **Approval timeline**\n- **Required applicant info**\n- **Notes**\n\nFlag the AI-specific tier separately if one exists (Praxis qualifies as AI-native).",
+      "read": [],
+      "write": ["artifacts/funding/cloud_credits_sweep_20260501/programs/google_for_startups.md"],
+      "verify_command": "test -s artifacts/funding/cloud_credits_sweep_20260501/programs/google_for_startups.md"
+    },
+    {
+      "label": "program_microsoft_for_startups",
+      "task_type": "research",
+      "description": "Research Microsoft for Startups (Azure)",
+      "outcome_goal": "artifacts/funding/cloud_credits_sweep_20260501/programs/microsoft_for_startups.md has tiers, eligibility, URL, timeline, required info.",
+      "prompt": "Research Microsoft for Startups Founders Hub (current as of today). Find microsoft.com/startups or the equivalent.\n\nWrite `artifacts/funding/cloud_credits_sweep_20260501/programs/microsoft_for_startups.md` with the same structure as the other program files. Note Azure credit amount, OpenAI credit amount if separately listed, and any other bundled benefits (GitHub, M365).",
+      "read": [],
+      "write": ["artifacts/funding/cloud_credits_sweep_20260501/programs/microsoft_for_startups.md"],
+      "verify_command": "test -s artifacts/funding/cloud_credits_sweep_20260501/programs/microsoft_for_startups.md"
+    },
+    {
+      "label": "program_cloudflare_for_startups",
+      "task_type": "research",
+      "description": "Research Cloudflare for Startups",
+      "outcome_goal": "artifacts/funding/cloud_credits_sweep_20260501/programs/cloudflare.md documents the program.",
+      "prompt": "Research Cloudflare for Startups (current as of today). Find cloudflare.com/forstartups or the equivalent.\n\nWrite `artifacts/funding/cloud_credits_sweep_20260501/programs/cloudflare.md` with the same structure as the other program files. Note: Cloudflare typically requires VC/accelerator referral — confirm whether direct applications are accepted.",
+      "read": [],
+      "write": ["artifacts/funding/cloud_credits_sweep_20260501/programs/cloudflare.md"],
+      "verify_command": "test -s artifacts/funding/cloud_credits_sweep_20260501/programs/cloudflare.md"
+    },
+    {
+      "label": "program_inference_brokers",
+      "task_type": "research",
+      "description": "Research inference broker startup tiers (OpenRouter, Together, Fireworks, Groq)",
+      "outcome_goal": "artifacts/funding/cloud_credits_sweep_20260501/programs/inference_brokers.md catalogs available startup credit programs from inference brokers.",
+      "prompt": "Research startup credit programs from API inference brokers Praxis already routes through or could route through:\n- OpenRouter\n- Together AI\n- Fireworks AI\n- Groq\n\nFor each, search for any startup credit program, free tier for early-stage builders, or partner-accelerator credit allocation. If no public program exists, say so and note whether direct outreach is the path.\n\nWrite `artifacts/funding/cloud_credits_sweep_20260501/programs/inference_brokers.md` as one section per broker, with the same structure as the other program files. Mark with `(no public program)` and document outreach options for ones without a public credit program.",
+      "read": [],
+      "write": ["artifacts/funding/cloud_credits_sweep_20260501/programs/inference_brokers.md"],
+      "verify_command": "test -s artifacts/funding/cloud_credits_sweep_20260501/programs/inference_brokers.md"
+    },
+    {
+      "label": "compose_sweep_report",
+      "task_type": "creative",
+      "depends_on": [
+        "program_anthropic_for_startups",
+        "program_aws_activate",
+        "program_google_for_startups",
+        "program_microsoft_for_startups",
+        "program_cloudflare_for_startups",
+        "program_inference_brokers"
+      ],
+      "description": "Produce the final operator-facing sweep with customized application narratives per program",
+      "outcome_goal": "artifacts/funding/cloud_credits_sweep_20260501/cloud_credits_sweep.md is the operator-facing deliverable with: per-program section, customized one-paragraph narrative for Praxis, application URL, ranked apply order.",
+      "prompt": "Read all six program files under `artifacts/funding/cloud_credits_sweep_20260501/programs/`.\n\nProduce `artifacts/funding/cloud_credits_sweep_20260501/cloud_credits_sweep.md` with:\n\n1. **Operator context** (one paragraph: Nate, solo founder, Praxis = LLM-first autonomous engineering control plane built on Claude as core dependency, pre-revenue, US-based Bellingham WA, target external-user launch 2026-07-19)\n2. **Apply order** (ranked list of programs by expected effort-to-credit ratio, with one-line reasoning per program)\n3. **Per-program section** (one per file under `programs/`):\n   - Heading: `## <Program name>`\n   - Quick facts table: credit amount | eligibility | application URL | approval timeline | LLC required (yes/no/unknown)\n   - **Customized application narrative** — one paragraph (3–5 sentences) ready to paste into the application's \"about the company\" or \"use case\" field. Mention: Praxis as LLM-first autonomous engineering control plane, dogfooding the host's models, current pre-revenue stage, planned external-user launch date, what credits would specifically unlock (compute headroom for the launch ramp).\n   - **Required info checklist** — bullet list of everything Nate needs to gather to apply\n4. **Cross-program flags** (LLC requirement, accelerator-only programs, etc.)\n5. **Open questions** (anything that needs Nate to provide info before applying — e.g. is Praxis incorporated, what's monthly LLM spend)\n\nDo NOT bake hardcoded model names into narratives. Frame Praxis's stack as 'routes through task_type_routing' rather than 'uses Claude Opus' even though Claude is the core dependency.",
+      "read": [
+        "artifacts/funding/cloud_credits_sweep_20260501/programs/anthropic.md",
+        "artifacts/funding/cloud_credits_sweep_20260501/programs/aws_activate.md",
+        "artifacts/funding/cloud_credits_sweep_20260501/programs/google_for_startups.md",
+        "artifacts/funding/cloud_credits_sweep_20260501/programs/microsoft_for_startups.md",
+        "artifacts/funding/cloud_credits_sweep_20260501/programs/cloudflare.md",
+        "artifacts/funding/cloud_credits_sweep_20260501/programs/inference_brokers.md"
+      ],
+      "write": ["artifacts/funding/cloud_credits_sweep_20260501/cloud_credits_sweep.md"],
+      "verify_command": "test -s artifacts/funding/cloud_credits_sweep_20260501/cloud_credits_sweep.md && grep -q 'Apply order' artifacts/funding/cloud_credits_sweep_20260501/cloud_credits_sweep.md"
+    }
+  ]
+}

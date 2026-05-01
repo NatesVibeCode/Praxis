@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from runtime.spec_compiler import (
+from runtime.spec_materializer import (
     PlanPacket,
     _bind_packet_data_pills,
     _build_packet_map_entry,
@@ -244,7 +244,7 @@ def test_bind_packet_data_pills_catches_module_import_failure(monkeypatch):
     """When intent_binding can't be imported (degraded data-dict substrate),
     we surface a warning rather than raising — launch compiler must not
     block on degraded binding."""
-    import runtime.spec_compiler as spec_mod
+    import runtime.spec_materializer as spec_mod
     import builtins
 
     real_import = builtins.__import__

@@ -334,7 +334,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example(
                 "Set compile request shape",
                 {
-                    "task_type": "compile",
+                    "task_type": "materialize",
                     "provider_slug": "openai",
                     "model_slug": "gpt-5.4",
                     "temperature": 0.2,
@@ -345,7 +345,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example(
                 "Attach request contract",
                 {
-                    "task_type": "compile",
+                    "task_type": "materialize",
                     "provider_slug": "openai",
                     "model_slug": "gpt-5.4",
                     "request_contract_ref": "llm_request_contract.openai.gpt-5-4.api.compile",

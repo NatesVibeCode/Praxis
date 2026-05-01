@@ -277,7 +277,7 @@ def _shadow_packet_job_label(spec: "WorkflowSpec") -> str:
         return "workflow"
 
     labels: list[str] = []
-    for source_name in ("compiled_spec_row", "definition_row"):
+    for source_name in ("materialized_spec_row", "definition_row"):
         source = packet_provenance.get(source_name)
         if not isinstance(source, dict):
             continue

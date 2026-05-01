@@ -45,8 +45,8 @@ Updated source audit for the Moon builder as of 2026-04-15.
 
 ## Summary
 - The old first-pass assumption that most Moon node actions were decorative is no longer accurate.
-- Ready node actions are preserved through `build_graph -> definition.execution_setup.phases -> compiled_spec.jobs`.
-- Trigger buttons are preserved through `build_graph -> trigger_intent -> compiled_spec.triggers`.
+- Ready node actions are preserved through `build_graph -> definition.execution_setup.phases -> materialized_spec.jobs`.
+- Trigger buttons are preserved through `build_graph -> trigger_intent -> materialized_spec.triggers`.
 - The old presenter-local `actionOptions` list is dead and should stay dead; the dock now relies on the catalog authority path instead of a shadow action list.
 - Gate truth is split:
   - `conditional`, `after_failure`, `approval`, and `validation` change planned dependency behavior now.
@@ -99,8 +99,8 @@ These are the step/action buttons shown in the trigger picker, node popout, and 
 | Button | Route / effect | Truth class | Notes |
 | --- | --- | --- | --- |
 | `Manual` | `trigger` | runnable | Compiles into `trigger_intent` and then into a real manual trigger. |
-| `Webhook` | `trigger/webhook` | runnable | Preserves webhook trigger config into `trigger_intent` and `compiled_spec.triggers`. |
-| `Schedule` | `trigger/schedule` | runnable | Preserves cron config into `trigger_intent` and `compiled_spec.triggers`. |
+| `Webhook` | `trigger/webhook` | runnable | Preserves webhook trigger config into `trigger_intent` and `materialized_spec.triggers`. |
+| `Schedule` | `trigger/schedule` | runnable | Preserves cron config into `trigger_intent` and `materialized_spec.triggers`. |
 | `Web Research` | `auto/research` | runnable | Planned as a real job route. |
 | `Docs` | `auto/research` | alias | Same route as `Web Research` today; not distinct functionality. |
 | `Classify` | `auto/classify` | runnable | Planned as a real job route. |

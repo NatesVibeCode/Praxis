@@ -213,7 +213,7 @@ def _fake_build_payload(
     row: dict[str, Any],
     *,
     definition: dict[str, Any] | None = None,
-    compiled_spec: dict[str, Any] | None = None,
+    materialized_spec: dict[str, Any] | None = None,
     build_bundle: dict[str, Any] | None = None,
     planning_notes: list[str] | None = None,
     compile_preview: dict[str, Any] | None = None,
@@ -232,7 +232,7 @@ def _fake_build_payload(
             "description": row.get("description"),
         },
         "definition": definition or row.get("definition") or {},
-        "compiled_spec": compiled_spec or row.get("compiled_spec") or {},
+        "materialized_spec": materialized_spec or row.get("materialized_spec") or {},
         "planning_notes": planning_notes or [],
         "build_state": "ready",
         "build_graph": graph,
@@ -248,7 +248,7 @@ def _fake_build_payload(
 def _install_spoofs(stack: ExitStack, conn: _ProbeConn) -> None:
     from unittest.mock import patch
 
-    import runtime.compile_cqrs as compile_cqrs
+    import runtime.materialize_cqrs as compile_cqrs
     import runtime.canonical_workflows as canonical_workflows
     import runtime.workflow_build_moment as workflow_build_moment
     import runtime.operations.queries.workflow_build_get as workflow_build_get
@@ -262,7 +262,7 @@ def _install_spoofs(stack: ExitStack, conn: _ProbeConn) -> None:
             "name": body.get("name") or "Compile delivery probe",
             "description": body.get("description"),
             "definition": body.get("definition") or {},
-            "compiled_spec": body.get("compiled_spec") or {},
+            "materialized_spec": body.get("materialized_spec") or {},
             "version": 1,
             "updated_at": "2026-04-29T00:00:00Z",
         }
@@ -284,11 +284,11 @@ def _install_spoofs(stack: ExitStack, conn: _ProbeConn) -> None:
             definition = {
                 "workflow_id": workflow_id,
                 "source_prose": body.get("prose"),
-                "compiled_prose": body.get("prose"),
+                "materialized_prose": body.get("prose"),
                 "compose_provenance": {"ok": True, "mode": "deterministic_probe"},
             }
             row["definition"] = definition
-            row["compiled_spec"] = {"jobs": [{"id": node["node_id"], "title": node["title"]} for node in graph["nodes"]]}
+            row["materialized_spec"] = {"jobs": [{"id": node["node_id"], "title": node["title"]} for node in graph["nodes"]]}
         elif subpath.startswith("nodes/"):
             node_id = subpath.split("/", 1)[1]
             graph = dict(conn.build_payloads[workflow_id]["build_graph"])
@@ -307,7 +307,7 @@ def _install_spoofs(stack: ExitStack, conn: _ProbeConn) -> None:
         mutation = {
             "row": row,
             "definition": definition,
-            "compiled_spec": row.get("compiled_spec") or {},
+            "materialized_spec": row.get("materialized_spec") or {},
             "build_bundle": build_bundle,
             "planning_notes": [],
             "candidate_resolution_manifest": {"execution_readiness": "ready"},
@@ -318,7 +318,7 @@ def _install_spoofs(stack: ExitStack, conn: _ProbeConn) -> None:
             conn,
             row,
             definition=definition,
-            compiled_spec=mutation["compiled_spec"],
+            materialized_spec=mutation["materialized_spec"],
             build_bundle=build_bundle,
             planning_notes=[],
         )

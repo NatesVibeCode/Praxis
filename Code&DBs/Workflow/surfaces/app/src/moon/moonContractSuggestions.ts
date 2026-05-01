@@ -5,7 +5,7 @@ import type {
   BuildIssue,
   BuildNode,
   BuildPayload,
-  CompiledSpec,
+  MaterializedSpec,
   ImportSnapshot,
 } from '../shared/types';
 import type { ObjectType } from '../shared/hooks/useObjectTypes';
@@ -25,7 +25,7 @@ export type DockPrimitiveSlice = {
 
 /** Extra sources mined from the workflow payload (compiled plan, issues, …). */
 export type PrimitiveContractExtras = {
-  compiledSpec?: CompiledSpec | null;
+  compiledSpec?: MaterializedSpec | null;
   buildIssues?: BuildIssue[] | null;
 };
 
@@ -120,7 +120,7 @@ function ingestGraphNodeDeepTokens(
 
 function ingestCompiledSpecSuggestions(
   add: (raw: string, detail?: string) => void,
-  compiled: CompiledSpec | null | undefined,
+  compiled: MaterializedSpec | null | undefined,
 ) {
   if (!compiled) return;
   for (const job of compiled.jobs || []) {

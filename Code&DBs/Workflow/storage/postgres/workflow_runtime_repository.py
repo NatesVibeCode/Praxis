@@ -697,7 +697,7 @@ def persist_workflow_record(
     name: str,
     description: str,
     definition: dict[str, Any],
-    compiled_spec: dict[str, Any] | None,
+    materialized_spec: dict[str, Any] | None,
     tags: list[str] | None = None,
     is_template: bool | None = None,
 ) -> dict[str, Any]:
@@ -706,8 +706,8 @@ def persist_workflow_record(
     normalized_description = str(description or "")
     normalized_definition = _normalize_json_mapping(definition, field_name="definition")
     normalized_compiled_spec = _normalize_json_mapping(
-        compiled_spec,
-        field_name="compiled_spec",
+        materialized_spec,
+        field_name="materialized_spec",
         allow_none=True,
     )
 
@@ -727,22 +727,22 @@ def persist_workflow_record(
         effective_is_template = bool(existing_template) if existing_template is not None else False
 
     definition_json = _encode_jsonb(normalized_definition, field_name="definition")
-    compiled_spec_json = (
-        _encode_jsonb(normalized_compiled_spec, field_name="compiled_spec")
+    materialized_spec_json = (
+        _encode_jsonb(normalized_compiled_spec, field_name="materialized_spec")
         if normalized_compiled_spec is not None
         else None
     )
     if existing is None:
         row = conn.fetchrow(
             """INSERT INTO public.workflows
-                  (id, name, description, definition, compiled_spec, tags, version, is_template)
+                  (id, name, description, definition, materialized_spec, tags, version, is_template)
                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, 1, $7)
                RETURNING *""",
             normalized_workflow_id,
             normalized_name,
             normalized_description,
             definition_json,
-            compiled_spec_json,
+            materialized_spec_json,
             effective_tags,
             effective_is_template,
         )
@@ -752,7 +752,7 @@ def persist_workflow_record(
                SET name = $2,
                    description = $3,
                    definition = $4::jsonb,
-                   compiled_spec = $5::jsonb,
+                   materialized_spec = $5::jsonb,
                    tags = $6,
                    is_template = $7,
                    version = COALESCE(version, 0) + 1,
@@ -763,7 +763,7 @@ def persist_workflow_record(
             normalized_name,
             normalized_description,
             definition_json,
-            compiled_spec_json,
+            materialized_spec_json,
             effective_tags,
             effective_is_template,
         )
@@ -797,7 +797,7 @@ def update_workflow_record(
     name: object = _UNSET,
     description: object = _UNSET,
     definition: object = _UNSET,
-    compiled_spec: object = _UNSET,
+    materialized_spec: object = _UNSET,
     tags: object = _UNSET,
     is_template: object = _UNSET,
 ) -> dict[str, Any] | None:
@@ -815,18 +815,18 @@ def update_workflow_record(
         normalized_definition = _normalize_json_mapping(definition, field_name="definition")
         params.append(_encode_jsonb(normalized_definition, field_name="definition"))
         assignments.append(f"definition = ${len(params)}::jsonb")
-    if compiled_spec is not _UNSET:
+    if materialized_spec is not _UNSET:
         normalized_compiled_spec = _normalize_json_mapping(
-            compiled_spec,
-            field_name="compiled_spec",
+            materialized_spec,
+            field_name="materialized_spec",
             allow_none=True,
         )
         params.append(
-            _encode_jsonb(normalized_compiled_spec, field_name="compiled_spec")
+            _encode_jsonb(normalized_compiled_spec, field_name="materialized_spec")
             if normalized_compiled_spec is not None
             else None
         )
-        assignments.append(f"compiled_spec = ${len(params)}::jsonb")
+        assignments.append(f"materialized_spec = ${len(params)}::jsonb")
     if tags is not _UNSET:
         params.append(_normalize_string_list(tags, field_name="tags"))
         assignments.append(f"tags = ${len(params)}")
@@ -869,10 +869,10 @@ def persist_workflow_build_record(
     workflow_name: str,
     existing_description: str | None,
     definition: dict[str, Any],
-    compiled_spec: dict[str, Any] | None,
+    materialized_spec: dict[str, Any] | None,
 ) -> dict[str, Any]:
     description_source = (
-        str(definition.get("compiled_prose") or "").strip()
+        str(definition.get("materialized_prose") or "").strip()
         or str(definition.get("source_prose") or "").strip()
         or str(existing_description or "").strip()
         or _require_text(workflow_name, field_name="workflow_name")
@@ -882,7 +882,7 @@ def persist_workflow_build_record(
         workflow_id=workflow_id,
         description=description_source[:200],
         definition=definition,
-        compiled_spec=compiled_spec,
+        materialized_spec=materialized_spec,
     )
     if row is None:
         raise PostgresWriteError(
@@ -897,10 +897,10 @@ def reconcile_workflow_triggers(
     conn: Any,
     *,
     workflow_id: str,
-    compiled_spec: dict[str, Any] | None,
+    materialized_spec: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     normalized_workflow_id = _require_text(workflow_id, field_name="workflow_id")
-    trigger_specs = compiled_spec.get("triggers", []) if isinstance(compiled_spec, dict) else []
+    trigger_specs = materialized_spec.get("triggers", []) if isinstance(materialized_spec, dict) else []
     existing_rows = conn.execute(
         "SELECT id, workflow_id, event_type, filter, cron_expression, enabled, source_trigger_id "
         "FROM workflow_triggers WHERE workflow_id = $1",
@@ -1152,7 +1152,7 @@ def rename_workflow_record(
         new_workflow_id=normalized_new_workflow_id,
     )
     rewritten_compiled_spec = _rewrite_workflow_identity_fields(
-        _normalize_json_mapping(existing.get("compiled_spec"), field_name="compiled_spec", allow_none=True),
+        _normalize_json_mapping(existing.get("materialized_spec"), field_name="materialized_spec", allow_none=True),
         old_workflow_id=normalized_old_workflow_id,
         new_workflow_id=normalized_new_workflow_id,
     )
@@ -1165,7 +1165,7 @@ def rename_workflow_record(
             name,
             description,
             definition,
-            compiled_spec,
+            materialized_spec,
             tags,
             created_at,
             updated_at,
@@ -1195,7 +1195,7 @@ def rename_workflow_record(
         normalized_new_workflow_id,
         normalized_name,
         _encode_jsonb(rewritten_definition, field_name="definition"),
-        _encode_jsonb(rewritten_compiled_spec, field_name="compiled_spec")
+        _encode_jsonb(rewritten_compiled_spec, field_name="materialized_spec")
         if rewritten_compiled_spec is not None
         else None,
     )
@@ -1227,14 +1227,14 @@ def rename_workflow_record(
         )
 
     execution_manifest_rows = conn.execute(
-        "SELECT execution_manifest_ref, compiled_spec_json FROM workflow_build_execution_manifests WHERE workflow_id = $1",
+        "SELECT execution_manifest_ref, materialized_spec_json FROM workflow_build_execution_manifests WHERE workflow_id = $1",
         normalized_old_workflow_id,
     )
     for execution_manifest_row in execution_manifest_rows or []:
         rewritten_compiled_spec_json = _rewrite_workflow_identity_fields(
             _normalize_json_mapping(
-                execution_manifest_row.get("compiled_spec_json"),
-                field_name="compiled_spec_json",
+                execution_manifest_row.get("materialized_spec_json"),
+                field_name="materialized_spec_json",
             ),
             old_workflow_id=normalized_old_workflow_id,
             new_workflow_id=normalized_new_workflow_id,
@@ -1242,11 +1242,11 @@ def rename_workflow_record(
         conn.execute(
             """UPDATE workflow_build_execution_manifests
                SET workflow_id = $2,
-                   compiled_spec_json = $3::jsonb
+                   materialized_spec_json = $3::jsonb
                WHERE execution_manifest_ref = $1""",
             execution_manifest_row["execution_manifest_ref"],
             normalized_new_workflow_id,
-            _encode_jsonb(rewritten_compiled_spec_json, field_name="compiled_spec_json"),
+            _encode_jsonb(rewritten_compiled_spec_json, field_name="materialized_spec_json"),
         )
 
     dependent_tables = (

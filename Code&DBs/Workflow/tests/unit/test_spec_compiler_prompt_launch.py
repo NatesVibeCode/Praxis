@@ -7,27 +7,27 @@ _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
-from runtime import spec_compiler
+from runtime import spec_materializer
 
 
 def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missing(monkeypatch) -> None:
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "resolve_default_adapter_type",
         lambda provider_slug=None: "cli_llm" if provider_slug == "openai" else None,
     )
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "default_model_for_provider",
         lambda provider_slug: "gpt-4.1" if provider_slug == "openai" else None,
     )
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "resolve_lane_policy",
         lambda provider_slug, adapter_type: {"admitted_by_policy": True},
     )
 
-    spec = spec_compiler.compile_prompt_launch_spec(
+    spec = spec_materializer.compile_prompt_launch_spec(
         prompt="Reply with exactly: OPENAI_DEFAULT_WORKFLOW_OK",
         provider_slug="openai",
         model_slug=None,
@@ -48,7 +48,7 @@ def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missi
     assert inline_spec["packet_provenance"] == {
         "source_kind": "prompt_launch",
         "definition_row": {"definition_revision": spec.definition_revision},
-        "compiled_spec_row": {
+        "materialized_spec_row": {
             "definition_revision": spec.definition_revision,
             "plan_revision": spec.plan_revision,
         },
@@ -57,17 +57,17 @@ def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missi
 
 def test_compile_prompt_launch_spec_prefers_provider_specific_adapter_when_unspecified(monkeypatch) -> None:
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "resolve_default_adapter_type",
         lambda provider_slug=None: "llm_task" if provider_slug == "cursor" else None,
     )
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "resolve_lane_policy",
         lambda provider_slug, adapter_type: {"admitted_by_policy": True},
     )
 
-    spec = spec_compiler.compile_prompt_launch_spec(
+    spec = spec_materializer.compile_prompt_launch_spec(
         prompt="Reply with exactly: CURSOR_BACKGROUND_AGENT_OK",
         provider_slug="cursor",
         model_slug="auto",
@@ -79,17 +79,17 @@ def test_compile_prompt_launch_spec_prefers_provider_specific_adapter_when_unspe
 
 def test_compile_prompt_launch_spec_carries_runtime_profile_authority(monkeypatch) -> None:
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "resolve_default_adapter_type",
         lambda provider_slug=None: "cli_llm" if provider_slug == "openai" else None,
     )
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "resolve_lane_policy",
         lambda provider_slug, adapter_type: {"admitted_by_policy": True},
     )
 
-    spec = spec_compiler.compile_prompt_launch_spec(
+    spec = spec_materializer.compile_prompt_launch_spec(
         prompt="Summarize the attached notes",
         provider_slug="openai",
         model_slug="gpt-5.4-mini",
@@ -106,12 +106,12 @@ def test_compile_prompt_launch_spec_carries_runtime_profile_authority(monkeypatc
 
 def test_compile_prompt_launch_spec_rejects_unadmitted_prompt_provider(monkeypatch) -> None:
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "resolve_default_adapter_type",
         lambda provider_slug=None: "llm_task" if provider_slug == "cursor" else None,
     )
     monkeypatch.setattr(
-        spec_compiler,
+        spec_materializer,
         "resolve_lane_policy",
         lambda provider_slug, adapter_type: {
             "admitted_by_policy": False,
@@ -119,10 +119,10 @@ def test_compile_prompt_launch_spec_rejects_unadmitted_prompt_provider(monkeypat
             "decision_ref": "decision.provider-onboarding.cursor.20260415T165657Z",
         },
     )
-    monkeypatch.setattr(spec_compiler, "registered_providers", lambda: ["google", "openai"])
+    monkeypatch.setattr(spec_materializer, "registered_providers", lambda: ["google", "openai"])
 
     try:
-        spec_compiler.compile_prompt_launch_spec(
+        spec_materializer.compile_prompt_launch_spec(
             prompt="Reply with exactly: NOPE",
             provider_slug="cursor",
             model_slug="composer-2",

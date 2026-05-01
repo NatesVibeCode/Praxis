@@ -5,7 +5,7 @@ import { planDefinition, commitDefinition, triggerWorkflow, createWorkflow } fro
 import { resolveReleasePlanSource } from '../shared/buildGraphDefinition';
 
 interface PlannedReleaseState {
-  compiled_spec?: {
+  materialized_spec?: {
     jobs?: Array<{
       label?: string;
       agent?: string;
@@ -92,15 +92,15 @@ export function MoonReleaseTray({
   const releaseSource = useMemo(() => resolveReleasePlanSource(payload), [payload]);
   const releaseFingerprint = releaseSource?.fingerprint ?? null;
   const releaseFingerprintRef = useRef<string | null>(releaseFingerprint);
-  const projectedJobs = payload?.compiled_spec_projection?.compiled_spec?.jobs || [];
+  const projectedJobs = payload?.materialized_spec_projection?.materialized_spec?.jobs || [];
   const activePlannedRelease = useMemo(() => {
     if (!plannedRelease || !releaseSource) return null;
     return plannedRelease.fingerprint === releaseSource.fingerprint ? plannedRelease : null;
   }, [plannedRelease, releaseSource]);
-  const plannedJobs = activePlannedRelease?.compiled_spec?.jobs || [];
+  const plannedJobs = activePlannedRelease?.materialized_spec?.jobs || [];
   const jobs = activePlannedRelease ? plannedJobs : projectedJobs;
-  const projectedTriggers = payload?.compiled_spec_projection?.compiled_spec?.triggers || [];
-  const plannedTriggers = activePlannedRelease?.compiled_spec?.triggers || [];
+  const projectedTriggers = payload?.materialized_spec_projection?.materialized_spec?.triggers || [];
+  const plannedTriggers = activePlannedRelease?.materialized_spec?.triggers || [];
   const triggers = plannedTriggers.length > 0 ? plannedTriggers : projectedTriggers;
   const hasFullPlan = activePlannedRelease !== null;
   const agentSummary = (hasFullPlan ? plannedJobs : projectedJobs).reduce<Record<string, number>>((acc, job) => {
@@ -180,9 +180,9 @@ export function MoonReleaseTray({
     setDispatchResult(null);
     try {
       let wfId = workflowId || activePlannedRelease.workflow?.id || null;
-      const { definition, buildGraph, title, compiled_spec } = activePlannedRelease;
+      const { definition, buildGraph, title, materialized_spec } = activePlannedRelease;
       if (!wfId) {
-        const created = await createWorkflow(title, { definition, buildGraph, compiled_spec });
+        const created = await createWorkflow(title, { definition, buildGraph, materialized_spec });
         wfId = created.id || (created as any).workflow_id;
         if (!wfId) throw new Error('Failed to create workflow');
         onWorkflowCreated?.(wfId);
@@ -191,7 +191,7 @@ export function MoonReleaseTray({
         title,
         definition,
         buildGraph,
-        compiled_spec,
+        materialized_spec,
       });
       const result = await triggerWorkflow(wfId);
       const runId = result.run_id;

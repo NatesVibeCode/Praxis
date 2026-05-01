@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
-class CompileRunTrace:
+class MaterializeRunTrace:
     """Mutable accumulator for one compile_prose invocation's provenance.
 
     Caller threads the trace object through the compile pipeline, mutating
@@ -129,13 +129,13 @@ def begin_compile_trace(
     workflow_id: str | None = None,
     task_type: str = "build",
     llm_requested: bool = False,
-) -> CompileRunTrace:
+) -> MaterializeRunTrace:
     """Open a new trace at the start of compile_prose.
 
     Records prose hash + preview so a later trace read can identify which
     input was being compiled without storing the full prose.
     """
-    trace = CompileRunTrace()
+    trace = MaterializeRunTrace()
     trace.workflow_id = (workflow_id or None)
     trace.title = (title or None)
     trace.task_type_requested = task_type or "build"
@@ -146,7 +146,7 @@ def begin_compile_trace(
     return trace
 
 
-def record_compile_trace(conn: Any, trace: CompileRunTrace) -> None:
+def record_compile_trace(conn: Any, trace: MaterializeRunTrace) -> None:
     """Persist one compile_runs row.
 
     Best-effort: a failure to record the trace must never block the compile
@@ -270,7 +270,7 @@ def compile_trace_scope(
 
 
 __all__ = [
-    "CompileRunTrace",
+    "MaterializeRunTrace",
     "begin_compile_trace",
     "compile_trace_scope",
     "record_compile_trace",

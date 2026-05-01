@@ -115,7 +115,7 @@ class LLMRequestContract:
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledLLMPayload:
+class MaterializedLLMPayload:
     payload: dict[str, Any]
     contract_ref: str
     applied_parameters: tuple[str, ...]
@@ -139,7 +139,7 @@ def compile_llm_request_body(
     provider_slug: str,
     model_slug: str,
     protocol_family: str,
-) -> CompiledLLMPayload:
+) -> MaterializedLLMPayload:
     """Compile a provider body through the request contract."""
 
     normalized_contract = (
@@ -332,7 +332,7 @@ def compile_llm_request_body(
         for param in _present_canonical_parameters(payload, protocol_family=protocol_family)
         if param not in omitted
     )
-    return CompiledLLMPayload(
+    return MaterializedLLMPayload(
         payload=payload,
         contract_ref=normalized_contract.contract_ref,
         applied_parameters=tuple(sorted(applied)),
@@ -919,7 +919,7 @@ def _optional_int(value: object) -> int | None:
 
 
 __all__ = [
-    "CompiledLLMPayload",
+    "MaterializedLLMPayload",
     "LLMRequestContract",
     "LLMRequestContractError",
     "compile_llm_request_body",

@@ -682,7 +682,7 @@ function extractDominantPath(payload: BuildPayload): string[] {
   const reviewEdges = deriveReviewEdges(graphNodes, payload.build_graph?.edges || []);
   if (reviewEdges.length > 0) return computeDominantReviewPath(reviewNodes, reviewEdges);
 
-  const spec = payload.compiled_spec_projection?.compiled_spec;
+  const spec = payload.materialized_spec_projection?.materialized_spec;
   if (spec?.jobs?.length) {
     return spec.jobs
       .map(j => j.source_node_id || j.source_step_id || '')
@@ -1068,7 +1068,7 @@ export function presentBuild(
     severity: b.severity || 'blocking',
     nodeIds: b.node_id ? [b.node_id] : [],
   }));
-  const projectedJobs = (payload.compiled_spec_projection?.compiled_spec?.jobs || []).map(j => ({
+  const projectedJobs = (payload.materialized_spec_projection?.materialized_spec?.jobs || []).map(j => ({
     label: j.label || 'unnamed',
     agent: j.agent || 'auto/build',
   }));

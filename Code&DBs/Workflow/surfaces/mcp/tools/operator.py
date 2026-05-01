@@ -1527,6 +1527,16 @@ def tool_praxis_work_assignment_matrix(params: dict) -> dict:
     )
 
 
+def tool_praxis_paid_model_access(params: dict) -> dict:
+    """Operate paid-model soft-off state and exact one-run leases through CQRS."""
+
+    payload = dict(params) if isinstance(params, dict) else {}
+    return _execute_catalog_tool(
+        operation_name="operator.paid_model_access",
+        payload=payload,
+    )
+
+
 def tool_praxis_execution_truth(params: dict) -> dict:
     """Read a composed proof packet for workflow execution truth."""
 
@@ -3915,6 +3925,72 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "minimum": 1,
                         "default": 100,
                     },
+                },
+            },
+        },
+    ),
+    "praxis_paid_model_access": (
+        tool_praxis_paid_model_access,
+        {
+            "description": (
+                "Operate paid-model access control without broad enables. Soft-off is "
+                "presentation-only; grant_once creates an exact one-workflow-run lease "
+                "for a paid provider/model/task/transport tuple; revoke and consume "
+                "close leases. Backend hard-off remains owned by praxis_access_control."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "status",
+                            "preview",
+                            "grant_once",
+                            "bind_run",
+                            "revoke",
+                            "consume",
+                            "soft_off",
+                            "soft_on",
+                        ],
+                        "default": "status",
+                    },
+                    "runtime_profile_ref": {"type": "string", "default": "praxis"},
+                    "selector": {
+                        "type": "object",
+                        "description": (
+                            "Optional grouped route selector. Supports runtime_profile_ref, "
+                            "job_type, transport_type, adapter_type, provider_slug, and "
+                            "model_slug. Top-level fields override matching selector fields."
+                        ),
+                        "properties": {
+                            "runtime_profile_ref": {"type": "string"},
+                            "job_type": {"type": "string"},
+                            "transport_type": {"type": "string", "enum": ["CLI", "API"]},
+                            "adapter_type": {"type": "string"},
+                            "provider_slug": {"type": "string"},
+                            "model_slug": {"type": "string"},
+                        },
+                    },
+                    "job_type": {"type": "string"},
+                    "transport_type": {"type": "string", "enum": ["CLI", "API"]},
+                    "adapter_type": {"type": "string"},
+                    "provider_slug": {"type": "string"},
+                    "model_slug": {"type": "string"},
+                    "approval_ref": {"type": "string"},
+                    "approved_by": {"type": "string"},
+                    "approval_note": {"type": "string"},
+                    "proposal_hash": {"type": "string"},
+                    "lease_id": {"type": "string"},
+                    "run_id": {"type": "string"},
+                    "expires_at": {"type": "string"},
+                    "ttl_minutes": {"type": "integer", "minimum": 1, "default": 30},
+                    "cost_posture": {"type": "object"},
+                    "route_truth_ref": {"type": "string"},
+                    "decision_ref": {"type": "string"},
+                    "reason_code": {"type": "string"},
+                    "operator_message": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "default": 100},
                 },
             },
         },

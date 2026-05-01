@@ -35,7 +35,7 @@ class StepIntent:
     """One decomposed step of the larger intent.
 
     Fields mirror what the caller would hand-write as a PlanPacket
-    description + stage hint; composition with spec_compiler.PlanPacket
+    description + stage hint; composition with spec_materializer.PlanPacket
     is done externally (not every decomposed step is a packet).
     """
 

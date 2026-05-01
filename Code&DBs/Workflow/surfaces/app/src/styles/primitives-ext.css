@@ -1,0 +1,85 @@
+/* =============================================================
+ * primitives-ext.css
+ * CSS for primitives that were inline-style soup and got promoted
+ * to proper prx-* class structure.
+ * ============================================================= */
+
+/* ── prx-status-grid ─────────────────────────────────────────── */
+
+.prx-status-grid {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  overflow: hidden;
+}
+.prx-status-grid__head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.prx-status-grid__body {
+  display: grid;
+  gap: 1px;
+  background: var(--border);
+}
+.prx-status-grid__cell {
+  background: var(--bg-card);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prx-status-grid__cell-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.prx-status-grid__cell-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-status-grid__cell-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-status-grid__empty {
+  padding: 14px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── prx-chart-svg ───────────────────────────────────────────── */
+
+.prx-chart-svg {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+}
+
+/* ── prx-friction empty state ────────────────────────────────── */
+
+.prx-friction__empty {
+  padding: 14px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── prx-roi single-stat fix ─────────────────────────────────── */
+
+.prx-roi[data-testid="prx-metric-card"] {
+  grid-template-columns: 1fr;
+  min-width: 140px;
+}
+.prx-roi[data-testid="prx-metric-card"] > .stat {
+  border-right: none;
+}

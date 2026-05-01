@@ -8,8 +8,8 @@ import uuid
 
 import pytest
 
-from runtime.compile_artifacts import CompileArtifactStore
-import runtime.workflow_graph_compiler as workflow_graph_compiler
+from runtime.materialize_artifacts import MaterializeArtifactStore
+import runtime.workflow_graph_materializer as workflow_graph_compiler
 from runtime.workflow import _admission
 from runtime.workflow import unified
 
@@ -135,7 +135,7 @@ class _PacketConn:
 def test_execution_packet_store_round_trips_shadow_lineage_and_provenance() -> None:
     conn = _PacketConn()
     run_id = f"run.{uuid.uuid4().hex[:10]}"
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     packet = {
         "definition_revision": "def_1234abcd",
         "plan_revision": "plan_5678efgh",
@@ -337,7 +337,7 @@ def test_workflow_submit_inline_reuses_exact_packet_lineage(monkeypatch) -> None
     assert second_result["packet_reuse_provenance"]["decision"] == "reused"
     assert len(conn.compile_artifact_rows) == 1
     assert conn.rows[-1]["run_id"] == "run.beta"
-    assert conn.rows[-1]["payload"]["compile_provenance"]["reuse"]["decision"] == "reused"
+    assert conn.rows[-1]["payload"]["materialize_provenance"]["reuse"]["decision"] == "reused"
 
 
 def test_workflow_submit_inline_reuses_child_invocation_packet_lineage(monkeypatch) -> None:
@@ -389,7 +389,7 @@ def test_workflow_submit_inline_reuses_child_invocation_packet_lineage(monkeypat
         "definition_row": {
             "definition_revision": "def_1234abcd",
         },
-        "compiled_spec_row": {
+        "materialized_spec_row": {
             "definition_revision": "def_1234abcd",
             "plan_revision": "plan_5678efgh",
         },
@@ -467,7 +467,7 @@ def test_workflow_submit_inline_rejects_stale_child_invocation_packet_lineage(mo
         "definition_row": {
             "definition_revision": "def_1234abcd",
         },
-        "compiled_spec_row": {
+        "materialized_spec_row": {
             "definition_revision": "def_1234abcd",
             "plan_revision": "plan_5678efgh",
         },

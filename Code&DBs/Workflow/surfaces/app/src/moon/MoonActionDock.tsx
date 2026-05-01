@@ -197,7 +197,7 @@ export function MoonActionDock({
       objectTypes,
       null,
       {
-        compiledSpec: payload?.compiled_spec_projection?.compiled_spec ?? payload?.compiled_spec ?? null,
+        compiledSpec: payload?.materialized_spec_projection?.materialized_spec ?? payload?.materialized_spec ?? null,
         buildIssues: payload?.build_issues ?? null,
       },
     ),
@@ -205,8 +205,8 @@ export function MoonActionDock({
       objectTypes,
       payload?.build_graph,
       payload?.build_issues,
-      payload?.compiled_spec,
-      payload?.compiled_spec_projection?.compiled_spec,
+      payload?.materialized_spec,
+      payload?.materialized_spec_projection?.materialized_spec,
       selectedNodeId,
     ],
   );

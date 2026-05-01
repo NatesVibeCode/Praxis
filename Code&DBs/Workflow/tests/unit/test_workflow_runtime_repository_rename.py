@@ -12,7 +12,7 @@ class _Conn:
         self.row = row
         self.workflow_versions = [{"id": "wv-1", "definition": row["definition"]}]
         self.execution_manifests = [
-            {"execution_manifest_ref": "wem-1", "compiled_spec_json": row["compiled_spec"]}
+            {"execution_manifest_ref": "wem-1", "materialized_spec_json": row["materialized_spec"]}
         ]
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
@@ -29,7 +29,7 @@ class _Conn:
                 "id": args[1],
                 "name": args[2],
                 "definition": json.loads(args[3]),
-                "compiled_spec": json.loads(args[4]) if args[4] is not None else None,
+                "materialized_spec": json.loads(args[4]) if args[4] is not None else None,
             }
         return None
 
@@ -41,7 +41,7 @@ class _Conn:
                 return list(self.workflow_versions)
             return []
         if normalized.startswith(
-            "SELECT execution_manifest_ref, compiled_spec_json FROM workflow_build_execution_manifests WHERE workflow_id = $1"
+            "SELECT execution_manifest_ref, materialized_spec_json FROM workflow_build_execution_manifests WHERE workflow_id = $1"
         ):
             if args[0] == self.row["id"]:
                 return list(self.execution_manifests)
@@ -63,7 +63,7 @@ def test_rename_workflow_record_rekeys_dependents_and_rewrites_identity(monkeypa
                     "target_workflow_id": "agent_handoff_search_db_probe",
                 },
             },
-            "compiled_spec": {
+            "materialized_spec": {
                 "workflow_id": "agent_handoff_search_db_probe",
                 "definition_revision": "def_agent_handoff_search_db_probe",
                 "notes": "agent_handoff_search_db_probe stays in review prose",
@@ -93,9 +93,9 @@ def test_rename_workflow_record_rekeys_dependents_and_rewrites_identity(monkeypa
     assert renamed["definition"]["definition_revision"] == "def_agent_handoff_search_db_probe"
     assert renamed["definition"]["notes"] == "Keep agent_handoff_search_db_probe in prose."
     assert renamed["definition"]["nested"]["target_workflow_id"] == "runtime_regression_probe"
-    assert renamed["compiled_spec"]["workflow_id"] == "runtime_regression_probe"
-    assert renamed["compiled_spec"]["definition_revision"] == "def_agent_handoff_search_db_probe"
-    assert renamed["compiled_spec"]["notes"] == "agent_handoff_search_db_probe stays in review prose"
+    assert renamed["materialized_spec"]["workflow_id"] == "runtime_regression_probe"
+    assert renamed["materialized_spec"]["definition_revision"] == "def_agent_handoff_search_db_probe"
+    assert renamed["materialized_spec"]["notes"] == "agent_handoff_search_db_probe stays in review prose"
 
     dependent_updates = [
         query
@@ -109,7 +109,7 @@ def test_rename_workflow_record_rekeys_dependents_and_rewrites_identity(monkeypa
                WHERE id = $1""",
         """UPDATE workflow_build_execution_manifests
                SET workflow_id = $2,
-                   compiled_spec_json = $3::jsonb
+                   materialized_spec_json = $3::jsonb
                WHERE execution_manifest_ref = $1""",
         "UPDATE workflow_triggers SET workflow_id = $2 WHERE workflow_id = $1",
         "UPDATE uploaded_files SET workflow_id = $2 WHERE workflow_id = $1",
@@ -133,7 +133,7 @@ def test_rename_workflow_record_rejects_existing_target(monkeypatch: pytest.Monk
             "name": "Agent Handoff Search DB Probe",
             "description": "probe workflow",
             "definition": {"workflow_id": "agent_handoff_search_db_probe"},
-            "compiled_spec": {"workflow_id": "agent_handoff_search_db_probe"},
+            "materialized_spec": {"workflow_id": "agent_handoff_search_db_probe"},
             "tags": [],
             "created_at": "2026-04-16T00:00:00+00:00",
             "updated_at": "2026-04-16T00:00:00+00:00",
@@ -165,7 +165,7 @@ def test_list_workflow_records_filters_never_run_and_bounds_limit() -> None:
                     "id": "wf_draft",
                     "name": "Draft Flow",
                     "definition": {"type": "pipeline"},
-                    "compiled_spec": None,
+                    "materialized_spec": None,
                     "invocation_count": 0,
                     "last_invoked_at": None,
                 }

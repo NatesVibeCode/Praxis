@@ -1,4 +1,4 @@
-"""Tests for fail-closed-at-compile policy in spec_compiler.
+"""Tests for fail-closed-at-compile policy in spec_materializer.
 
 Honors architecture-policy::platform-architecture::fail-closed-at-compile-
 no-silent-defaults: unknown packet.stage must raise a typed UnresolvedStageError
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from runtime.spec_compiler import (
+from runtime.spec_materializer import (
     CompilePlanError,
     Plan,
     PlanPacket,
@@ -22,7 +22,7 @@ from runtime.spec_compiler import (
 
 
 class _StubConn:
-    """Minimal conn stub — spec_compiler.compile_plan doesn't touch the DB
+    """Minimal conn stub — spec_materializer.compile_plan doesn't touch the DB
     on the explicit-packets path (only when source_refs are supplied)."""
 
     def execute(self, sql: str, *args):

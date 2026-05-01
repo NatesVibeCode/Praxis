@@ -19,7 +19,7 @@ def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-class CompileMaterializationError(RuntimeError):
+class MaterializationError(RuntimeError):
     """Typed materialization failure that should persist a failed receipt."""
 
     def __init__(
@@ -121,7 +121,7 @@ def _input_fingerprint(intent: str) -> str:
 
 
 @dataclass(frozen=True)
-class CompilePreview:
+class MaterializePreview:
     intent: str
     recognition: dict[str, Any]
     input_fingerprint: str
@@ -169,12 +169,12 @@ def preview_compile(
     *,
     conn: Any,
     match_limit: int = 5,
-) -> CompilePreview:
+) -> MaterializePreview:
     clean_intent = _text(intent)
     if not clean_intent:
         raise ValueError("intent must be a non-empty string")
     recognition = recognize_intent(clean_intent, conn=conn, match_limit=match_limit).to_dict()
-    return CompilePreview(
+    return MaterializePreview(
         intent=clean_intent,
         recognition=recognition,
         input_fingerprint=_input_fingerprint(clean_intent),
@@ -225,13 +225,13 @@ def materialize_workflow(
         try:
             timeout_seconds = int(llm_timeout_seconds)
         except (TypeError, ValueError) as exc:
-            raise CompileMaterializationError(
+            raise MaterializationError(
                 "compile.materialize.invalid_timeout",
                 "llm_timeout_seconds must be an integer",
                 details={"llm_timeout_seconds": llm_timeout_seconds},
             ) from exc
         if timeout_seconds < 5 or timeout_seconds > 600:
-            raise CompileMaterializationError(
+            raise MaterializationError(
                 "compile.materialize.invalid_timeout",
                 "llm_timeout_seconds must be between 5 and 600",
                 details={"llm_timeout_seconds": timeout_seconds},
@@ -257,7 +257,7 @@ def materialize_workflow(
         if compose_result.ok is not True:
             compose_payload = compose_result.to_dict()
             reason_code = _text(compose_payload.get("reason_code")) or "compile.materialize.compose_failed"
-            raise CompileMaterializationError(
+            raise MaterializationError(
                 reason_code,
                 f"Compile materialization blocked: {reason_code}",
                 details={
@@ -306,7 +306,7 @@ def materialize_workflow(
         merged_details = dict(details) if isinstance(details, dict) else {}
         merged_details.setdefault("workflow_id", normalized_workflow_id)
         merged_details.setdefault("compile_preview", preview)
-        raise CompileMaterializationError(
+        raise MaterializationError(
             reason_code,
             f"Compile materialization blocked: {reason_code}",
             details=merged_details,
@@ -318,7 +318,7 @@ def materialize_workflow(
         preview=preview,
     )
     if reason_code:
-        raise CompileMaterializationError(
+        raise MaterializationError(
             reason_code,
             f"Compile materialization blocked: {reason_code}",
             details=details,
@@ -330,7 +330,7 @@ def materialize_workflow(
         mutation["row"],
         conn=conn,
         definition=mutation["definition"],
-        compiled_spec=mutation["compiled_spec"],
+        materialized_spec=mutation["materialized_spec"],
         build_bundle=mutation["build_bundle"],
         planning_notes=mutation["planning_notes"],
         intent_brief=mutation.get("intent_brief"),
@@ -358,8 +358,8 @@ def materialize_workflow(
 
 
 __all__ = [
-    "CompileMaterializationError",
-    "CompilePreview",
+    "MaterializationError",
+    "MaterializePreview",
     "materialize_workflow",
     "preview_compile",
 ]

@@ -27,7 +27,7 @@ from runtime.build_review_decisions import (
     effective_workflow_build_review_state,
     scrub_review_state_for_persistence,
 )
-from runtime.definition_compile_kernel import materialize_definition
+from runtime.definition_materialize_kernel import materialize_definition
 from storage.postgres.workflow_build_planning_repository import (
     list_active_capability_bundle_definitions,
     list_active_workflow_shape_family_definitions,
@@ -82,7 +82,7 @@ def _source_mode_for_definition(definition: dict[str, Any]) -> str:
     explicit = _text(definition.get("source_mode"))
     if explicit:
         return explicit
-    if _text(definition.get("source_prose")) or _text(definition.get("compiled_prose")):
+    if _text(definition.get("source_prose")) or _text(definition.get("materialized_prose")):
         return "prose"
     if definition.get("draft_flow"):
         return "saved_draft"
@@ -90,7 +90,7 @@ def _source_mode_for_definition(definition: dict[str, Any]) -> str:
 
 
 def _goal_from_definition(definition: dict[str, Any]) -> str:
-    for field in ("goal", "compiled_prose", "source_prose", "title", "name"):
+    for field in ("goal", "materialized_prose", "source_prose", "title", "name"):
         text = _text(definition.get(field))
         if text:
             return text
@@ -102,7 +102,7 @@ def _goal_from_definition(definition: dict[str, Any]) -> str:
 
 
 def _desired_outcome_from_definition(definition: dict[str, Any]) -> str:
-    for field in ("desired_outcome", "compiled_prose", "source_prose", "authority"):
+    for field in ("desired_outcome", "materialized_prose", "source_prose", "authority"):
         text = _text(definition.get(field))
         if text:
             return text
@@ -261,7 +261,7 @@ def build_intent_brief(
         "uncertainty_markers": _uncertainty_markers_from_definition(materialized),
         "bootstrap_state": {
             "has_source_prose": bool(_text(materialized.get("source_prose"))),
-            "has_compiled_prose": bool(_text(materialized.get("compiled_prose"))),
+            "has_compiled_prose": bool(_text(materialized.get("materialized_prose"))),
             "draft_step_count": len(materialized.get("draft_flow") or [])
             if isinstance(materialized.get("draft_flow"), list)
             else 0,
@@ -856,11 +856,11 @@ def build_candidate_resolution_manifest(
     definition: dict[str, Any],
     workflow_id: str | None = None,
     conn: Any | None = None,
-    compiled_spec: dict[str, Any] | None = None,
+    materialized_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     materialized = materialize_definition(definition if isinstance(definition, dict) else {})
     scrubbed_definition = scrub_review_state_for_persistence(materialized)
-    authority_bundle = build_authority_bundle(scrubbed_definition, compiled_spec=compiled_spec)
+    authority_bundle = build_authority_bundle(scrubbed_definition, materialized_spec=materialized_spec)
     definition_revision = _text(materialized.get("definition_revision")) or None
     intent_brief = build_intent_brief(
         definition=materialized,
@@ -1023,7 +1023,7 @@ def build_reviewable_plan(
     definition: dict[str, Any],
     workflow_id: str | None = None,
     conn: Any | None = None,
-    compiled_spec: dict[str, Any] | None = None,
+    materialized_spec: dict[str, Any] | None = None,
     candidate_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     materialized = materialize_definition(definition if isinstance(definition, dict) else {})
@@ -1041,7 +1041,7 @@ def build_reviewable_plan(
             definition=materialized,
             workflow_id=workflow_id,
             conn=conn,
-            compiled_spec=compiled_spec,
+            materialized_spec=materialized_spec,
         )
     )
     approval_records: list[dict[str, Any]] = []
@@ -1198,7 +1198,7 @@ def build_execution_manifest(
     definition: dict[str, Any],
     workflow_id: str | None = None,
     conn: Any | None = None,
-    compiled_spec: dict[str, Any] | None = None,
+    materialized_spec: dict[str, Any] | None = None,
     candidate_manifest: dict[str, Any] | None = None,
     reviewable_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
@@ -1211,7 +1211,7 @@ def build_execution_manifest(
             definition=materialized,
             workflow_id=workflow_id,
             conn=conn,
-            compiled_spec=compiled_spec,
+            materialized_spec=materialized_spec,
         )
     )
     review = (
@@ -1221,7 +1221,7 @@ def build_execution_manifest(
             definition=materialized,
             workflow_id=workflow_id,
             conn=conn,
-            compiled_spec=compiled_spec,
+            materialized_spec=materialized_spec,
             candidate_manifest=manifest,
         )
     )
@@ -1293,7 +1293,7 @@ def build_execution_manifest(
         else _stable_id("execution_manifest", execution_payload)
     )
     hardening_report = {
-        "status": "compiled" if isinstance(compiled_spec, dict) else "pending_compiled_spec",
+        "status": "compiled" if isinstance(materialized_spec, dict) else "pending_compiled_spec",
         "manifest_ref": manifest.get("manifest_ref"),
         "review_group_ref": review.get("review_group_ref"),
         "approved_bundle_refs": approved_bundle_refs,
@@ -1302,10 +1302,10 @@ def build_execution_manifest(
         "execution_manifest_version": 1,
         "execution_manifest_ref": execution_manifest_ref,
         **execution_payload,
-        "compiled_spec": _json_clone(compiled_spec) if isinstance(compiled_spec, dict) else {},
+        "materialized_spec": _json_clone(materialized_spec) if isinstance(materialized_spec, dict) else {},
         "hardening_report": hardening_report,
     }
-    if _can_use_planning_repo(conn) and workflow_id and definition_revision and isinstance(compiled_spec, dict):
+    if _can_use_planning_repo(conn) and workflow_id and definition_revision and isinstance(materialized_spec, dict):
         try:
             upsert_workflow_build_execution_manifest(
                 conn,
@@ -1314,7 +1314,7 @@ def build_execution_manifest(
                 definition_revision=definition_revision,
                 manifest_ref=_text(manifest.get("manifest_ref")) or manifest.get("manifest_id") or execution_manifest_ref,
                 review_group_ref=_text(review.get("review_group_ref")) or f"workflow_build:{workflow_id}:{definition_revision}",
-                compiled_spec=compiled_spec,
+                materialized_spec=materialized_spec,
                 resolved_bindings=execution_payload["resolved_bindings"],
                 approved_bundle_refs=approved_bundle_refs,
                 tool_allowlist=execution_payload["tool_allowlist"],

@@ -35,7 +35,7 @@ def test_allowlist_covers_modules_commonly_hot_fixed():
         "runtime.workflow_chain",
         "runtime.workflow._context_building",
         "runtime.capability.resolver",
-        "runtime.compile_reuse",
+        "runtime.materialize_reuse",
     )
     for name in must_be_allowed:
         assert _module_is_reload_allowed(name), (
@@ -133,11 +133,11 @@ def test_default_module_list_reloads_every_imported_allowlisted_module():
     """scope=runtime_modules with no modules list → reloads whichever of
     the allowlisted modules are currently in sys.modules. We import a
     known-allowlisted one and assert it shows up."""
-    import runtime.compile_reuse  # noqa: F401
+    import runtime.materialize_reuse  # noqa: F401
 
     result = tool_praxis_reload({"scope": "runtime_modules"})
     rt = result["runtime_modules"]
-    assert "runtime.compile_reuse" in rt["reloaded"]
+    assert "runtime.materialize_reuse" in rt["reloaded"]
     assert rt["failed"] == []
 
 

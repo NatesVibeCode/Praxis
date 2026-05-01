@@ -450,7 +450,7 @@ export function WorkspaceComposeSurface({
               generatedManifestId={generateResult?.manifest_id}
               workflowId={workflowId}
               runId={runId}
-              compiledSpec={buildPayload.compiled_spec ?? buildPayload.definition ?? {}}
+              compiledSpec={buildPayload.materialized_spec ?? buildPayload.definition ?? {}}
             />
           ) : null}
         </aside>

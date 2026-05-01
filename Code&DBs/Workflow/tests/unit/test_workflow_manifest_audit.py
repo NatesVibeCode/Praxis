@@ -15,7 +15,7 @@ def test_workspace_manifest_audit_records_missing_and_observed_paths() -> None:
         hydrated_files=2,
         workspace_materialization="copy",
         workspace_snapshot_ref="workspace_snapshot:abc",
-        hydrated_paths=("runtime/spec_compiler.py", "runtime/context.py"),
+        hydrated_paths=("runtime/spec_materializer.py", "runtime/context.py"),
     )
     result = SandboxExecutionResult(
         sandbox_session_id="sandbox.alpha",
@@ -39,7 +39,7 @@ def test_workspace_manifest_audit_records_missing_and_observed_paths() -> None:
         metadata={
             "execution_bundle": {
                 "access_policy": {
-                    "write_scope": ["runtime/spec_compiler.py"],
+                    "write_scope": ["runtime/spec_materializer.py"],
                     "declared_read_scope": ["runtime/context.py", "runtime/missing.py"],
                 }
             }

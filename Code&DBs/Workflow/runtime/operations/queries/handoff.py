@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
 from storage.postgres.compile_artifact_repository import PostgresCompileArtifactRepository
 from storage.postgres.subscription_repository import PostgresSubscriptionRepository
 
@@ -55,13 +55,13 @@ def handle_query_handoff_latest(
     conn = _pg_conn(subsystems)
     repository = PostgresCompileArtifactRepository(conn)
     if query.input_fingerprint:
-        store = CompileArtifactStore(conn)
+        store = MaterializeArtifactStore(conn)
         try:
             reusable = store.load_reusable_artifact(
                 artifact_kind=query.artifact_kind,
                 input_fingerprint=query.input_fingerprint,
             )
-        except CompileArtifactError as exc:
+        except MaterializeArtifactError as exc:
             raise RuntimeError(str(exc)) from exc
         if reusable is None:
             return {

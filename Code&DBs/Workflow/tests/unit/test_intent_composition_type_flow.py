@@ -11,7 +11,7 @@ from runtime.intent_composition import (
     _adapt_plan_jobs_to_type_flow_request,
     _validate_composed_plan_type_flow,
 )
-from runtime.spec_compiler import ProposedPlan
+from runtime.spec_materializer import ProposedPlan
 
 
 def _make_proposed(jobs: list[dict]) -> ProposedPlan:
@@ -161,7 +161,7 @@ def test_compose_attaches_type_flow_errors_to_warnings(monkeypatch):
     )
 
     from dataclasses import replace
-    from runtime.spec_compiler import ProposedPlan
+    from runtime.spec_materializer import ProposedPlan
 
     def fake_propose(plan_dict, *, conn, workdir=None):
         return ProposedPlan(
@@ -219,7 +219,7 @@ def test_compose_no_errors_leaves_warnings_unchanged(monkeypatch):
         lambda *a, **k: None,
     )
 
-    from runtime.spec_compiler import ProposedPlan
+    from runtime.spec_materializer import ProposedPlan
 
     baseline_warnings = ["baseline warning"]
 

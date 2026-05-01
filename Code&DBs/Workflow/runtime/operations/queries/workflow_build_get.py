@@ -25,7 +25,7 @@ def handle_get_workflow_build(
 ) -> dict[str, Any]:
     conn = subsystems.get_pg_conn()
     row = conn.fetchrow(
-        "SELECT id, name, description, definition, compiled_spec, version, updated_at "
+        "SELECT id, name, description, definition, materialized_spec, version, updated_at "
         "FROM public.workflows WHERE id = $1",
         command.workflow_id,
     )

@@ -8,7 +8,7 @@ principle (`project_dogfooding_principle.md`) — every internal operation
 should route through the gateway.
 
 The underlying business logic still lives in
-`runtime.compile_cqrs.materialize_workflow`. This module is the
+`runtime.materialize_cqrs.materialize_workflow`. This module is the
 gateway-friendly seam (Pydantic input + (command, subsystems) handler).
 """
 
@@ -68,18 +68,18 @@ class CompileMaterializeCommand(BaseModel):
 def handle_compile_materialize(
     command: CompileMaterializeCommand, subsystems: Any
 ) -> dict[str, Any]:
-    """Dispatch `runtime.compile_cqrs.materialize_workflow` through the gateway.
+    """Dispatch `runtime.materialize_cqrs.materialize_workflow` through the gateway.
 
     The gateway wraps this call in an authority operation receipt + emits
     `compile.materialized` to `authority_events` (event_required=TRUE on the
     operation_catalog_registry row registered for this operation).
 
-    Known materialization blockers raise ``CompileMaterializationError`` so the
+    Known materialization blockers raise ``MaterializationError`` so the
     gateway records execution_status=failed and does not emit a false
     ``compile.materialized`` event.
     """
 
-    from runtime.compile_cqrs import CompileMaterializationError, materialize_workflow
+    from runtime.materialize_cqrs import MaterializationError, materialize_workflow
 
     conn = subsystems.get_pg_conn()
     try:
@@ -94,7 +94,7 @@ def handle_compile_materialize(
             llm_timeout_seconds=command.llm_timeout_seconds,
         )
     except ValueError as exc:
-        raise CompileMaterializationError(
+        raise MaterializationError(
             "compile.intent.invalid",
             str(exc),
             details={"intent": command.intent},

@@ -413,7 +413,7 @@ def _source_option_catalog(pg: Any) -> dict[str, dict[str, Any]]:
 def _workflow_to_dict(row: dict[str, Any], *, include_definition: bool = False) -> dict[str, Any]:
     # Extract definition type from the stored JSONB
     definition = _parse_json_field(row.get("definition")) or {}
-    saved_compiled_spec = _parse_json_field(row.get("compiled_spec"))
+    saved_compiled_spec = _parse_json_field(row.get("materialized_spec"))
     from runtime.operating_model_planner import current_compiled_spec
 
     current_plan = current_compiled_spec(
@@ -438,7 +438,7 @@ def _workflow_to_dict(row: dict[str, Any], *, include_definition: bool = False) 
     }
     if include_definition:
         workflow["definition"] = definition
-        workflow["compiled_spec"] = saved_compiled_spec
+        workflow["materialized_spec"] = saved_compiled_spec
         workflow["current_compiled_spec"] = current_plan
     return workflow
 
@@ -546,7 +546,7 @@ def _annotate_dashboard_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
 
 def _load_workflow_inventory(pg: Any) -> list[dict[str, Any]]:
     rows = pg.execute(
-        """SELECT w.id, w.name, w.description, w.definition, w.compiled_spec, w.tags,
+        """SELECT w.id, w.name, w.description, w.definition, w.materialized_spec, w.tags,
                   w.version, w.is_template, w.invocation_count, w.last_invoked_at,
                   w.created_at, w.updated_at,
                   t.id AS trigger_id, t.event_type AS trigger_event, t.enabled AS trigger_enabled,
@@ -1037,7 +1037,7 @@ def _packet_revision_view(
 def _workflow_revision_state(
     *,
     definition: Any,
-    compiled_spec: Any,
+    materialized_spec: Any,
     latest_runs: list[dict[str, Any]],
     pg: Any,
     workflow_name: str | None = None,
@@ -1045,24 +1045,24 @@ def _workflow_revision_state(
     from runtime.operating_model_planner import current_compiled_spec
 
     definition_dict = _parse_json_field(definition) or {}
-    compiled_spec_dict = _parse_json_field(compiled_spec)
+    materialized_spec_dict = _parse_json_field(materialized_spec)
     saved_definition_revision = (
         str(definition_dict.get("definition_revision") or "").strip() or None
         if isinstance(definition_dict, dict)
         else None
     )
     saved_plan_definition_revision = (
-        str(compiled_spec_dict.get("definition_revision") or "").strip() or None
-        if isinstance(compiled_spec_dict, dict)
+        str(materialized_spec_dict.get("definition_revision") or "").strip() or None
+        if isinstance(materialized_spec_dict, dict)
         else None
     )
     saved_plan_revision = (
-        str(compiled_spec_dict.get("plan_revision") or "").strip() or None
-        if isinstance(compiled_spec_dict, dict)
+        str(materialized_spec_dict.get("plan_revision") or "").strip() or None
+        if isinstance(materialized_spec_dict, dict)
         else None
     )
     saved_current_plan = (
-        current_compiled_spec(definition_dict, compiled_spec_dict)
+        current_compiled_spec(definition_dict, materialized_spec_dict)
         if isinstance(definition_dict, dict)
         else None
     )
@@ -1143,7 +1143,7 @@ def _workflow_build_subpath(path: str) -> tuple[str, str]:
 
 def _load_workflow_build_row(pg: Any, workflow_id: str) -> dict[str, Any]:
     row = pg.fetchrow(
-        "SELECT id, name, description, definition, compiled_spec, version, updated_at "
+        "SELECT id, name, description, definition, materialized_spec, version, updated_at "
         "FROM public.workflows WHERE id = $1",
         workflow_id,
     )
@@ -1178,9 +1178,9 @@ def _validate_workflow_body(
     if "build_graph" in body and build_graph is not None and not isinstance(build_graph, dict):
         return "build_graph must be an object"
 
-    compiled_spec = body.get("compiled_spec")
-    if "compiled_spec" in body and compiled_spec is not None and not isinstance(compiled_spec, dict):
-        return "compiled_spec must be an object"
+    materialized_spec = body.get("materialized_spec")
+    if "materialized_spec" in body and materialized_spec is not None and not isinstance(materialized_spec, dict):
+        return "materialized_spec must be an object"
 
     description = body.get("description")
     if "description" in body and description is not None and not isinstance(description, str):
@@ -1309,7 +1309,7 @@ def _handle_workflows_get(request: Any, path: str) -> None:
         workflow["latest_runs"] = _fetch_workflow_runs(pg, workflow["name"], limit=10)
         workflow["revision_state"] = _workflow_revision_state(
             definition=workflow.get("definition"),
-            compiled_spec=workflow.get("compiled_spec"),
+            materialized_spec=workflow.get("materialized_spec"),
             latest_runs=workflow["latest_runs"],
             pg=pg,
             workflow_name=workflow.get("name"),
@@ -1561,8 +1561,8 @@ def _load_compile_index_snapshot_for_request(request: Any):
     authority is refreshed here so normal repo drift does not strand the UI.
     """
 
-    from runtime.compile_index import (
-        CompileIndexAuthorityError,
+    from runtime.materialize_index import (
+        MaterializeIndexAuthorityError,
         load_compile_index_snapshot,
         refresh_compile_index,
     )
@@ -1575,7 +1575,7 @@ def _load_compile_index_snapshot_for_request(request: Any):
             require_fresh=True,
             repo_root=REPO_ROOT,
         )
-    except CompileIndexAuthorityError as exc:
+    except MaterializeIndexAuthorityError as exc:
         if exc.reason_code not in _REFRESHABLE_COMPILE_INDEX_REASON_CODES:
             raise
         snapshot = refresh_compile_index(
@@ -1707,7 +1707,7 @@ def _synthesize_orchestrator_build_moment(pg: Any, workflow_id: str) -> dict[str
             "edges": graph_edges,
         },
         "definition": None,
-        "compiled_spec": None,
+        "materialized_spec": None,
         "synthesized": True,
         "synthesis_source": {
             "kind": "orchestrator_run",
@@ -1752,7 +1752,7 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
                 result["row"],
                 conn=pg,
                 definition=result["definition"],
-                compiled_spec=result["compiled_spec"],
+                materialized_spec=result["materialized_spec"],
                 build_bundle=result["build_bundle"],
                 planning_notes=result["planning_notes"],
                 intent_brief=result.get("intent_brief"),

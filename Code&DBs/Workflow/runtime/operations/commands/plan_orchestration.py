@@ -5,7 +5,7 @@ These let `launch_plan` and `compose_plan_from_intent` dispatch through
 `event_ids` on completed `authority_operation_receipts` and emits
 `plan.launched` / `plan.composed` to `authority_events`.
 
-The underlying business logic still lives in `runtime.spec_compiler.launch_plan`
+The underlying business logic still lives in `runtime.spec_materializer.launch_plan`
 and `runtime.intent_composition.compose_plan_from_intent`. This module is the
 gateway-friendly seam (Pydantic input + (command, subsystems) handler).
 """
@@ -37,7 +37,7 @@ class ComposePlanCommand(BaseModel):
 
 
 def handle_launch_plan(command: LaunchPlanCommand, subsystems: Any) -> dict[str, Any]:
-    """Dispatch ``runtime.spec_compiler.launch_plan`` through the catalog gateway.
+    """Dispatch ``runtime.spec_materializer.launch_plan`` through the catalog gateway.
 
     The gateway wraps this call in an authority operation receipt + emits
     ``plan.launched`` to ``authority_events`` (event_required=TRUE on the
@@ -50,7 +50,7 @@ def handle_launch_plan(command: LaunchPlanCommand, subsystems: Any) -> dict[str,
     failed and the receipt reflects the error.
     """
 
-    from runtime.spec_compiler import LaunchSubmitFailedError, launch_plan
+    from runtime.spec_materializer import LaunchSubmitFailedError, launch_plan
 
     conn = subsystems.get_pg_conn()
     try:

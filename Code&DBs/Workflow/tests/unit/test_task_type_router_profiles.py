@@ -982,7 +982,7 @@ class _ResearchCompileGuardConn(_ResearchOnlyGuardConn):
                     "rationale": "chat profile",
                 },
                 {
-                    "task_type": "compile",
+                    "task_type": "materialize",
                     "affinity_labels": {
                         "primary": ["compile", "analysis"],
                         "secondary": ["research", "review"],
@@ -1035,7 +1035,7 @@ def test_research_tagged_candidate_is_allowed_for_compile_routes(monkeypatch) ->
     )
     router = TaskTypeRouter(_ResearchCompileGuardConn())
 
-    compile_chain = router.resolve_failover_chain("auto/compile")
+    compile_chain = router.resolve_failover_chain("auto/materialize")
 
     assert [entry.provider_slug for entry in compile_chain] == ["deepseek", "openai"]
     assert [entry.model_slug for entry in compile_chain] == ["deepseek-r3", "gpt-5.4-mini"]

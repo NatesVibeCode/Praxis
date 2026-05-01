@@ -1252,7 +1252,7 @@ def retry_job(
         _retry_packet_reuse_provenance,
     )
 
-    from runtime.compile_artifacts import CompileArtifactStore
+    from runtime.materialize_artifacts import MaterializeArtifactStore
 
     run_row = _load_run_row(conn, run_id)
     if run_row:

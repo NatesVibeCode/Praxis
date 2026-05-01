@@ -408,7 +408,17 @@
     "391_register_model_eval_operations.sql",
     "392_model_eval_case_runs_and_scorecards.sql",
     "393_register_model_eval_benchmark_ingest.sql",
-    "394_execution_target_authority.sql"
+    "394_execution_target_authority.sql",
+    "395_compile_decision_authority.sql",
+    "396_materialize_decision_authority.sql",
+    "398_agent_principal_authority.sql",
+    "399_paid_model_access_leases.sql",
+    "400_register_integration_register_operation.sql",
+    "401_materialize_operation_renames.sql",
+    "402_register_paid_model_access_operation.sql",
+    "403_materialize_table_renames.sql",
+    "404_materialize_event_type_renames.sql",
+    "405_materialize_remaining_compile_remnants.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1906,7 +1916,7 @@
     "031_workflow_invocation.sql": [
       {
         "object_type": "column",
-        "object_name": "workflows.compiled_spec"
+        "object_name": "workflows.materialized_spec"
       },
       {
         "object_type": "column",
@@ -2460,11 +2470,11 @@
     "053_compiler_route_hints.sql": [
       {
         "object_type": "table",
-        "object_name": "compiler_route_hints"
+        "object_name": "materializer_route_hints"
       },
       {
         "object_type": "constraint",
-        "object_name": "compiler_route_hints.compiler_route_hints_unique_hint"
+        "object_name": "materializer_route_hints.compiler_route_hints_unique_hint"
       }
     ],
     "054_provider_model_market_match_rules.sql": [
@@ -2530,7 +2540,7 @@
     "057_compile_spine_authority.sql": [
       {
         "object_type": "table",
-        "object_name": "compile_artifacts"
+        "object_name": "materialize_artifacts"
       },
       {
         "object_type": "table",
@@ -2914,7 +2924,7 @@
     "069_compile_index_snapshots.sql": [
       {
         "object_type": "table",
-        "object_name": "compile_index_snapshots"
+        "object_name": "materialize_index_snapshots"
       },
       {
         "object_type": "index",
@@ -6622,7 +6632,7 @@
     "245_compile_run_trace.sql": [
       {
         "object_type": "table",
-        "object_name": "compile_runs"
+        "object_name": "materialize_runs"
       },
       {
         "object_type": "index",
@@ -7084,11 +7094,11 @@
       },
       {
         "object_type": "row",
-        "object_name": "task_type_routing.compile|together|deepseek-ai/DeepSeek-V4-Pro"
+        "object_name": "task_type_routing.materialize|together|deepseek-ai/DeepSeek-V4-Pro"
       },
       {
         "object_type": "row",
-        "object_name": "task_type_routing.compile|together|deepseek-ai/DeepSeek-V3.2"
+        "object_name": "task_type_routing.materialize|together|deepseek-ai/DeepSeek-V3.2"
       },
       {
         "object_type": "row",
@@ -8047,7 +8057,7 @@
     ],
     "314_compile_materialize_canonical_http_path.sql": [
       {
-        "object_type": "row",
+        "object_type": "absent_row",
         "object_name": "operation_catalog_registry.compile.materialize"
       }
     ],
@@ -8430,23 +8440,23 @@
     "330_anthropic_sonnet_cli_compile_fallback_routes.sql": [
       {
         "object_type": "row",
-        "object_name": "task_type_routing.compile|anthropic|claude-sonnet-4-6"
+        "object_name": "task_type_routing.materialize|anthropic|claude-sonnet-4-6"
       },
       {
         "object_type": "row",
-        "object_name": "task_type_routing.compile_synthesize|anthropic|claude-sonnet-4-6"
+        "object_name": "task_type_routing.materialize_synthesize|anthropic|claude-sonnet-4-6"
       },
       {
         "object_type": "row",
-        "object_name": "task_type_routing.compile_pill_match|anthropic|claude-sonnet-4-6"
+        "object_name": "task_type_routing.materialize_pill_match|anthropic|claude-sonnet-4-6"
       },
       {
         "object_type": "row",
-        "object_name": "task_type_routing.compile_author|anthropic|claude-sonnet-4-6"
+        "object_name": "task_type_routing.materialize_author|anthropic|claude-sonnet-4-6"
       },
       {
         "object_type": "row",
-        "object_name": "task_type_routing.compile_finalize|anthropic|claude-sonnet-4-6"
+        "object_name": "task_type_routing.materialize_finalize|anthropic|claude-sonnet-4-6"
       }
     ],
     "331_friction_events_task_mode.sql": [
@@ -8743,15 +8753,15 @@
     ],
     "340_register_compile_preview_query_operation.sql": [
       {
-        "object_type": "row",
+        "object_type": "absent_row",
         "object_name": "data_dictionary_objects.operation.compile_preview"
       },
       {
-        "object_type": "row",
+        "object_type": "absent_row",
         "object_name": "authority_object_registry.operation.compile_preview"
       },
       {
-        "object_type": "row",
+        "object_type": "absent_row",
         "object_name": "operation_catalog_registry.compile_preview"
       }
     ],
@@ -8933,7 +8943,7 @@
         "object_name": "register_operation_atomic"
       },
       {
-        "object_type": "row",
+        "object_type": "absent_row",
         "object_name": "operation_catalog_registry.compile_materialize"
       },
       {
@@ -8985,7 +8995,7 @@
     ],
     "353_operation_lane_bulk_classification.sql": [
       {
-        "object_type": "row",
+        "object_type": "absent_row",
         "object_name": "operation_catalog_registry.compile_preview"
       },
       {
@@ -11312,6 +11322,250 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.execution.dispatch_choice.commit"
       }
+    ],
+    "395_compile_decision_authority.sql": [
+      {
+        "object_type": "absent_row",
+        "object_name": "data_dictionary_objects.compile.decision.stage_resolution"
+      },
+      {
+        "object_type": "absent_row",
+        "object_name": "data_dictionary_objects.compile.decision.write_scope_resolution"
+      },
+      {
+        "object_type": "absent_row",
+        "object_name": "data_dictionary_objects.compile.decision.source_ref_resolution"
+      },
+      {
+        "object_type": "absent_row",
+        "object_name": "data_dictionary_objects.compile.decision.agent_selection"
+      },
+      {
+        "object_type": "absent_row",
+        "object_name": "data_dictionary_objects.compile.decision.data_pill_binding"
+      },
+      {
+        "object_type": "absent_row",
+        "object_name": "data_dictionary_objects.compile.decision.capability_binding"
+      },
+      {
+        "object_type": "absent_row",
+        "object_name": "data_dictionary_objects.compile.decision.verification_admission"
+      },
+      {
+        "object_type": "absent_row",
+        "object_name": "data_dictionary_objects.compile.review.packet_decision_record"
+      }
+    ],
+    "396_materialize_decision_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.materialize.decision.stage_resolution"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.materialize.decision.write_scope_resolution"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.materialize.decision.source_ref_resolution"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.materialize.decision.agent_selection"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.materialize.decision.data_pill_binding"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.materialize.decision.capability_binding"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.materialize.decision.verification_admission"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.materialize.review.packet_decision_record"
+      }
+    ],
+    "398_agent_principal_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "agent_principals"
+      },
+      {
+        "object_type": "table",
+        "object_name": "agent_wakes"
+      },
+      {
+        "object_type": "table",
+        "object_name": "agent_delegations"
+      },
+      {
+        "object_type": "table",
+        "object_name": "agent_tool_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.network_policy.praxis_only"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.agent_principals"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.agent.wake.requested"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.agent.wake.dispatched"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.agent.delegation.committed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.agent.tool_gap.filed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.agent_principal.command.register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.agent.command.delegate"
+      }
+    ],
+    "399_paid_model_access_leases.sql": [
+      {
+        "object_type": "table",
+        "object_name": "private_provider_model_access_soft_offs"
+      },
+      {
+        "object_type": "table",
+        "object_name": "private_paid_model_access_leases"
+      },
+      {
+        "object_type": "index",
+        "object_name": "private_paid_model_access_leases_selector_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "private_paid_model_access_leases_run_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "private_paid_model_access_leases_active_once_idx"
+      },
+      {
+        "object_type": "view",
+        "object_name": "private_paid_model_access_state"
+      }
+    ],
+    "400_register_integration_register_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.integration.registered"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.integration_registered_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.integration_register"
+      }
+    ],
+    "401_materialize_operation_renames.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.materialize_preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.materialize_commit"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.workflow_context_materialize"
+      }
+    ],
+    "402_register_paid_model_access_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.paid_model_access"
+      }
+    ],
+    "403_materialize_table_renames.sql": [
+      {
+        "object_type": "table",
+        "object_name": "materialize_artifacts"
+      },
+      {
+        "object_type": "table",
+        "object_name": "materialize_index_snapshots"
+      },
+      {
+        "object_type": "table",
+        "object_name": "materialize_runs"
+      }
+    ],
+    "404_materialize_event_type_renames.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.404_materialize_event_type_renames.sql"
+      }
+    ],
+    "405_materialize_remaining_compile_remnants.sql": [
+      {
+        "object_type": "table",
+        "object_name": "materializer_route_hints"
+      },
+      {
+        "object_type": "column",
+        "object_name": "materializer_route_hints.materializer_route_hint_id"
+      },
+      {
+        "object_type": "column",
+        "object_name": "workflows.materialized_spec"
+      },
+      {
+        "object_type": "column",
+        "object_name": "workflow_build_execution_manifests.materialized_spec_json"
+      },
+      {
+        "object_type": "column",
+        "object_name": "workflow_context_packs.materialized_from_json"
+      },
+      {
+        "object_type": "column",
+        "object_name": "workflow_surface_usage_events.materialized_job_count"
+      },
+      {
+        "object_type": "absent_table",
+        "object_name": "compiler_route_hints"
+      },
+      {
+        "object_type": "absent_column",
+        "object_name": "workflows.compiled_spec"
+      },
+      {
+        "object_type": "absent_column",
+        "object_name": "workflow_build_execution_manifests.compiled_spec_json"
+      },
+      {
+        "object_type": "absent_column",
+        "object_name": "workflow_context_packs.compiled_from_json"
+      },
+      {
+        "object_type": "absent_column",
+        "object_name": "workflow_surface_usage_events.compiled_job_count"
+      }
     ]
   },
   "policy_buckets": {
@@ -11724,7 +11978,17 @@
       "391_register_model_eval_operations.sql",
       "392_model_eval_case_runs_and_scorecards.sql",
       "393_register_model_eval_benchmark_ingest.sql",
-      "394_execution_target_authority.sql"
+      "394_execution_target_authority.sql",
+      "395_compile_decision_authority.sql",
+      "396_materialize_decision_authority.sql",
+      "398_agent_principal_authority.sql",
+      "399_paid_model_access_leases.sql",
+      "400_register_integration_register_operation.sql",
+      "401_materialize_operation_renames.sql",
+      "402_register_paid_model_access_operation.sql",
+      "403_materialize_table_renames.sql",
+      "404_materialize_event_type_renames.sql",
+      "405_materialize_remaining_compile_remnants.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

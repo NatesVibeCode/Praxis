@@ -205,17 +205,17 @@ export interface WorkflowTrigger {
   source_ref?: string;
 }
 
-export interface CompiledSpec {
+export interface MaterializedSpec {
   name?: string;
   jobs?: WorkflowJob[];
   triggers?: WorkflowTrigger[];
 }
 
-export interface CompiledSpecProjection {
+export interface MaterializedSpecProjection {
   version?: number;
   graph_id?: string;
   definition_revision?: string;
-  compiled_spec?: CompiledSpec | null;
+  materialized_spec?: MaterializedSpec | null;
 }
 
 export interface BuildUndoReceiptStep {
@@ -314,7 +314,7 @@ export interface CompilePreviewPayload {
 export interface BuildPayload {
   workflow?: { id: string; name: string; description?: string } | null;
   definition: Record<string, unknown>;
-  compiled_spec?: CompiledSpec | null;
+  materialized_spec?: MaterializedSpec | null;
   planning_notes?: string[];
   build_state?: string;
   build_blockers?: BuildIssue[];
@@ -324,7 +324,7 @@ export interface BuildPayload {
   authority_attachments?: AuthorityAttachment[];
   build_issues?: BuildIssue[];
   projection_status?: Record<string, unknown>;
-  compiled_spec_projection?: CompiledSpecProjection | null;
+  materialized_spec_projection?: MaterializedSpecProjection | null;
   matched_building_blocks?: Array<{
     id: string;
     name: string;

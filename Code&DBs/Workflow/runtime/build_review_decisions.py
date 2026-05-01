@@ -361,14 +361,14 @@ def materialize_reviewed_build_definition(
     *,
     workflow_id: str,
     definition: dict[str, Any],
-    compiled_spec: dict[str, Any] | None = None,
+    materialized_spec: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     from runtime.build_authority import apply_authority_bundle
 
     base_definition = definition if isinstance(definition, dict) else {}
     definition_revision = _text(base_definition.get("definition_revision"))
     if not definition_revision:
-        return apply_authority_bundle(base_definition, compiled_spec=compiled_spec), False
+        return apply_authority_bundle(base_definition, materialized_spec=materialized_spec), False
 
     effective_state = effective_workflow_build_review_state(
         conn,
@@ -377,11 +377,11 @@ def materialize_reviewed_build_definition(
     )
     latest_records = effective_state["latest_records"]
     if not latest_records:
-        return apply_authority_bundle(base_definition, compiled_spec=compiled_spec), False
+        return apply_authority_bundle(base_definition, materialized_spec=materialized_spec), False
 
     materialized = apply_authority_bundle(
         _scrub_binding_review_state(base_definition),
-        compiled_spec=compiled_spec,
+        materialized_spec=materialized_spec,
     )
     binding_index = {
         _text(entry.get("binding_id")): entry

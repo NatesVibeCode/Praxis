@@ -65,7 +65,7 @@ from runtime.operation_catalog_gateway import (
 )
 from runtime.atlas_graph import build_atlas_payload
 from runtime.workflow._status import summarize_run_health
-from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
+from runtime.workflow_graph_materializer import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
 from surfaces.api.operation_catalog_authority import build_operation_catalog_payload
 from surfaces.api import agent_sessions as agent_sessions_app
@@ -1618,7 +1618,7 @@ def _serialize_surface_usage_event_row(row: dict[str, Any]) -> dict[str, Any]:
         "unresolved_count": int(row.get("unresolved_count") or 0),
         "capability_count": int(row.get("capability_count") or 0),
         "reference_count": int(row.get("reference_count") or 0),
-        "compiled_job_count": int(row.get("compiled_job_count") or 0),
+        "materialized_job_count": int(row.get("materialized_job_count") or 0),
         "trigger_count": int(row.get("trigger_count") or 0),
         "definition_hash": row.get("definition_hash") or None,
         "definition_revision": row.get("definition_revision") or None,
@@ -2512,8 +2512,8 @@ def _build_run_graph_from_graph_spec(
     spec_snapshot: dict[str, Any],
 ) -> dict[str, Any] | None:
     try:
-        compiled_request = compile_graph_workflow_request(spec_snapshot, run_id=run_id)
-        validation = validate_workflow_request(compiled_request)
+        materialized_request = compile_graph_workflow_request(spec_snapshot, run_id=run_id)
+        validation = validate_workflow_request(materialized_request)
     except Exception:
         return None
 
@@ -2522,7 +2522,7 @@ def _build_run_graph_from_graph_spec(
 
     visible_nodes = [
         node
-        for node in compiled_request.nodes
+        for node in materialized_request.nodes
         if not node.template_owner_node_id
     ]
     if not visible_nodes:
@@ -2580,7 +2580,7 @@ def _build_run_graph_from_graph_spec(
 
     nodes_by_id = {node.node_id: node for node in visible_nodes}
     graph_edges: list[dict[str, Any]] = []
-    for edge in compiled_request.edges:
+    for edge in materialized_request.edges:
         if edge.template_owner_node_id:
             continue
         if edge.from_node_id not in visible_node_ids or edge.to_node_id not in visible_node_ids:

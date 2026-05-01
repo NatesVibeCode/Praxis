@@ -15,7 +15,7 @@
       }
     ]
   },
-  "compiled_spec": {
+  "materialized_spec": {
     "definition_revision": "def_runtime_regression_probe_20260416",
       "name": "Runtime Regression Probe",
     "workflow_id": "runtime_regression_probe",

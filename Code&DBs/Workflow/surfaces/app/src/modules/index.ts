@@ -62,6 +62,7 @@ for (const entry of blockCatalog) {
     defaultSpan: entry.defaultSpan,
     component,
     description: entry.description,
+    icon: entry.icon,
   } satisfies ModuleDefinition);
 }
 

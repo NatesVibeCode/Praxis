@@ -14,7 +14,7 @@ class _FakeConn:
         self.fetch_calls: list[tuple[str, tuple[object, ...]]] = []
         self.fetchrow_calls: list[tuple[str, tuple[object, ...]]] = []
         self.route_row = {
-            "task_type": "compile",
+            "task_type": "materialize",
             "sub_task_type": "*",
             "provider_slug": "openai",
             "model_slug": "gpt-5.4",
@@ -185,7 +185,7 @@ def test_task_route_request_write_invalidates_routes_without_touching_eligibilit
     result = asyncio.run(
         frontdoor._set_task_route_request(
             env={"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis"},
-            task_type="compile",
+            task_type="materialize",
             provider_slug="openai",
             model_slug="gpt-5.4",
             sub_task_type="*",

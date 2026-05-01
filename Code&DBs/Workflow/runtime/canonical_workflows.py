@@ -69,12 +69,12 @@ def _json_clone(value: Any) -> Any:
 def _normalized_execution_manifest(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    if "tool_allowlist" in value and "verify_refs" in value and "compiled_spec" in value:
+    if "tool_allowlist" in value and "verify_refs" in value and "materialized_spec" in value:
         return _json_clone(value)
     tool_allowlist = value.get("tool_allowlist_json")
     if not isinstance(tool_allowlist, dict):
         return None
-    compiled_spec = value.get("compiled_spec_json")
+    materialized_spec = value.get("materialized_spec_json")
     policy_gates = value.get("policy_gates_json")
     hardening_report = value.get("hardening_report_json")
     return {
@@ -94,7 +94,7 @@ def _normalized_execution_manifest(value: Any) -> dict[str, Any] | None:
             for item in (_json_clone(value.get("verify_refs_json")) if isinstance(value.get("verify_refs_json"), list) else [])
             if _text(item)
         ],
-        "compiled_spec": _json_clone(compiled_spec) if isinstance(compiled_spec, dict) else {},
+        "materialized_spec": _json_clone(materialized_spec) if isinstance(materialized_spec, dict) else {},
         "policy_gates": _json_clone(policy_gates) if isinstance(policy_gates, dict) else {},
         "hardening_report": _json_clone(hardening_report) if isinstance(hardening_report, dict) else {},
     }
@@ -404,7 +404,7 @@ def _current_build_graph_for_field_patch(
 ) -> dict[str, Any]:
     from runtime.build_authority import build_authority_bundle
 
-    bundle = build_authority_bundle(definition, compiled_spec=current_compiled_spec)
+    bundle = build_authority_bundle(definition, materialized_spec=current_compiled_spec)
     graph = bundle.get("build_graph") if isinstance(bundle.get("build_graph"), dict) else {}
     return _json_clone(graph)
 
@@ -476,7 +476,7 @@ def _apply_node_field_patch(
     node_id, field_name, value = _parse_node_field_patch(subpath, body)
     persisted_compiled_spec = current_compiled_spec(
         definition,
-        _parse_json_field(row.get("compiled_spec")),
+        _parse_json_field(row.get("materialized_spec")),
     )
     graph = _current_build_graph_for_field_patch(
         definition,
@@ -854,7 +854,7 @@ def commit_workflow(
     *,
     title: str,
     definition: dict[str, Any] | None,
-    compiled_spec: dict[str, Any] | None,
+    materialized_spec: dict[str, Any] | None,
     workflow_id: str | None = None,
     build_graph: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -878,11 +878,11 @@ def commit_workflow(
         )
     if not isinstance(definition, dict):
         raise WorkflowRuntimeBoundaryError("definition is required and must be an object")
-    if compiled_spec is not None and not isinstance(compiled_spec, dict):
-        raise WorkflowRuntimeBoundaryError("compiled_spec must be an object")
+    if materialized_spec is not None and not isinstance(materialized_spec, dict):
+        raise WorkflowRuntimeBoundaryError("materialized_spec must be an object")
 
-    persisted_compiled_spec = current_compiled_spec(definition, compiled_spec)
-    description_source = definition.get("compiled_prose") or definition.get("source_prose") or normalized_title
+    persisted_compiled_spec = current_compiled_spec(definition, materialized_spec)
+    description_source = definition.get("materialized_prose") or definition.get("source_prose") or normalized_title
     description = (
         description_source[:200]
         if isinstance(description_source, str)
@@ -894,12 +894,12 @@ def commit_workflow(
         name=normalized_title,
         description=description,
         definition=definition,
-        compiled_spec=persisted_compiled_spec,
+        materialized_spec=persisted_compiled_spec,
     )
     triggers = reconcile_workflow_triggers(
         conn,
         workflow_id=normalized_workflow_id,
-        compiled_spec=persisted_compiled_spec,
+        materialized_spec=persisted_compiled_spec,
     )
     return {
         "workflow_id": normalized_workflow_id,
@@ -938,14 +938,14 @@ def save_workflow(
             name=_text(body.get("name")),
             description=_text(body.get("description")),
             definition=definition,
-            compiled_spec=current_compiled_spec(definition, body.get("compiled_spec")),
+            materialized_spec=current_compiled_spec(definition, body.get("materialized_spec")),
             tags=body.get("tags"),
             is_template=body.get("is_template"),
         )
         reconcile_workflow_triggers(
             conn,
             workflow_id=normalized_workflow_id,
-            compiled_spec=_parse_json_field(row.get("compiled_spec")),
+            materialized_spec=_parse_json_field(row.get("materialized_spec")),
         )
         return row
 
@@ -957,7 +957,7 @@ def save_workflow(
         raise WorkflowRuntimeBoundaryError(f"Workflow not found: {normalized_workflow_id}", status_code=404)
 
     has_build_graph = isinstance(body.get("build_graph"), dict)
-    should_refresh_compiled_spec = "definition" in body or "compiled_spec" in body or has_build_graph
+    should_refresh_compiled_spec = "definition" in body or "materialized_spec" in body or has_build_graph
     persisted_compiled_spec: dict[str, Any] | None | object = _UNSET
     next_definition: dict[str, Any] | None = None
     if should_refresh_compiled_spec:
@@ -973,9 +973,9 @@ def save_workflow(
             )
         next_definition = current_definition
         current_compiled_spec_row = (
-            body.get("compiled_spec")
-            if "compiled_spec" in body
-            else _parse_json_field(current_row.get("compiled_spec"))
+            body.get("materialized_spec")
+            if "materialized_spec" in body
+            else _parse_json_field(current_row.get("materialized_spec"))
         )
         persisted_compiled_spec = current_compiled_spec(
             current_definition,
@@ -992,7 +992,7 @@ def save_workflow(
     elif "definition" in body:
         kwargs["definition"] = body.get("definition")
     if persisted_compiled_spec is not _UNSET:
-        kwargs["compiled_spec"] = persisted_compiled_spec
+        kwargs["materialized_spec"] = persisted_compiled_spec
     if "tags" in body:
         kwargs["tags"] = body.get("tags") or []
     if "is_template" in body:
@@ -1009,7 +1009,7 @@ def save_workflow(
         reconcile_workflow_triggers(
             conn,
             workflow_id=normalized_workflow_id,
-            compiled_spec=persisted_compiled_spec,
+            materialized_spec=persisted_compiled_spec,
         )
     return row
 
@@ -1240,7 +1240,7 @@ def mutate_workflow_build(
                 compose_result=compose_result,
             )
         else:
-            from runtime.compiler import compile_prose
+            from runtime.materializer import compile_prose
 
             compile_result = compile_prose(
                 prose,
@@ -1248,10 +1248,10 @@ def mutate_workflow_build(
                 enable_llm=enable_llm_raw if isinstance(enable_llm_raw, bool) else None,
                 conn=conn,
             )
-            compiled_definition = compile_result.get("definition")
-            if not isinstance(compiled_definition, dict):
+            materialized_definition = compile_result.get("definition")
+            if not isinstance(materialized_definition, dict):
                 raise WorkflowRuntimeBoundaryError("bootstrap did not produce a definition")
-            definition = _json_clone(compiled_definition)
+            definition = _json_clone(materialized_definition)
             definition["workflow_id"] = workflow_id
     elif subpath == "progressive":
         definition = _apply_progressive_build_step(
@@ -1439,7 +1439,7 @@ def mutate_workflow_build(
         intent_brief,
         hydrated_definition,
         durable_definition,
-        compiled_spec,
+        materialized_spec,
         build_bundle,
         planning_notes,
         candidate_resolution_manifest,
@@ -1457,12 +1457,12 @@ def mutate_workflow_build(
         workflow_name=_text(row.get("name")) or workflow_id,
         existing_description=_text(row.get("description")) or None,
         definition=durable_definition,
-        compiled_spec=compiled_spec,
+        materialized_spec=materialized_spec,
     )
     reconcile_workflow_triggers(
         conn,
         workflow_id=workflow_id,
-        compiled_spec=compiled_spec,
+        materialized_spec=materialized_spec,
     )
 
     # Emit to the service bus
@@ -1483,7 +1483,7 @@ def mutate_workflow_build(
         "row": persisted_row,
         "intent_brief": intent_brief,
         "definition": hydrated_definition,
-        "compiled_spec": compiled_spec,
+        "materialized_spec": materialized_spec,
         "build_bundle": build_bundle,
         "planning_notes": planning_notes,
         "candidate_resolution_manifest": candidate_resolution_manifest,
@@ -1529,7 +1529,7 @@ def _rebuild_workflow_build(
     )
 
     planning_notes: list[str] = []
-    compiled_spec: dict[str, Any] | None = None
+    materialized_spec: dict[str, Any] | None = None
     intent_brief: dict[str, Any] | None = None
     candidate_manifest: dict[str, Any] | None = None
     reviewable_plan: dict[str, Any] | None = None
@@ -1549,13 +1549,13 @@ def _rebuild_workflow_build(
         definition=reviewed_definition,
         workflow_id=workflow_id,
         conn=conn,
-        compiled_spec=None,
+        materialized_spec=None,
     )
     reviewable_plan = build_reviewable_plan(
         definition=reviewed_definition,
         workflow_id=workflow_id,
         conn=conn,
-        compiled_spec=None,
+        materialized_spec=None,
         candidate_manifest=candidate_manifest,
     )
     if _text(bundle.get("projection_status", {}).get("state")) == "ready":
@@ -1583,9 +1583,9 @@ def _rebuild_workflow_build(
                     candidate_manifest=candidate_manifest,
                     reviewable_plan=reviewable_plan,
                 )
-                candidate_spec = plan_result.get("compiled_spec")
+                candidate_spec = plan_result.get("materialized_spec")
                 if isinstance(candidate_spec, dict):
-                    compiled_spec = candidate_spec
+                    materialized_spec = candidate_spec
                 planning_notes = [
                     note
                     for note in plan_result.get("planning_notes", [])
@@ -1595,26 +1595,26 @@ def _rebuild_workflow_build(
                     definition=reviewed_definition,
                     workflow_id=workflow_id,
                     conn=conn,
-                    compiled_spec=compiled_spec,
+                    materialized_spec=materialized_spec,
                     candidate_manifest=candidate_manifest,
                     reviewable_plan=reviewable_plan,
                 )
                 if execution_manifest is None:
-                    compiled_spec = None
+                    materialized_spec = None
                     planning_notes.append(
                         "Execution manifest not produced; approved capability bundles and reviewed authority are required before hardening can complete."
                     )
             except PlanningBlockedError as exc:
                 planning_notes = [str(exc)]
-    hydrated_definition = apply_authority_bundle(reviewed_definition, compiled_spec=compiled_spec)
+    hydrated_definition = apply_authority_bundle(reviewed_definition, materialized_spec=materialized_spec)
     if has_db_review_state:
         hydrated_definition, _ = materialize_reviewed_build_definition(
             conn,
             workflow_id=workflow_id,
             definition=hydrated_definition,
-            compiled_spec=compiled_spec,
+            materialized_spec=materialized_spec,
         )
-    bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
+    bundle = build_authority_bundle(hydrated_definition, materialized_spec=materialized_spec)
     durable_definition = (
         scrub_review_state_for_persistence(hydrated_definition)
         if has_db_review_state
@@ -1624,7 +1624,7 @@ def _rebuild_workflow_build(
         intent_brief,
         hydrated_definition,
         durable_definition,
-        compiled_spec,
+        materialized_spec,
         bundle,
         planning_notes,
         candidate_manifest,
@@ -1673,7 +1673,7 @@ def trigger_workflow_manually(
     )
     if not isinstance(execution_manifest, dict):
         raise WorkflowRuntimeBoundaryError(missing_execution_manifest_message(workflow_row.get("name")))
-    spec = execution_manifest.get("compiled_spec")
+    spec = execution_manifest.get("materialized_spec")
     if not isinstance(spec, dict) or not _text(spec.get("definition_revision")):
         raise WorkflowRuntimeBoundaryError(missing_execution_manifest_message(workflow_row.get("name")))
 
@@ -1684,7 +1684,7 @@ def trigger_workflow_manually(
         "source_kind": "workflow_trigger",
         "workflow_row": dict(workflow_row),
         "definition_row": definition_row,
-        "compiled_spec_row": spec,
+        "materialized_spec_row": spec,
     }
     packet_provenance["execution_manifest"] = _json_clone(execution_manifest)
     spec_to_submit["packet_provenance"] = packet_provenance

@@ -6,8 +6,8 @@ This is the end-to-end shortcut that turns a prose intent into a
   1. :func:`runtime.intent_decomposition.decompose_intent` splits the
      prose into ordered :class:`StepIntent` records.
   2. :func:`packets_from_steps` translates each step into a
-     :class:`runtime.spec_compiler.PlanPacket`.
-  3. :func:`runtime.spec_compiler.propose_plan` compiles + previews
+     :class:`runtime.spec_materializer.PlanPacket`.
+  3. :func:`runtime.spec_materializer.propose_plan` compiles + previews
      the resulting packet list (which also runs bind_data_pills per
      packet description).
 
@@ -29,7 +29,7 @@ from runtime.intent_decomposition import (
     StepIntent,
     decompose_intent,
 )
-from runtime.spec_compiler import (
+from runtime.spec_materializer import (
     LaunchReceipt,
     PlanPacket,
     ProposedPlan,

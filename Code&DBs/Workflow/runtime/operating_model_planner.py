@@ -11,11 +11,11 @@ import json
 import hashlib
 from typing import Any
 
-from runtime.compiler import _as_text, _derive_title, _infer_agent_route, _workflow_id_for_title, _slugify
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
-from runtime.compile_reuse import module_surface_revision, stable_hash
+from runtime.materializer import _as_text, _derive_title, _infer_agent_route, _workflow_id_for_title, _slugify
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
+from runtime.materialize_reuse import module_surface_revision, stable_hash
 from runtime.build_authority import build_authority_bundle
-from runtime.definition_compile_kernel import materialize_definition
+from runtime.definition_materialize_kernel import materialize_definition
 from runtime.edge_release import normalize_edge_release
 
 logger = logging.getLogger(__name__)
@@ -88,18 +88,18 @@ def _edge_gate_retry_max_attempts(edge_gate: dict[str, Any]) -> int | None:
     return max(attempts, 1) if attempts > 0 else 3
 
 
-def current_compiled_spec(definition: Any, compiled_spec: Any) -> dict[str, Any] | None:
+def current_compiled_spec(definition: Any, materialized_spec: Any) -> dict[str, Any] | None:
     definition_dict = materialize_definition(_json_dict(definition))
-    compiled_spec_dict = _json_dict(compiled_spec)
+    materialized_spec_dict = _json_dict(materialized_spec)
     definition_revision = _as_text(definition_dict.get("definition_revision"))
-    compiled_revision = _as_text(compiled_spec_dict.get("definition_revision"))
-    if not definition_revision or not compiled_revision or definition_revision != compiled_revision:
+    materialized_revision = _as_text(materialized_spec_dict.get("definition_revision"))
+    if not definition_revision or not materialized_revision or definition_revision != materialized_revision:
         return None
-    if not _compiled_spec_surface_is_current(compiled_spec_dict):
+    if not _materialized_spec_surface_is_current(materialized_spec_dict):
         return None
-    if not _compiled_spec_matches_definition(definition_dict, compiled_spec_dict):
+    if not _compiled_spec_matches_definition(definition_dict, materialized_spec_dict):
         return None
-    return json.loads(json.dumps(compiled_spec_dict))
+    return json.loads(json.dumps(materialized_spec_dict))
 
 
 def unresolved_reference_slugs(definition: Any) -> list[str]:
@@ -156,41 +156,41 @@ def missing_execution_manifest_message(workflow_name: str | None = None) -> str:
     return "Workflow has no approved execution manifest. Review and harden the workflow first."
 
 
-def _compile_planned_definition(
+def _materialize_planned_definition(
     definition: dict[str, Any],
     *,
     title: str | None,
     conn: Any | None,
     planning_source: str,
 ) -> dict[str, Any]:
-    compiled_prose = _as_text(definition.get("compiled_prose"))
+    materialized_prose = _as_text(definition.get("materialized_prose"))
     source_prose = _as_text(definition.get("source_prose"))
     definition_revision = _as_text(definition.get("definition_revision"))
     if not definition_revision:
         raise ValueError("definition.definition_revision is required")
-    effective_title = _as_text(title) or _derive_title(source_prose, compiled_prose)
-    compile_provenance = _plan_compile_provenance(definition=definition, title=effective_title)
+    effective_title = _as_text(title) or _derive_title(source_prose, materialized_prose)
+    materialize_provenance = _plan_materialize_provenance(definition=definition, title=effective_title)
 
     if conn is not None:
-        artifact_store = CompileArtifactStore(conn)
+        artifact_store = MaterializeArtifactStore(conn)
         try:
             reusable_plan = artifact_store.load_reusable_artifact(
                 artifact_kind="plan",
-                input_fingerprint=compile_provenance["input_fingerprint"],
+                input_fingerprint=materialize_provenance["input_fingerprint"],
             )
-        except CompileArtifactError as exc:
+        except MaterializeArtifactError as exc:
             logger.warning("Skipping reusable plan artifact: %s", exc)
             reusable_plan = None
         if reusable_plan is not None:
-            compiled_spec = json.loads(json.dumps(reusable_plan.payload, default=str))
+            materialized_spec = json.loads(json.dumps(reusable_plan.payload, default=str))
             return {
-                "compiled_spec": compiled_spec,
+                "materialized_spec": materialized_spec,
                 "planning_notes": ["Reused plan from exact authority and context match."],
                 "reuse_provenance": {
                     "artifact_kind": "plan",
                     "decision": "reused",
                     "reason_code": "plan.compile.exact_input_match",
-                    "input_fingerprint": compile_provenance["input_fingerprint"],
+                    "input_fingerprint": materialize_provenance["input_fingerprint"],
                     "artifact_ref": reusable_plan.artifact_ref,
                     "revision_ref": reusable_plan.revision_ref,
                     "content_hash": reusable_plan.content_hash,
@@ -199,40 +199,40 @@ def _compile_planned_definition(
             }
 
     jobs = _plan_jobs(definition)
-    compiled_spec = {
+    materialized_spec = {
         "name": effective_title,
         "workflow_id": _workflow_id_for_title(effective_title),
         "phase": "build",
-        "outcome_goal": compiled_prose or source_prose,
+        "outcome_goal": materialized_prose or source_prose,
         "jobs": jobs,
         "triggers": _plan_triggers(definition),
         "definition_revision": definition_revision,
     }
-    compiled_spec["compile_provenance"] = compile_provenance
-    compiled_spec["plan_revision"] = _plan_revision(compiled_spec)
+    materialized_spec["materialize_provenance"] = materialize_provenance
+    materialized_spec["plan_revision"] = _plan_revision(materialized_spec)
     if conn is not None:
         try:
-            artifact_store = CompileArtifactStore(conn)
+            artifact_store = MaterializeArtifactStore(conn)
             artifact_store.record_plan(
-                plan=compiled_spec,
+                plan=materialized_spec,
                 authority_refs=[definition_revision],
-                decision_ref=f"decision.compile.plan.{compiled_spec['plan_revision']}",
+                decision_ref=f"decision.compile.plan.{materialized_spec['plan_revision']}",
                 parent_artifact_ref=definition_revision,
-                input_fingerprint=compile_provenance["input_fingerprint"],
+                input_fingerprint=materialize_provenance["input_fingerprint"],
             )
         except Exception:
             pass
     return {
-        "compiled_spec": compiled_spec,
+        "materialized_spec": materialized_spec,
         "planning_notes": [
-            f"Planned {len(compiled_spec['jobs'])} jobs from {planning_source}.",
-            f"Planned {len(compiled_spec['triggers'])} triggers from trigger_intent.",
+            f"Planned {len(materialized_spec['jobs'])} jobs from {planning_source}.",
+            f"Planned {len(materialized_spec['triggers'])} triggers from trigger_intent.",
         ],
         "reuse_provenance": {
             "artifact_kind": "plan",
             "decision": "compiled",
             "reason_code": "plan.compile.miss",
-            "input_fingerprint": compile_provenance["input_fingerprint"],
+            "input_fingerprint": materialize_provenance["input_fingerprint"],
         },
     }
 
@@ -278,7 +278,7 @@ def harden_reviewed_definition(
     if unresolved:
         raise PlanningBlockedError(unresolved)
 
-    return _compile_planned_definition(
+    return _materialize_planned_definition(
         definition,
         title=title,
         conn=conn,
@@ -306,7 +306,7 @@ def plan_definition(
                 "Use harden_reviewed_definition for builder-owned workflow state."
             ]
         )
-    return _compile_planned_definition(
+    return _materialize_planned_definition(
         definition,
         title=title,
         conn=conn,
@@ -336,7 +336,7 @@ def _review_contract_for_definition(
             definition=definition,
             workflow_id=workflow_id,
             conn=conn,
-            compiled_spec=None,
+            materialized_spec=None,
         )
     )
     review = (
@@ -346,7 +346,7 @@ def _review_contract_for_definition(
             definition=definition,
             workflow_id=workflow_id,
             conn=conn,
-            compiled_spec=None,
+            materialized_spec=None,
             candidate_manifest=manifest,
         )
     )
@@ -389,7 +389,7 @@ def _review_hardening_blockers(
 
 def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
     definition = materialize_definition(definition)
-    compiled_prose = _as_text(definition.get("compiled_prose"))
+    materialized_prose = _as_text(definition.get("materialized_prose"))
     references = definition.get("references") if isinstance(definition.get("references"), list) else []
     narrative_blocks = definition.get("narrative_blocks") if isinstance(definition.get("narrative_blocks"), list) else []
     draft_flow = definition.get("draft_flow") if isinstance(definition.get("draft_flow"), list) else []
@@ -454,7 +454,7 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "id": "step-001",
                 "title": "Execute operating model",
-                "summary": compiled_prose,
+                "summary": materialized_prose,
                 "source_block_ids": [],
                 "reference_slugs": [],
                 "capability_slugs": [],
@@ -499,7 +499,7 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             agent_route,
             step=step,
             explicit_phase=phase_by_step_id.get(step_id),
-            compiled_prose=compiled_prose,
+            materialized_prose=materialized_prose,
             label=label,
         )
         if integration_job is not None:
@@ -517,11 +517,11 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
         )
         prompt_sections = [
             "## Operating Model",
-            compiled_prose,
+            materialized_prose,
             "## Planned Step",
             f"{int(step.get('order') or index)}. {_as_text(step.get('title')) or f'Step {index}'}",
             "## Step Summary",
-            _as_text(step.get("summary")) or source_text or compiled_prose,
+            _as_text(step.get("summary")) or source_text or materialized_prose,
         ]
         if source_text:
             prompt_sections.extend(["## Source Narrative", source_text])
@@ -619,8 +619,8 @@ def _plan_triggers(definition: dict[str, Any]) -> list[dict[str, Any]]:
     return triggers
 
 
-def _plan_revision(compiled_spec: dict[str, Any]) -> str:
-    payload = json.dumps(compiled_spec, sort_keys=True, separators=(",", ":"), default=str)
+def _plan_revision(materialized_spec: dict[str, Any]) -> str:
+    payload = json.dumps(materialized_spec, sort_keys=True, separators=(",", ":"), default=str)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
     return f"plan_{digest}"
 
@@ -629,14 +629,14 @@ def _plan_surface_revision() -> str:
     return module_surface_revision(__file__)
 
 
-def _plan_compile_provenance(
+def _plan_materialize_provenance(
     *,
     definition: dict[str, Any],
     title: str,
 ) -> dict[str, Any]:
     definition_compile_provenance = (
-        dict(definition.get("compile_provenance"))
-        if isinstance(definition.get("compile_provenance"), dict)
+        dict(definition.get("materialize_provenance"))
+        if isinstance(definition.get("materialize_provenance"), dict)
         else {}
     )
     normalized_definition = json.loads(json.dumps(definition, default=str))
@@ -659,11 +659,11 @@ def _plan_compile_provenance(
     }
 
 
-def _compiled_spec_surface_is_current(compiled_spec: dict[str, Any]) -> bool:
-    compile_provenance = compiled_spec.get("compile_provenance")
-    if not isinstance(compile_provenance, dict):
+def _materialized_spec_surface_is_current(materialized_spec: dict[str, Any]) -> bool:
+    materialize_provenance = materialized_spec.get("materialize_provenance")
+    if not isinstance(materialize_provenance, dict):
         return True
-    surface_revision = _as_text(compile_provenance.get("surface_revision"))
+    surface_revision = _as_text(materialize_provenance.get("surface_revision"))
     if not surface_revision:
         return True
     return surface_revision == _plan_surface_revision()
@@ -671,31 +671,31 @@ def _compiled_spec_surface_is_current(compiled_spec: dict[str, Any]) -> bool:
 
 def _compiled_spec_matches_definition(
     definition: dict[str, Any],
-    compiled_spec: dict[str, Any],
+    materialized_spec: dict[str, Any],
 ) -> bool:
-    compile_provenance = compiled_spec.get("compile_provenance")
-    if not isinstance(compile_provenance, dict):
+    materialize_provenance = materialized_spec.get("materialize_provenance")
+    if not isinstance(materialize_provenance, dict):
         return True
-    input_fingerprint = _as_text(compile_provenance.get("input_fingerprint"))
+    input_fingerprint = _as_text(materialize_provenance.get("input_fingerprint"))
     if not input_fingerprint:
         return False
-    expected_provenance = _plan_compile_provenance(
+    expected_provenance = _plan_materialize_provenance(
         definition=definition,
-        title=_as_text(compiled_spec.get("name")) or _derive_title(
+        title=_as_text(materialized_spec.get("name")) or _derive_title(
             _as_text(definition.get("source_prose")),
-            _as_text(definition.get("compiled_prose")),
+            _as_text(definition.get("materialized_prose")),
         ),
     )
     if input_fingerprint != expected_provenance["input_fingerprint"]:
         return False
-    plan_revision = _as_text(compiled_spec.get("plan_revision"))
+    plan_revision = _as_text(materialized_spec.get("plan_revision"))
     if not plan_revision:
         return False
-    return plan_revision == _computed_plan_revision(compiled_spec)
+    return plan_revision == _computed_plan_revision(materialized_spec)
 
 
-def _computed_plan_revision(compiled_spec: dict[str, Any]) -> str:
-    payload = json.loads(json.dumps(compiled_spec, default=str))
+def _computed_plan_revision(materialized_spec: dict[str, Any]) -> str:
+    payload = json.loads(json.dumps(materialized_spec, default=str))
     payload.pop("plan_revision", None)
     return _plan_revision(payload)
 
@@ -739,7 +739,7 @@ def _integration_job_from_route(
     *,
     step: dict[str, Any],
     explicit_phase: dict[str, Any] | None,
-    compiled_prose: str,
+    materialized_prose: str,
     label: str,
 ) -> tuple[str, str, dict[str, Any]] | None:
     normalized_route = _as_text(route)
@@ -759,7 +759,7 @@ def _integration_job_from_route(
             _as_text(integration_args.get("message"))
             or _as_text(step.get("summary"))
             or _as_text(phase.get("system_prompt"))
-            or compiled_prose
+            or materialized_prose
             or title
         )
         metadata = {

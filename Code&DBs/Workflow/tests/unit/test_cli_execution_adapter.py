@@ -33,7 +33,7 @@ def test_execution_bundle_merges_context_scope_into_existing_bundle() -> None:
                 "run_id": "run.alpha",
                 "job_label": "job.alpha",
                 "access_policy": {
-                    "write_scope": ["runtime/spec_compiler.py"],
+                    "write_scope": ["runtime/spec_materializer.py"],
                     "declared_read_scope": [],
                 },
             },
@@ -46,7 +46,7 @@ def test_execution_bundle_merges_context_scope_into_existing_bundle() -> None:
     )
 
     assert bundle is not None
-    assert bundle["access_policy"]["write_scope"] == ["runtime/spec_compiler.py"]
+    assert bundle["access_policy"]["write_scope"] == ["runtime/spec_materializer.py"]
     assert bundle["access_policy"]["declared_read_scope"] == [
         "runtime/operations/commands/provider_availability_refresh.py",
         "runtime/workflow/pipeline_eval.py",

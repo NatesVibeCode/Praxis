@@ -2557,7 +2557,7 @@ Example input:
 
 ```json
 {
-  "task_type": "compile",
+  "task_type": "materialize",
   "provider_slug": "openai",
   "model_slug": "gpt-5.4",
   "temperature": 0.2,

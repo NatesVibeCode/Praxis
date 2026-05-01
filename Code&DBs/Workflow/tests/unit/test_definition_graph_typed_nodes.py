@@ -21,13 +21,13 @@ _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
-from runtime.definition_compile_kernel import build_definition_graph
+from runtime.definition_materialize_kernel import build_definition_graph
 
 
 def test_capability_node_carries_typed_contract():
     graph = build_definition_graph(
         source_prose="research and analyze the situation",
-        compiled_prose="research and analyze the situation",
+        materialized_prose="research and analyze the situation",
         references=[],
         capabilities=[
             {
@@ -55,7 +55,7 @@ def test_capability_node_carries_typed_contract():
 def test_draft_step_node_carries_typed_contract_for_implement_step():
     graph = build_definition_graph(
         source_prose="implement the feature",
-        compiled_prose="implement the feature",
+        materialized_prose="implement the feature",
         references=[],
         capabilities=[],
         authority="",
@@ -82,7 +82,7 @@ def test_draft_step_node_carries_typed_contract_for_implement_step():
 def test_draft_step_node_with_review_title_routes_to_review_contract():
     graph = build_definition_graph(
         source_prose="check it",
-        compiled_prose="check it",
+        materialized_prose="check it",
         references=[],
         capabilities=[],
         authority="",
@@ -105,7 +105,7 @@ def test_draft_step_node_with_review_title_routes_to_review_contract():
 def test_draft_step_node_default_when_no_inferable_role():
     graph = build_definition_graph(
         source_prose="x",
-        compiled_prose="x",
+        materialized_prose="x",
         references=[],
         capabilities=[],
         authority="",
@@ -131,7 +131,7 @@ def test_reference_and_narrative_nodes_dont_get_typed_contract():
     They don't need typed contracts. Only capability and draft_step do."""
     graph = build_definition_graph(
         source_prose="x",
-        compiled_prose="x",
+        materialized_prose="x",
         references=[{"slug": "doc.api", "title": "API docs"}],
         capabilities=[],
         authority="",

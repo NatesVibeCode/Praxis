@@ -31,7 +31,7 @@ def _support_inbox_definition(
             "Watch the support inbox, classify incoming email by severity, "
             "and route the triage agent for review."
         ),
-        "compiled_prose": (
+        "materialized_prose": (
             "Watch the support inbox, classify incoming email by severity, "
             "and route the triage agent for review."
         ),
@@ -111,7 +111,7 @@ def _persist_support_workflow(
         name="Support Intake",
         description="Compile support intake",
         definition=definition,
-        compiled_spec=None,
+        materialized_spec=None,
     )
     return definition
 
@@ -127,7 +127,7 @@ def _ap_invoice_definition(
             "Parse inbound AP invoices, match vendors in ERP, update the payable object, "
             "and require policy approval before scheduling payment."
         ),
-        "compiled_prose": (
+        "materialized_prose": (
             "Parse inbound AP invoices, match vendors in ERP, update the payable object, "
             "and require policy approval before scheduling payment."
         ),
@@ -207,7 +207,7 @@ def _persist_ap_invoice_workflow(
         name="AP Invoice Intake",
         description="Compile AP invoice intake",
         definition=definition,
-        compiled_spec=None,
+        materialized_spec=None,
     )
     return definition
 
@@ -233,7 +233,7 @@ def test_real_db_candidate_manifest_projection_matches_persisted_shape() -> None
             definition=definition,
             workflow_id=workflow_id,
             conn=conn,
-            compiled_spec=None,
+            materialized_spec=None,
         )
         payload = _latest_payload(conn, workflow_id=workflow_id)
         projected = payload["candidate_resolution_manifest"]
@@ -270,7 +270,7 @@ def test_real_db_candidate_manifest_and_payload_require_explicit_binding_approva
             definition=definition,
             workflow_id=workflow_id,
             conn=conn,
-            compiled_spec=None,
+            materialized_spec=None,
         )
         slot = manifest["binding_slots"][0]
         assert manifest["execution_readiness"] == "review_required"
@@ -495,7 +495,7 @@ def test_real_db_bundle_and_workflow_shape_reviews_share_provenance_and_hardenin
                 "rationale": "Approve the support review lane.",
             },
         )
-        assert binding_only["compiled_spec"] is None
+        assert binding_only["materialized_spec"] is None
         assert any("Workflow shape requires explicit approval" in note for note in binding_only["planning_notes"])
         workflow_shape_ref = binding_only["candidate_resolution_manifest"]["workflow_shape_candidates"][0]["candidate_ref"]
 
@@ -520,7 +520,7 @@ def test_real_db_bundle_and_workflow_shape_reviews_share_provenance_and_hardenin
                 "rationale": "Approve the current support inbox flow shape.",
             },
         )
-        assert shape_approved["compiled_spec"] is None
+        assert shape_approved["materialized_spec"] is None
         assert any("Capability bundle approval is required" in note for note in shape_approved["planning_notes"])
         assert shape_approved["definition"]["review_state"]["approved_workflow_shape_ref"] == workflow_shape_ref
         assert shape_approved["definition"]["build_graph"]["approval_state"] == "approved"
@@ -546,7 +546,7 @@ def test_real_db_bundle_and_workflow_shape_reviews_share_provenance_and_hardenin
                 "rationale": "Approve the support triage capability bundle.",
             },
         )
-        assert bundle_approved["compiled_spec"] is not None
+        assert bundle_approved["materialized_spec"] is not None
         assert bundle_approved["execution_manifest"] is not None
         assert bundle_approved["definition"]["review_state"]["approved_bundle_refs"] == [
             "capability_bundle:email_triage"
@@ -657,7 +657,7 @@ def test_real_db_ap_invoice_path_uses_registry_bundle_candidates_and_execution_m
             definition=definition,
             workflow_id=workflow_id,
             conn=conn,
-            compiled_spec=None,
+            materialized_spec=None,
         )
         assert manifest["capability_bundle_candidates"][0]["top_ranked_ref"] == "capability_bundle:invoice_processing"
         workflow_shape_ref = manifest["workflow_shape_candidates"][0]["candidate_ref"]

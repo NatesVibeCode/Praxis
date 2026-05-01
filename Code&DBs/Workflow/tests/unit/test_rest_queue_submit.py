@@ -127,7 +127,7 @@ def test_spec_from_request_preserves_shadow_packet_fields() -> None:
         plan_revision="plan_alpha",
         packet_provenance={
             "source_kind": "workflow_runtime",
-            "compiled_spec_row": {
+            "materialized_spec_row": {
                 "definition_revision": "def_alpha",
                 "plan_revision": "plan_alpha",
             },
@@ -150,7 +150,7 @@ def test_spec_from_request_preserves_shadow_packet_fields() -> None:
     assert spec.plan_revision == "plan_alpha"
     assert spec.packet_provenance == {
         "source_kind": "workflow_runtime",
-        "compiled_spec_row": {
+        "materialized_spec_row": {
             "definition_revision": "def_alpha",
             "plan_revision": "plan_alpha",
         },

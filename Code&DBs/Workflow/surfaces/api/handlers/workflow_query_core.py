@@ -219,12 +219,12 @@ def _jsonish(value: Any) -> Any:
 
 
 def _workflow_record_summary(row: dict[str, Any]) -> dict[str, Any]:
-    compiled_spec = _jsonish(row.get("compiled_spec"))
+    materialized_spec = _jsonish(row.get("materialized_spec"))
     return {
         "id": row.get("id"),
         "name": row.get("name"),
         "description": row.get("description"),
-        "has_spec": compiled_spec is not None,
+        "has_spec": materialized_spec is not None,
         "invocation_count": int(row.get("invocation_count") or 0),
         "last_invoked_at": row.get("last_invoked_at"),
         "is_template": bool(row.get("is_template")),

@@ -81,7 +81,7 @@ def _pg() -> _MutableWorkflowPg:
                 "name": "Graph Dispatch",
                 "description": "Graph Dispatch",
                 "definition": {},
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "version": 1,
                 "updated_at": "2026-04-15T10:00:00Z",
             }
@@ -93,14 +93,14 @@ def test_graph_first_harden_requires_review_before_execution_manifest() -> None:
     status, payload = _harden_graph(_pg())
 
     assert status == 200
-    assert payload["compiled_spec"] is None
+    assert payload["materialized_spec"] is None
     assert payload["execution_manifest"] is None
     assert payload["candidate_resolution_manifest"]["execution_readiness"] == "review_required"
     assert payload["candidate_resolution_manifest"]["projection_status"] == {
         "state": "ready",
         "blocking_issue_ids": [],
         "issue_count": 0,
-        "compiled_spec_available": False,
+        "materialized_spec_available": False,
     }
     assert "Workflow shape requires explicit approval" in payload["planning_notes"][0]
 

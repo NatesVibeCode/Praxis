@@ -43,7 +43,7 @@ def handle_mutate_workflow_build(command: MutateWorkflowBuildCommand, subsystems
         result["row"],
         conn=conn,
         definition=result["definition"],
-        compiled_spec=result["compiled_spec"],
+        materialized_spec=result["materialized_spec"],
         build_bundle=result["build_bundle"],
         planning_notes=result["planning_notes"],
         intent_brief=result.get("intent_brief"),

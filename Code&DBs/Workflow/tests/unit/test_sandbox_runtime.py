@@ -1714,7 +1714,7 @@ def test_workspace_manifest_audit_compares_intended_hydrated_and_observed_reads(
         hydrated_files=2,
         workspace_materialization="copy",
         workspace_snapshot_ref="workspace_snapshot:abc",
-        hydrated_paths=("runtime/spec_compiler.py", "runtime/context.py"),
+        hydrated_paths=("runtime/spec_materializer.py", "runtime/context.py"),
     )
     result = SandboxExecutionResult(
         sandbox_session_id="sandbox.alpha",
@@ -1738,7 +1738,7 @@ def test_workspace_manifest_audit_compares_intended_hydrated_and_observed_reads(
         metadata={
             "execution_bundle": {
                 "access_policy": {
-                    "write_scope": ["runtime/spec_compiler.py"],
+                    "write_scope": ["runtime/spec_materializer.py"],
                     "declared_read_scope": ["runtime/context.py", "runtime/missing.py"],
                 }
             }
@@ -1750,17 +1750,17 @@ def test_workspace_manifest_audit_compares_intended_hydrated_and_observed_reads(
     assert audit["intended_manifest_paths"] == [
         "runtime/context.py",
         "runtime/missing.py",
-        "runtime/spec_compiler.py",
+        "runtime/spec_materializer.py",
     ]
     assert audit["intended_read_manifest_paths"] == [
         "runtime/context.py",
         "runtime/missing.py",
     ]
     assert audit["intended_write_manifest_paths"] == [
-        "runtime/spec_compiler.py",
+        "runtime/spec_materializer.py",
     ]
     assert audit["hydrated_manifest_paths"] == [
-        "runtime/spec_compiler.py",
+        "runtime/spec_materializer.py",
         "runtime/context.py",
     ]
     assert audit["missing_intended_paths"] == ["runtime/missing.py"]

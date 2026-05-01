@@ -823,7 +823,7 @@ def test_verification_registry_expected_objects_are_registered() -> None:
 def test_compile_spine_authority_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("057_compile_spine_authority.sql")
     names = {item.object_name for item in objects}
-    assert "compile_artifacts" in names
+    assert "materialize_artifacts" in names
     assert "capability_catalog" in names
     assert "verify_refs" in names
     assert "compile_artifacts_kind_revision_idx" in names
@@ -910,7 +910,7 @@ def test_verifier_healer_authority_expected_objects_are_registered() -> None:
 def test_compile_index_snapshots_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("069_compile_index_snapshots.sql")
     names = {item.object_name for item in objects}
-    assert "compile_index_snapshots" in names
+    assert "materialize_index_snapshots" in names
     assert "compile_index_snapshots_surface_name_refreshed_idx" in names
     assert "compile_index_snapshots_surface_name_revision_idx" in names
     assert "compile_index_snapshots_repo_fingerprint_idx" in names

@@ -13,21 +13,21 @@ WORKFLOW_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_ROOT))
 
-import runtime.compiler as compiler_module
-from runtime.compiler import compile_prose
+import runtime.materializer as compiler_module
+from runtime.materializer import compile_prose
 
 
-def _compile_index_snapshot() -> compiler_module.CompileIndexSnapshot:
+def _compile_index_snapshot() -> compiler_module.MaterializeIndexSnapshot:
     now = datetime(2026, 4, 23, 0, 0, tzinfo=timezone.utc)
     repo_root = str(WORKFLOW_ROOT.parents[1])
     source_counts = {
         "reference_catalog": 1,
         "integration_registry": 1,
         "object_types": 1,
-        "compiler_route_hints": 1,
+        "materializer_route_hints": 1,
         "capability_catalog": 1,
     }
-    return compiler_module.CompileIndexSnapshot(
+    return compiler_module.MaterializeIndexSnapshot(
         schema_version=1,
         compile_index_ref="compile_index.compiler.smoke_test",
         compile_surface_revision="compile_surface.compiler.smoke_test",
@@ -65,7 +65,7 @@ def _compile_index_snapshot() -> compiler_module.CompileIndexSnapshot:
         object_types=(
             {"type_id": "invoice", "name": "Invoice", "description": "Invoice status"},
         ),
-        compiler_route_hints=(("review", "auto/review"),),
+        materializer_route_hints=(("review", "auto/review"),),
         capability_catalog=(
             {"slug": "capability.gmail.search", "summary": "Search Gmail inboxes"},
         ),
@@ -110,7 +110,7 @@ def _stub_external_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         "_resolve_compiler_embedder",
         lambda: (None, {"mode": "degraded", "reason": "compiler smoke test"}),
     )
-    monkeypatch.setattr(compiler_module, "CompileArtifactStore", _FakeArtifactStore)
+    monkeypatch.setattr(compiler_module, "MaterializeArtifactStore", _FakeArtifactStore)
     monkeypatch.setattr(compiler_module, "_call_llm_compile", _fake_llm_compile)
 
 
@@ -132,13 +132,13 @@ def test_basic_compilation() -> None:
     )
     _assert_compiler_shape(result)
     definition = result["definition"]
-    assert isinstance(definition["compiled_prose"], str)
+    assert isinstance(definition["materialized_prose"], str)
     assert isinstance(definition["references"], list)
     assert isinstance(definition["draft_flow"], list)
     assert isinstance(definition["execution_setup"], dict)
     assert isinstance(definition["surface_manifest"], dict)
     assert isinstance(definition["build_receipt"], dict)
-    print(f'✓ Compiled: {definition["compiled_prose"][:100]}...')
+    print(f'✓ Compiled: {definition["materialized_prose"][:100]}...')
     print(f'  References: {len(definition["references"])} found')
     print(f'  Draft steps: {len(definition["draft_flow"])} planned')
     print(f'  Unresolved: {result["unresolved"]}')
@@ -149,7 +149,7 @@ def test_basic_compilation() -> None:
 def test_empty_prose() -> None:
     result = compile_prose("")
     _assert_compiler_shape(result)
-    assert result.get("error") is not None or result["definition"].get("compiled_prose") == ""
+    assert result.get("error") is not None or result["definition"].get("materialized_prose") == ""
     print("✓ Empty prose handled")
 
 

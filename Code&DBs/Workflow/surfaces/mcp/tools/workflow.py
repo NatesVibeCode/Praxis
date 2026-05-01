@@ -1928,7 +1928,7 @@ def tool_praxis_launch_plan(params: dict) -> dict:
                 "reason_code": "postgres.authority.unavailable",
             }
         try:
-            from runtime.spec_compiler import (
+            from runtime.spec_materializer import (
                 ApprovalHashMismatchError,
                 ApprovedPlan,
                 LaunchSubmitFailedError,
@@ -2036,7 +2036,7 @@ def tool_praxis_launch_plan(params: dict) -> dict:
 
     try:
         if preview_only:
-            from runtime.spec_compiler import propose_plan
+            from runtime.spec_materializer import propose_plan
 
             proposed = propose_plan(plan, conn=pg_conn, workdir=workdir)
             payload = proposed.to_dict()
@@ -2162,7 +2162,7 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
             ComposeAndLaunchBlocked,
             compose_and_launch,
         )
-        from runtime.spec_compiler import (
+        from runtime.spec_materializer import (
             ApprovalHashMismatchError,
             LaunchSubmitFailedError,
         )
@@ -2414,7 +2414,7 @@ def tool_praxis_approve_proposed_plan(params: dict) -> dict:
         }
 
     try:
-        from runtime.spec_compiler import (
+        from runtime.spec_materializer import (
             ProposedPlan,
             approve_proposed_plan,
             ProviderFreshnessGateError,

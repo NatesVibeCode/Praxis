@@ -50,7 +50,7 @@ def test_cqrs_dynamic_route_mounting_and_dispatch(monkeypatch: Any) -> None:
         lambda *args, **kwargs: {
             "row": {"id": "test_wf", "name": "Test", "version": 1},
             "definition": {"type": "test"},
-            "compiled_spec": {"compiled": True},
+            "materialized_spec": {"compiled": True},
             "build_bundle": {"status": "ready"},
             "planning_notes": [],
         }
@@ -110,7 +110,7 @@ def test_cqrs_dynamic_route_mounting_and_dispatch(monkeypatch: Any) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["workflow"]["id"] == "test_wf"
-    assert data["compiled_spec"] == {"compiled": True}
+    assert data["materialized_spec"] == {"compiled": True}
 
 
 def test_operation_query_roadmap_tree_dispatch(monkeypatch: Any) -> None:

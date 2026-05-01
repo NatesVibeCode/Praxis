@@ -141,7 +141,7 @@ def _evaluate_workflow_triggers_for_event(
         triggers = conn.execute(
             """SELECT t.id, t.workflow_id, t.filter,
                       t.trigger_type, t.integration_id, t.integration_action, t.integration_args,
-                      w.definition, w.compiled_spec, w.name as workflow_name
+                      w.definition, w.materialized_spec, w.name as workflow_name
                FROM public.workflow_triggers t
                LEFT JOIN public.workflows w ON w.id = t.workflow_id
                WHERE t.event_type = $1 AND t.enabled = TRUE""",
@@ -151,7 +151,7 @@ def _evaluate_workflow_triggers_for_event(
         triggers = conn.execute(
             """SELECT t.id, t.workflow_id, t.filter,
                       t.trigger_type, t.integration_id, t.integration_action, t.integration_args,
-                      w.definition, w.compiled_spec, w.name as workflow_name
+                      w.definition, w.materialized_spec, w.name as workflow_name
                FROM public.workflow_triggers t
                LEFT JOIN public.workflows w ON w.id = t.workflow_id
                WHERE t.event_type = ANY($1::text[]) AND t.enabled = TRUE""",
@@ -240,8 +240,8 @@ def _fire_workflow_trigger(
 
     from runtime.operating_model_planner import current_compiled_spec
 
-    compiled_spec = current_compiled_spec(trigger.get("definition"), trigger.get("compiled_spec"))
-    if not compiled_spec:
+    materialized_spec = current_compiled_spec(trigger.get("definition"), trigger.get("materialized_spec"))
+    if not materialized_spec:
         logger.warning(
             "Trigger %s matched but workflow %s has no current plan authority; skipping",
             trigger_id,
@@ -254,7 +254,7 @@ def _fire_workflow_trigger(
 
     from runtime.control_commands import submit_workflow_command
 
-    spec_copy = json.loads(json.dumps(compiled_spec))
+    spec_copy = json.loads(json.dumps(materialized_spec))
     if spec_copy.get("jobs"):
         event_context = (
             f"\n\n## Trigger Context\n"
@@ -369,7 +369,7 @@ def evaluate_event_subscriptions(conn: Any) -> int:
                   s.cursor_scope,
                   s.filter_policy,
                   w.definition,
-                  w.compiled_spec,
+                  w.materialized_spec,
                   w.name AS workflow_name
            FROM public.event_subscriptions s
            LEFT JOIN public.workflows w ON w.id = s.workflow_id
@@ -411,7 +411,7 @@ def _process_event_subscription(
     envelope_kind = str(subscription.get("envelope_kind") or "system_event").strip()
     from runtime.operating_model_planner import current_compiled_spec
 
-    compiled_spec = current_compiled_spec(subscription.get("definition"), subscription.get("compiled_spec"))
+    materialized_spec = current_compiled_spec(subscription.get("definition"), subscription.get("materialized_spec"))
     filter_policy = _json_mapping(subscription.get("filter_policy"))
 
     if envelope_kind != "system_event":
@@ -427,8 +427,8 @@ def _process_event_subscription(
             subscription_id,
         )
         return 0
-    if not compiled_spec:
-        has_authority_snapshot = bool(subscription.get("definition")) or bool(subscription.get("compiled_spec"))
+    if not materialized_spec:
+        has_authority_snapshot = bool(subscription.get("definition")) or bool(subscription.get("materialized_spec"))
         logger.warning(
             "Event subscription %s %s for workflow %s; skipping",
             subscription_id,
@@ -470,7 +470,7 @@ def _process_event_subscription(
                 conn,
                 workflow_id=workflow_id,
                 workflow_name=workflow_name,
-                compiled_spec=compiled_spec,
+                materialized_spec=materialized_spec,
                 event=event,
                 source_depth=_event_payload(event).get("trigger_depth", 0),
                 context_title="Subscription Context",
@@ -631,7 +631,7 @@ def _submit_workflow_for_event(
     *,
     workflow_id: str,
     workflow_name: str,
-    compiled_spec: Any,
+    materialized_spec: Any,
     event: dict[str, Any],
     source_depth: int,
     context_title: str,
@@ -649,7 +649,7 @@ def _submit_workflow_for_event(
             f"Trigger depth {source_depth} exceeds maximum ({MAX_TRIGGER_DEPTH})"
         )
 
-    spec_copy = _compiled_spec_dict(compiled_spec, workflow_id=workflow_id)
+    spec_copy = _compiled_spec_dict(materialized_spec, workflow_id=workflow_id)
     payload = _event_payload(event)
     event_type = event["event_type"]
     parent_run_id = payload.get("run_id") or event.get("source_id")
@@ -689,15 +689,15 @@ def _submit_workflow_for_event(
     return result
 
 
-def _compiled_spec_dict(compiled_spec: Any, *, workflow_id: str) -> dict[str, Any]:
-    if isinstance(compiled_spec, str):
+def _compiled_spec_dict(materialized_spec: Any, *, workflow_id: str) -> dict[str, Any]:
+    if isinstance(materialized_spec, str):
         try:
-            compiled_spec = json.loads(compiled_spec)
+            materialized_spec = json.loads(materialized_spec)
         except (json.JSONDecodeError, TypeError) as exc:
-            raise ValueError(f"invalid compiled_spec for workflow {workflow_id}") from exc
-    if not isinstance(compiled_spec, dict):
-        raise ValueError(f"compiled_spec for workflow {workflow_id} must be a mapping")
-    return json.loads(json.dumps(compiled_spec))
+            raise ValueError(f"invalid materialized_spec for workflow {workflow_id}") from exc
+    if not isinstance(materialized_spec, dict):
+        raise ValueError(f"materialized_spec for workflow {workflow_id} must be a mapping")
+    return json.loads(json.dumps(materialized_spec))
 
 
 def _event_payload(event: dict[str, Any]) -> dict[str, Any]:

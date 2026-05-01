@@ -175,7 +175,7 @@ class TestFireExceptionHandling:
                 "integration_action": "explode",
                 "integration_args": "{}",
                 "definition": None,
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "workflow_name": None,
             },
             {
@@ -187,7 +187,7 @@ class TestFireExceptionHandling:
                 "integration_action": "send",
                 "integration_args": "{}",
                 "definition": None,
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "workflow_name": None,
             },
         ]
@@ -223,7 +223,7 @@ class TestFireExceptionHandling:
                 "integration_action": "send",
                 "integration_args": "{}",
                 "definition": None,
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "workflow_name": None,
             },
         ]
@@ -252,7 +252,7 @@ class TestFireExceptionHandling:
                 "integration_action": "ping",
                 "integration_args": "{}",
                 "definition": None,
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "workflow_name": None,
             },
         ]
@@ -280,7 +280,7 @@ class TestFireExceptionHandling:
                 "integration_action": "send",
                 "integration_args": "{}",
                 "definition": None,
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "workflow_name": None,
             },
         ]
@@ -314,7 +314,7 @@ class TestDepthLimiting:
                 "integration_action": "send",
                 "integration_args": "{}",
                 "definition": None,
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "workflow_name": None,
             }
         ]
@@ -349,7 +349,7 @@ class TestWorkflowTriggerCompat:
                 "integration_action": None,
                 "integration_args": "{}",
                 "definition": None,
-                "compiled_spec": '{"name": "test", "jobs": [{"label": "j1", "prompt": "do thing"}]}',
+                "materialized_spec": '{"name": "test", "jobs": [{"label": "j1", "prompt": "do thing"}]}',
                 "workflow_name": "Test WF",
             }
         ]

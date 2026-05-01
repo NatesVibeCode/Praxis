@@ -347,7 +347,7 @@ _RUNTIME_RELOAD_ALLOWLIST_PREFIXES: tuple[str, ...] = (
     "runtime.workflow_chain",
     "runtime.workflow._context_building",
     "runtime.capability.",     # resolver, plan envelope, lifecycle
-    "runtime.compile_reuse",
+    "runtime.materialize_reuse",
     "runtime.idempotency",
     "runtime.job_dependencies",
     "runtime.workflow_trigger_handlers",

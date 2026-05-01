@@ -16,7 +16,7 @@ from typing import TextIO
 from surfaces.cli._db import cli_repo_root, cli_sync_conn
 from surfaces.cli.mcp_tools import load_json_file, print_json, run_cli_tool
 from surfaces._workflow_database import workflow_database_authority_for_repo
-from runtime.spec_compiler import compile_prompt_launch_spec
+from runtime.spec_materializer import materialize_prompt_launch_spec as compile_prompt_launch_spec
 from runtime.workspace_paths import workflow_root
 
 _DETACHED_WAIT_ATTEMPTS = 30

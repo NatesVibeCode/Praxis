@@ -28,7 +28,10 @@ from pathlib import Path
 
 from runtime.canonical_manifests import generate_manifest, load_app_manifest_record, ManifestRuntimeBoundaryError
 from runtime.control_commands import submit_workflow_command
-from runtime.spec_compiler import PromptLaunchSpec, compile_prompt_launch_spec
+from runtime.spec_materializer import (
+    PromptLaunchSpec,
+    materialize_prompt_launch_spec as compile_prompt_launch_spec,
+)
 from surfaces.cli.mcp_tools import run_cli_tool
 
 _WORKFLOW_ROOT = str(Path(__file__).resolve().parent.parent.parent)

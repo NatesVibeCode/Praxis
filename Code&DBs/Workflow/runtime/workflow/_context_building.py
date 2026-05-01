@@ -20,7 +20,7 @@ from ._shared import (
     _slugify,
     _workflow_run_envelope,
 )
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
 from runtime.receipt_store import proof_metrics
 from runtime.scope_resolver import resolve_scope
 from runtime.execution_packet_authority import (
@@ -121,7 +121,7 @@ def _execution_manifest_for_snapshot(
         tool_allowlist = payload.get("tool_allowlist_json")
         verify_refs = payload.get("verify_refs_json")
         approved_bundle_refs = payload.get("approved_bundle_refs_json")
-        compiled_spec = payload.get("compiled_spec_json")
+        materialized_spec = payload.get("materialized_spec_json")
         policy_gates = payload.get("policy_gates_json")
         hardening_report = payload.get("hardening_report_json")
         if isinstance(tool_allowlist, dict):
@@ -134,8 +134,8 @@ def _execution_manifest_for_snapshot(
                 "approved_bundle_refs": _normalize_string_list(approved_bundle_refs),
                 "tool_allowlist": json.loads(json.dumps(tool_allowlist, default=str)),
                 "verify_refs": _normalize_string_list(verify_refs),
-                "compiled_spec": json.loads(json.dumps(compiled_spec, default=str))
-                if isinstance(compiled_spec, dict)
+                "materialized_spec": json.loads(json.dumps(materialized_spec, default=str))
+                if isinstance(materialized_spec, dict)
                 else {},
                 "policy_gates": json.loads(json.dumps(policy_gates, default=str))
                 if isinstance(policy_gates, dict)
@@ -1323,7 +1323,7 @@ def _build_execution_packet(
     authority_inputs = {
         "authority": authority,
         "workflow_definition": provenance.get("definition_row"),
-        "workflow_plan": provenance.get("compiled_spec_row"),
+        "workflow_plan": provenance.get("materialized_spec_row"),
         "workflow_row": provenance.get("workflow_row"),
         "spec_snapshot": raw_snapshot,
         "parent_run_id": parent_run_id,
@@ -1356,7 +1356,7 @@ def _build_execution_packet(
         "verify_refs": json.loads(json.dumps(verify_refs, default=str)),
         "authority_inputs": json_authority_inputs,
         "file_inputs": json_file_inputs,
-        "compile_provenance": {
+        "materialize_provenance": {
             "artifact_kind": "packet_lineage",
             "input_fingerprint": "",
             "surface_revision": "workflow_runtime.packet_submit",
@@ -1370,7 +1370,7 @@ def _build_execution_packet(
                 json.dumps(
                     {
                         "workflow_definition": provenance.get("definition_row"),
-                        "workflow_plan": provenance.get("compiled_spec_row"),
+                        "workflow_plan": provenance.get("materialized_spec_row"),
                         "workflow_row": _workflow_row_reuse_authority(provenance.get("workflow_row")),
                         "source_authority": provenance.get("authority_inputs")
                         if isinstance(provenance.get("authority_inputs"), dict)
@@ -1381,10 +1381,10 @@ def _build_execution_packet(
             ),
         },
     }
-    compile_provenance = dict(packet_payload["compile_provenance"])
+    materialize_provenance = dict(packet_payload["materialize_provenance"])
     compile_input_payload = {
-        "artifact_kind": compile_provenance["artifact_kind"],
-        "surface_revision": compile_provenance["surface_revision"],
+        "artifact_kind": materialize_provenance["artifact_kind"],
+        "surface_revision": materialize_provenance["surface_revision"],
         "definition_revision": definition_revision,
         "plan_revision": plan_revision,
         "workflow_id": workflow_id,
@@ -1394,19 +1394,19 @@ def _build_execution_packet(
         "reference_bindings": packet_payload["reference_bindings"],
         "capability_bindings": packet_payload["capability_bindings"],
         "verify_refs": packet_payload["verify_refs"],
-        "file_inputs": compile_provenance["file_inputs"],
-        "authority_inputs": compile_provenance["authority_inputs"],
+        "file_inputs": materialize_provenance["file_inputs"],
+        "authority_inputs": materialize_provenance["authority_inputs"],
     }
-    compile_provenance["input_fingerprint"] = canonical_hash(compile_input_payload)
-    packet_payload["compile_provenance"] = compile_provenance
-    artifact_store = CompileArtifactStore(conn)
+    materialize_provenance["input_fingerprint"] = canonical_hash(compile_input_payload)
+    packet_payload["materialize_provenance"] = materialize_provenance
+    artifact_store = MaterializeArtifactStore(conn)
     try:
         return artifact_store.persist_execution_packet_with_reuse(
             packet=packet_payload,
             authority_refs=[definition_revision, plan_revision],
             parent_artifact_ref=plan_revision,
         )
-    except CompileArtifactError as exc:
+    except MaterializeArtifactError as exc:
         raise RuntimeError(f"workflow packet lineage reuse failed closed: {exc}") from exc
 
 

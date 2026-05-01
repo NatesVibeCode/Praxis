@@ -19,7 +19,7 @@ interface BuildDefinitionRequest {
   title?: string;
   definition?: Record<string, unknown>;
   buildGraph?: BuildPayload['build_graph'] | null;
-  compiled_spec?: Record<string, unknown> | null;
+  materialized_spec?: Record<string, unknown> | null;
 }
 
 export interface CatalogReviewDecisionRequest {
@@ -59,7 +59,7 @@ async function _ensureWorkflowId(
   const created = await createWorkflow(title || 'Materialize draft', {
     definition: opts?.definition ?? {},
     buildGraph: opts?.buildGraph,
-    compiled_spec: opts?.compiled_spec,
+    materialized_spec: opts?.materialized_spec,
   });
   return created.id || created.workflow_id || '';
 }
@@ -160,7 +160,7 @@ export async function commitDefinition(
       name: opts?.title,
       definition: opts?.definition,
       build_graph: opts?.buildGraph,
-      compiled_spec: opts?.compiled_spec,
+      materialized_spec: opts?.materialized_spec,
     }),
   }, { timeoutMs: 20000 });
 }
@@ -205,14 +205,14 @@ export async function createWorkflow(
       name,
       definition: opts?.definition,
       build_graph: opts?.buildGraph,
-      compiled_spec: opts?.compiled_spec,
+      materialized_spec: opts?.materialized_spec,
     }),
   }, { timeoutMs: 15000 });
   // API returns { workflow: { id, name, ... } }
   return data.workflow || data;
 }
 
-export async function planDefinition(opts?: Omit<BuildDefinitionRequest, 'compiled_spec'>): Promise<any> {
+export async function planDefinition(opts?: Omit<BuildDefinitionRequest, 'materialized_spec'>): Promise<any> {
   if (opts?.workflowId) {
     return postBuildMutation(opts.workflowId, 'harden', {
       title: opts?.title,

@@ -107,7 +107,7 @@ def resolve_execution_packet_revisions(
         "jobs": canonicalized_jobs,
     }
 
-    from runtime.compile_reuse import stable_hash
+    from runtime.materialize_reuse import stable_hash
 
     synthetic_fields: list[str] = []
     if not definition_revision:
@@ -149,7 +149,7 @@ def build_execution_packet_lineage_payload(
     *,
     parent_artifact_ref: str,
 ) -> dict[str, Any]:
-    compile_provenance = _json_mapping(packet.get("compile_provenance"))
+    materialize_provenance = _json_mapping(packet.get("materialize_provenance"))
     lineage_payload: dict[str, Any] = {
         "definition_revision": str(packet.get("definition_revision") or "").strip(),
         "plan_revision": str(packet.get("plan_revision") or "").strip(),
@@ -165,9 +165,9 @@ def build_execution_packet_lineage_payload(
         "reference_bindings": _mapping_list(_json_clone(packet.get("reference_bindings"))),
         "capability_bindings": _mapping_list(_json_clone(packet.get("capability_bindings"))),
         "verify_refs": _string_list(_json_clone(packet.get("verify_refs"))),
-        "authority_inputs": _json_mapping(_json_clone(compile_provenance.get("authority_inputs"))),
-        "file_inputs": _json_mapping(_json_clone(compile_provenance.get("file_inputs"))),
-        "compile_provenance": compile_provenance,
+        "authority_inputs": _json_mapping(_json_clone(materialize_provenance.get("authority_inputs"))),
+        "file_inputs": _json_mapping(_json_clone(materialize_provenance.get("file_inputs"))),
+        "materialize_provenance": materialize_provenance,
     }
     lineage_hash = hashlib.sha256(
         json.dumps(lineage_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -186,11 +186,11 @@ def finalize_execution_packet(
     reuse_metadata: Mapping[str, Any],
 ) -> dict[str, Any]:
     finalized = dict(packet)
-    compile_provenance = _json_mapping(finalized.get("compile_provenance"))
-    compile_provenance["packet_lineage_revision"] = lineage_payload["packet_revision"]
-    compile_provenance["packet_lineage_hash"] = lineage_payload["packet_hash"]
-    compile_provenance["reuse"] = dict(reuse_metadata)
-    finalized["compile_provenance"] = compile_provenance
+    materialize_provenance = _json_mapping(finalized.get("materialize_provenance"))
+    materialize_provenance["packet_lineage_revision"] = lineage_payload["packet_revision"]
+    materialize_provenance["packet_lineage_hash"] = lineage_payload["packet_hash"]
+    materialize_provenance["reuse"] = dict(reuse_metadata)
+    finalized["materialize_provenance"] = materialize_provenance
     finalized["parent_artifact_ref"] = lineage_payload["packet_revision"]
     packet_hash = hashlib.sha256(
         json.dumps(finalized, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")

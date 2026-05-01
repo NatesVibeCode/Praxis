@@ -1860,7 +1860,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
             "id": row["id"],
             "name": row["name"],
             "definition": row["definition"] if include_definition else None,
-            "compiled_spec": row["compiled_spec"],
+            "materialized_spec": row["materialized_spec"],
         },
     )
     monkeypatch.setattr(workflow_commands, "_workflow_subsystems", lambda: _FakeSubsystems(object()))
@@ -1874,7 +1874,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
             "id": workflow_id or body.get("id") or "wf_probe",
             "name": body["name"],
             "definition": body["definition"],
-            "compiled_spec": body.get("compiled_spec"),
+            "materialized_spec": body.get("materialized_spec"),
         },
     )
     monkeypatch.setattr(
@@ -1884,7 +1884,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
             "id": new_workflow_id,
             "name": name or "Runtime Regression Probe",
             "definition": {"definition_revision": "def_runtime_regression_probe"},
-            "compiled_spec": {"definition_revision": "def_runtime_regression_probe"},
+            "materialized_spec": {"definition_revision": "def_runtime_regression_probe"},
             "workflow_id": workflow_id,
         },
     )
@@ -1893,7 +1893,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
         "id": "runtime_regression_probe",
         "name": "Runtime Regression Probe",
         "definition": {"definition_revision": "def_runtime_regression_probe"},
-        "compiled_spec": {
+        "materialized_spec": {
             "definition_revision": "def_runtime_regression_probe",
             "jobs": [{"label": "seed_contract"}],
         },
@@ -1908,7 +1908,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
     )
     created = json.loads(stdout.getvalue())
     assert created["workflow"]["id"] == "runtime_regression_probe"
-    assert created["workflow"]["compiled_spec"]["jobs"][0]["label"] == "seed_contract"
+    assert created["workflow"]["materialized_spec"]["jobs"][0]["label"] == "seed_contract"
 
     update_payload = {
         "name": "Runtime Regression Probe v2",
@@ -1958,7 +1958,7 @@ def test_records_frontdoor_supports_list_get_and_never_run(monkeypatch: pytest.M
         _workflow_to_dict=lambda row, include_definition=False: {
             "id": row["id"],
             "name": row["name"],
-            "has_spec": row.get("compiled_spec") is not None,
+            "has_spec": row.get("materialized_spec") is not None,
             "invocation_count": row.get("invocation_count", 0),
             "definition": row.get("definition") if include_definition else None,
         },
@@ -1980,7 +1980,7 @@ def test_records_frontdoor_supports_list_get_and_never_run(monkeypatch: pytest.M
                 "id": "wf_draft",
                 "name": "Draft Flow",
                 "definition": {"type": "pipeline"},
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "invocation_count": 0,
             }
         ]
@@ -1993,7 +1993,7 @@ def test_records_frontdoor_supports_list_get_and_never_run(monkeypatch: pytest.M
             "id": workflow_id,
             "name": "Draft Flow",
             "definition": {"type": "pipeline"},
-            "compiled_spec": None,
+            "materialized_spec": None,
             "invocation_count": 0,
         },
     )

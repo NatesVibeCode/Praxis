@@ -15,12 +15,12 @@ from runtime.execution_packet_authority import (
 from storage.postgres.compile_artifact_repository import PostgresCompileArtifactRepository
 
 
-class CompileArtifactError(RuntimeError):
+class MaterializeArtifactError(RuntimeError):
     """Raised when compile artifact persistence is unavailable or malformed."""
 
 
 @dataclass(frozen=True, slots=True)
-class CompileArtifactRecord:
+class MaterializeArtifactRecord:
     compile_artifact_id: str
     artifact_kind: str
     artifact_ref: str
@@ -57,7 +57,7 @@ class ExecutionPacketRecord:
     decision_ref: str
 
 
-class CompileArtifactStore:
+class MaterializeArtifactStore:
     """Explicit Postgres-backed compile artifact persistence."""
 
     def __init__(self, conn: Any) -> None:
@@ -65,7 +65,7 @@ class CompileArtifactStore:
 
     def _repository(self) -> PostgresCompileArtifactRepository:
         if self._conn is None:
-            raise CompileArtifactError("compile artifact persistence requires Postgres authority")
+            raise MaterializeArtifactError("compile artifact persistence requires Postgres authority")
         return PostgresCompileArtifactRepository(self._conn)
 
     def record_definition(
@@ -75,7 +75,7 @@ class CompileArtifactStore:
         authority_refs: list[str] | tuple[str, ...] = (),
         decision_ref: str,
         input_fingerprint: str | None = None,
-    ) -> CompileArtifactRecord:
+    ) -> MaterializeArtifactRecord:
         revision_ref = _require_text(definition.get("definition_revision"), field_name="definition_revision")
         return self._upsert(
             artifact_kind="definition",
@@ -96,7 +96,7 @@ class CompileArtifactStore:
         decision_ref: str,
         parent_artifact_ref: str | None = None,
         input_fingerprint: str | None = None,
-    ) -> CompileArtifactRecord:
+    ) -> MaterializeArtifactRecord:
         revision_ref = _require_text(plan.get("plan_revision"), field_name="plan_revision")
         return self._upsert(
             artifact_kind="plan",
@@ -117,7 +117,7 @@ class CompileArtifactStore:
         decision_ref: str,
         parent_artifact_ref: str | None = None,
         input_fingerprint: str | None = None,
-    ) -> CompileArtifactRecord:
+    ) -> MaterializeArtifactRecord:
         revision_ref = _packet_revision(packet)
         return self._upsert(
             artifact_kind="packet_lineage",
@@ -135,9 +135,9 @@ class CompileArtifactStore:
         *,
         artifact_kind: str,
         input_fingerprint: str,
-    ) -> CompileArtifactRecord | None:
+    ) -> MaterializeArtifactRecord | None:
         if self._conn is None:
-            raise CompileArtifactError("compile artifact reads require Postgres authority")
+            raise MaterializeArtifactError("compile artifact reads require Postgres authority")
 
         normalized_input_fingerprint = _require_text(
             input_fingerprint,
@@ -161,7 +161,7 @@ class CompileArtifactStore:
         revision_refs = {record.revision_ref for record in records}
         content_hashes = {record.content_hash for record in records}
         if len(revision_refs) != 1 or len(content_hashes) != 1:
-            raise CompileArtifactError(
+            raise MaterializeArtifactError(
                 "conflicting reusable compile artifacts detected for the same exact input fingerprint",
             )
         return records[0]
@@ -182,7 +182,7 @@ class CompileArtifactStore:
         packet_revision = _require_text(packet.get("packet_revision"), field_name="packet_revision")
         packet_version = int(packet.get("packet_version") or 0)
         if packet_version < 1:
-            raise CompileArtifactError("packet_version must be a positive integer")
+            raise MaterializeArtifactError("packet_version must be a positive integer")
         return self._upsert_execution_packet(
             packet=packet,
             definition_revision=definition_revision,
@@ -205,10 +205,10 @@ class CompileArtifactStore:
         authority_refs: list[str] | tuple[str, ...],
         payload: dict[str, Any],
         decision_ref: str,
-    ) -> CompileArtifactRecord:
+    ) -> MaterializeArtifactRecord:
         normalized_payload = _freeze_jsonish(payload)
         if not isinstance(normalized_payload, dict):
-            raise CompileArtifactError("compile artifact payload must be mapping-shaped")
+            raise MaterializeArtifactError("compile artifact payload must be mapping-shaped")
 
         payload_json = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"), default=str)
         content_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
@@ -226,7 +226,7 @@ class CompileArtifactStore:
             decision_ref=decision_ref,
         )
 
-        return CompileArtifactRecord(
+        return MaterializeArtifactRecord(
             compile_artifact_id=compile_artifact_id,
             artifact_kind=artifact_kind,
             artifact_ref=artifact_ref,
@@ -253,7 +253,7 @@ class CompileArtifactStore:
     ) -> ExecutionPacketRecord:
         normalized_payload = _freeze_jsonish(packet)
         if not isinstance(normalized_payload, dict):
-            raise CompileArtifactError("execution packet payload must be mapping-shaped")
+            raise MaterializeArtifactError("execution packet payload must be mapping-shaped")
 
         packet_hash = _require_text(packet.get("packet_hash"), field_name="packet_hash")
         execution_packet_id = f"execution_packet.{_require_text(normalized_payload.get('run_id'), field_name='run_id')}.{packet_revision}"
@@ -324,17 +324,17 @@ class CompileArtifactStore:
     ) -> dict[str, Any]:
         normalized_packet = _freeze_jsonish(packet)
         if not isinstance(normalized_packet, dict):
-            raise CompileArtifactError("execution packet payload must be mapping-shaped")
+            raise MaterializeArtifactError("execution packet payload must be mapping-shaped")
 
-        compile_provenance = normalized_packet.get("compile_provenance", {})
-        if not isinstance(compile_provenance, dict):
-            raise CompileArtifactError(
-                "execution packet compile_provenance must be mapping-shaped"
+        materialize_provenance = normalized_packet.get("materialize_provenance", {})
+        if not isinstance(materialize_provenance, dict):
+            raise MaterializeArtifactError(
+                "execution packet materialize_provenance must be mapping-shaped"
             )
 
         input_fingerprint = _require_text(
-            compile_provenance.get("input_fingerprint"),
-            field_name="compile_provenance.input_fingerprint",
+            materialize_provenance.get("input_fingerprint"),
+            field_name="materialize_provenance.input_fingerprint",
         )
         effective_parent_artifact_ref = _require_text(
             parent_artifact_ref or normalized_packet.get("plan_revision"),
@@ -352,7 +352,7 @@ class CompileArtifactStore:
         if reusable_lineage is not None:
             lineage_payload = _freeze_jsonish(reusable_lineage.payload)
             if not isinstance(lineage_payload, dict):
-                raise CompileArtifactError(
+                raise MaterializeArtifactError(
                     "reusable packet lineage payload must be mapping-shaped"
                 )
             reuse_metadata = {
@@ -399,7 +399,7 @@ class CompileArtifactStore:
         run_id: str,
     ) -> tuple[ExecutionPacketRecord, ...]:
         if self._conn is None:
-            raise CompileArtifactError("execution packet reads require Postgres authority")
+            raise MaterializeArtifactError("execution packet reads require Postgres authority")
 
         rows = self._repository().load_execution_packets_for_run(run_id=run_id)
         return tuple(_execution_packet_record_from_row(row) for row in (rows or []))
@@ -410,7 +410,7 @@ class CompileArtifactStore:
         packet_revision: str,
     ) -> ExecutionPacketRecord | None:
         if self._conn is None:
-            raise CompileArtifactError("execution packet reads require Postgres authority")
+            raise MaterializeArtifactError("execution packet reads require Postgres authority")
 
         normalized_packet_revision = _require_text(
             packet_revision,
@@ -431,7 +431,7 @@ class CompileArtifactStore:
             or len(definition_revisions) != 1
             or len(plan_revisions) != 1
         ):
-            raise CompileArtifactError(
+            raise MaterializeArtifactError(
                 "conflicting execution packet authority detected for the same packet_revision",
             )
         return records[0]
@@ -482,7 +482,7 @@ def _jsonish_object(value: Any) -> dict[str, Any]:
 def _require_text(value: object, *, field_name: str) -> str:
     text = value if isinstance(value, str) else ""
     if not text.strip():
-        raise CompileArtifactError(f"{field_name} is required")
+        raise MaterializeArtifactError(f"{field_name} is required")
     return text.strip()
 
 
@@ -524,41 +524,41 @@ def _compile_artifact_record_from_row(
     *,
     expected_artifact_kind: str,
     expected_input_fingerprint: str,
-) -> CompileArtifactRecord:
+) -> MaterializeArtifactRecord:
     payload = _jsonish_object(row.get("payload"))
     if not payload:
-        raise CompileArtifactError("reusable compile artifact payload must be a non-empty object")
+        raise MaterializeArtifactError("reusable compile artifact payload must be a non-empty object")
     artifact_kind = _require_text(row.get("artifact_kind"), field_name="artifact_kind")
     if artifact_kind != expected_artifact_kind:
-        raise CompileArtifactError(
+        raise MaterializeArtifactError(
             f"reusable compile artifact kind mismatch: expected {expected_artifact_kind}, got {artifact_kind}",
         )
     revision_ref = _require_text(row.get("revision_ref"), field_name="revision_ref")
     payload_revision = _payload_revision_ref(payload, artifact_kind=artifact_kind)
     if payload_revision != revision_ref:
-        raise CompileArtifactError(
+        raise MaterializeArtifactError(
             f"reusable compile artifact revision mismatch for {artifact_kind}: "
             f"payload={payload_revision} row={revision_ref}",
         )
     input_fingerprint = _require_text(row.get("input_fingerprint"), field_name="input_fingerprint")
     if input_fingerprint != expected_input_fingerprint:
-        raise CompileArtifactError(
+        raise MaterializeArtifactError(
             "reusable compile artifact input_fingerprint does not match the requested exact fingerprint",
         )
     payload_input_fingerprint = _resolve_input_fingerprint(payload, input_fingerprint=None)
     if payload_input_fingerprint != expected_input_fingerprint:
-        raise CompileArtifactError(
-            "reusable compile artifact payload is missing the expected compile_provenance input_fingerprint",
+        raise MaterializeArtifactError(
+            "reusable compile artifact payload is missing the expected materialize_provenance input_fingerprint",
         )
     normalized_payload = _freeze_jsonish(payload)
     payload_json = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"), default=str)
     content_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
     recorded_content_hash = _require_text(row.get("content_hash"), field_name="content_hash")
     if content_hash != recorded_content_hash:
-        raise CompileArtifactError(
+        raise MaterializeArtifactError(
             "reusable compile artifact payload hash does not match the recorded content_hash",
         )
-    return CompileArtifactRecord(
+    return MaterializeArtifactRecord(
         compile_artifact_id=_require_text(row.get("compile_artifact_id"), field_name="compile_artifact_id"),
         artifact_kind=artifact_kind,
         artifact_ref=_require_text(row.get("artifact_ref"), field_name="artifact_ref"),
@@ -582,7 +582,7 @@ def _payload_revision_ref(payload: dict[str, Any], *, artifact_kind: str) -> str
     }
     field_name = field_name_by_kind.get(artifact_kind)
     if field_name is None:
-        raise CompileArtifactError(f"unsupported compile artifact kind: {artifact_kind}")
+        raise MaterializeArtifactError(f"unsupported compile artifact kind: {artifact_kind}")
     return _require_text(payload.get(field_name), field_name=field_name)
 
 
@@ -593,20 +593,20 @@ def _resolve_input_fingerprint(
 ) -> str:
     if input_fingerprint is not None and str(input_fingerprint).strip():
         return str(input_fingerprint).strip()
-    compile_provenance = payload.get("compile_provenance")
-    if isinstance(compile_provenance, dict):
-        candidate = compile_provenance.get("input_fingerprint")
+    materialize_provenance = payload.get("materialize_provenance")
+    if isinstance(materialize_provenance, dict):
+        candidate = materialize_provenance.get("input_fingerprint")
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()
     packet_hash = payload.get("packet_hash")
     if isinstance(packet_hash, str) and packet_hash.strip():
         return packet_hash.strip()
-    raise CompileArtifactError("input_fingerprint is required")
+    raise MaterializeArtifactError("input_fingerprint is required")
 
 
 __all__ = [
-    "CompileArtifactError",
-    "CompileArtifactRecord",
-    "CompileArtifactStore",
+    "MaterializeArtifactError",
+    "MaterializeArtifactRecord",
+    "MaterializeArtifactStore",
     "ExecutionPacketRecord",
 ]

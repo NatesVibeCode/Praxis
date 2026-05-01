@@ -24,7 +24,7 @@ _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
-from runtime.spec_compiler import _build_packet_map_entry, PlanPacket
+from runtime.spec_materializer import _build_packet_map_entry, PlanPacket
 
 
 def _job(**overrides):

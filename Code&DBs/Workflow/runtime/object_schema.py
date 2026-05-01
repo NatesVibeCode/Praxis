@@ -69,15 +69,15 @@ def _compile_object_type(
     type_row: dict[str, Any],
     field_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    compiled_fields = [_normalize_field_row(row) for row in field_rows]
-    compiled_fields.sort(key=lambda item: (int(item.get("display_order") or 100), item["name"]))
+    materialized_fields = [_normalize_field_row(row) for row in field_rows]
+    materialized_fields.sort(key=lambda item: (int(item.get("display_order") or 100), item["name"]))
     return {
         "type_id": _text(type_row.get("type_id")),
         "name": _text(type_row.get("name")),
         "description": _text(type_row.get("description")),
         "icon": _text(type_row.get("icon")),
         "created_at": type_row.get("created_at"),
-        "fields": compiled_fields,
+        "fields": materialized_fields,
     }
 
 
@@ -144,10 +144,10 @@ def list_compiled_object_types(
             """,
             limit,
         )
-    compiled_types = [dict(row) for row in (type_rows or [])]
-    if not compiled_types:
+    materialized_types = [dict(row) for row in (type_rows or [])]
+    if not materialized_types:
         return []
-    compiled_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    materialized_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     if include_retired:
         field_rows = conn.execute(
             """
@@ -169,10 +169,10 @@ def list_compiled_object_types(
         )
     for row in field_rows or []:
         item = dict(row)
-        compiled_by_type[_text(item.get("type_id"))].append(item)
+        materialized_by_type[_text(item.get("type_id"))].append(item)
     return [
-        _compile_object_type(type_row, compiled_by_type.get(_text(type_row.get("type_id")), []))
-        for type_row in compiled_types
+        _compile_object_type(type_row, materialized_by_type.get(_text(type_row.get("type_id")), []))
+        for type_row in materialized_types
     ]
 
 

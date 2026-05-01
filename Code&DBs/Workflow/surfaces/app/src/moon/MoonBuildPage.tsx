@@ -713,7 +713,7 @@ function hasLocalDraftPayload(payload: BuildPayload | null): boolean {
   if ((payload.build_graph?.nodes?.length || 0) > 0) return true;
   if ((payload.build_graph?.edges?.length || 0) > 0) return true;
   if (payload.definition && Object.keys(payload.definition).length > 0) return true;
-  if (payload.compiled_spec && Object.keys(payload.compiled_spec).length > 0) return true;
+  if (payload.materialized_spec && Object.keys(payload.materialized_spec).length > 0) return true;
   return false;
 }
 
@@ -1084,7 +1084,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       payload
         ? {
             compiledSpec:
-              payload.compiled_spec_projection?.compiled_spec ?? payload.compiled_spec ?? null,
+              payload.materialized_spec_projection?.materialized_spec ?? payload.materialized_spec ?? null,
             buildIssues: payload.build_issues ?? null,
           }
         : null,
@@ -1740,7 +1740,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           };
         }
       }
-      const workflowName = (result as any)?.definition?.compiled_prose?.slice(0, 60) || '';
+      const workflowName = (result as any)?.definition?.materialized_prose?.slice(0, 60) || '';
       const asPayload = {
         ...result,
         workflow: wfId ? { id: wfId, name: workflowName } : null,

@@ -47,12 +47,12 @@ def _serialize_json(value: Any) -> Any:
 def _normalized_execution_manifest(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    if "tool_allowlist" in value and "verify_refs" in value and "compiled_spec" in value:
+    if "tool_allowlist" in value and "verify_refs" in value and "materialized_spec" in value:
         return _json_clone(value)
     tool_allowlist = value.get("tool_allowlist_json")
     if not isinstance(tool_allowlist, dict):
         return None
-    compiled_spec = value.get("compiled_spec_json")
+    materialized_spec = value.get("materialized_spec_json")
     policy_gates = value.get("policy_gates_json")
     hardening_report = value.get("hardening_report_json")
     return {
@@ -80,7 +80,7 @@ def _normalized_execution_manifest(value: Any) -> dict[str, Any] | None:
             )
             if coerce_text(item)
         ],
-        "compiled_spec": _json_clone(compiled_spec) if isinstance(compiled_spec, dict) else {},
+        "materialized_spec": _json_clone(materialized_spec) if isinstance(materialized_spec, dict) else {},
         "policy_gates": _json_clone(policy_gates) if isinstance(policy_gates, dict) else {},
         "hardening_report": _json_clone(hardening_report) if isinstance(hardening_report, dict) else {},
     }
@@ -118,7 +118,7 @@ def build_workflow_build_moment(
     *,
     conn: Any | None = None,
     definition: dict[str, Any] | None = None,
-    compiled_spec: dict[str, Any] | None = None,
+    materialized_spec: dict[str, Any] | None = None,
     build_bundle: dict[str, Any] | None = None,
     planning_notes: list[str] | None = None,
     intent_brief: dict[str, Any] | None = None,
@@ -131,7 +131,7 @@ def build_workflow_build_moment(
     workflow_id = coerce_text(row.get("id")) or None
     effective_definition = parse_json_field(definition if definition is not None else row.get("definition")) or {}
     effective_compiled_spec = parse_json_field(
-        compiled_spec if compiled_spec is not None else row.get("compiled_spec")
+        materialized_spec if materialized_spec is not None else row.get("materialized_spec")
     )
     effective_build_bundle = build_bundle if isinstance(build_bundle, dict) else None
 
@@ -142,17 +142,17 @@ def build_workflow_build_moment(
                 conn,
                 workflow_id=workflow_id,
                 definition=effective_definition,
-                compiled_spec=current_plan,
+                materialized_spec=current_plan,
             )
         else:
             effective_definition = apply_authority_bundle(
                 effective_definition,
-                compiled_spec=current_plan,
+                materialized_spec=current_plan,
             )
         effective_compiled_spec = current_plan
         effective_build_bundle = build_authority_bundle(
             effective_definition,
-            compiled_spec=current_plan,
+            materialized_spec=current_plan,
         )
         if not isinstance(intent_brief, dict):
             intent_brief = build_intent_brief(
@@ -182,13 +182,13 @@ def build_workflow_build_moment(
         definition=effective_definition,
         workflow_id=workflow_id,
         conn=conn,
-        compiled_spec=effective_compiled_spec,
+        materialized_spec=effective_compiled_spec,
     )
     reviewable_plan = build_reviewable_plan(
         definition=effective_definition,
         workflow_id=workflow_id,
         conn=conn,
-        compiled_spec=effective_compiled_spec,
+        materialized_spec=effective_compiled_spec,
         candidate_manifest=candidate_resolution_manifest,
     )
     review_state = effective_definition.get("review_state")
@@ -207,7 +207,7 @@ def build_workflow_build_moment(
         },
         "intent_brief": intent_brief or {},
         "definition": effective_definition,
-        "compiled_spec": effective_compiled_spec,
+        "materialized_spec": effective_compiled_spec,
         "planning_notes": planning_notes or [],
         "build_state": coerce_text(effective_build_bundle.get("projection_status", {}).get("state")) or "blocked",
         "build_blockers": blocking_issues,
@@ -218,7 +218,7 @@ def build_workflow_build_moment(
         "review_state": _serialize_json(review_state) if isinstance(review_state, dict) else {},
         "build_issues": effective_build_bundle.get("build_issues") or [],
         "projection_status": effective_build_bundle.get("projection_status") or {},
-        "compiled_spec_projection": effective_build_bundle.get("compiled_spec_projection"),
+        "materialized_spec_projection": effective_build_bundle.get("materialized_spec_projection"),
         "candidate_resolution_manifest": candidate_resolution_manifest,
         "reviewable_plan": reviewable_plan,
         "execution_manifest": execution_manifest,

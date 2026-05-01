@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactRecord
-import runtime.compile_index as compile_index
-import runtime.compiler as compiler
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactRecord
+import runtime.materialize_index as compile_index
+import runtime.materializer as compiler
 import runtime.compiler_semantic as compiler_semantic
 
 _REPO_ROOT = str(Path(__file__).resolve().parents[4])
@@ -20,7 +20,7 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[4])
 
 class _FakeConn:
     def execute(self, query: str, *args):
-        if "FROM compiler_route_hints" in query:
+        if "FROM materializer_route_hints" in query:
             return [
                 {"hint_text": "review", "route_slug": "auto/review"},
                 {"hint_text": "build", "route_slug": "auto/build"},
@@ -106,19 +106,19 @@ def _compile_index_snapshot(
     repo_fingerprint: str = "compile-index-fingerprint",
     freshness_state: str = "fresh",
     freshness_reason: str | None = None,
-) -> compile_index.CompileIndexSnapshot:
+) -> compile_index.MaterializeIndexSnapshot:
     source_counts = {
         "reference_catalog": len(catalog),
         "integration_registry": len(integrations),
         "object_types": len(object_types),
-        "compiler_route_hints": len(route_hints),
+        "materializer_route_hints": len(route_hints),
         "capability_catalog": len(capabilities),
     }
     source_fingerprints = {
         "reference_catalog": "catalog-fingerprint",
         "integration_registry": "integration-fingerprint",
         "object_types": "object-type-fingerprint",
-        "compiler_route_hints": "route-hint-fingerprint",
+        "materializer_route_hints": "route-hint-fingerprint",
         "capability_catalog": "capability-fingerprint",
     }
     repo_info = {
@@ -146,13 +146,13 @@ def _compile_index_snapshot(
         "reference_catalog": catalog,
         "integration_registry": integrations,
         "object_types": object_types,
-        "compiler_route_hints": [
+        "materializer_route_hints": [
             {"hint_text": hint, "route_slug": route}
             for hint, route in route_hints
         ],
         "capability_catalog": capabilities,
     }
-    return compile_index.CompileIndexSnapshot(
+    return compile_index.MaterializeIndexSnapshot(
         schema_version=1,
         compile_index_ref=compile_index_ref,
         compile_surface_revision=compile_surface_revision,
@@ -172,7 +172,7 @@ def _compile_index_snapshot(
         reference_catalog=tuple(catalog),
         integration_registry=tuple(integrations),
         object_types=tuple(object_types),
-        compiler_route_hints=route_hints,
+        materializer_route_hints=route_hints,
         capability_catalog=tuple(capabilities),
         payload=payload,
     )
@@ -206,11 +206,11 @@ _AUTHOR_RESPONSE = json.dumps(
 
 
 def _stage_response_for(task_type: str) -> str:
-    if task_type == "compile_synthesize":
+    if task_type == "materialize_synthesize":
         return _SYNTHESIZE_RESPONSE
-    if task_type == "compile_pill_match":
+    if task_type == "materialize_pill_match":
         return _PILL_MATCH_RESPONSE
-    if task_type == "compile_author":
+    if task_type == "materialize_author":
         return _AUTHOR_RESPONSE
     raise AssertionError(f"unexpected compile sub-task: {task_type}")
 
@@ -301,9 +301,9 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
     assert "effective_private_provider_job_catalog" in captured["catalog_query"]
     # Three sub-task dispatches in order: synthesize → pill_match → author
     assert [args[1] for args in captured["catalog_args_per_call"]] == [
-        "compile_synthesize",
-        "compile_pill_match",
-        "compile_author",
+        "materialize_synthesize",
+        "materialize_pill_match",
+        "materialize_author",
     ]
     # All resolve through the same matrix-gated runtime profile + adapter type
     for args in captured["catalog_args_per_call"]:
@@ -313,9 +313,9 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
     # Three LLM HTTP calls, one per stage
     assert len(captured["calls"]) == 3
     assert captured["request_task_types"] == [
-        "compile_synthesize",
-        "compile_pill_match",
-        "compile_author",
+        "materialize_synthesize",
+        "materialize_pill_match",
+        "materialize_author",
     ]
     # Final compiled artifact comes from the author stage
     assert result["title"] == "Support Mail"
@@ -335,7 +335,7 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
         captured["calls"].append((request.provider_slug, request.model_slug, task_type))
         # First route of the synthesize stage fails; failover should pick the next route
         if (
-            task_type == "compile_synthesize"
+            task_type == "materialize_synthesize"
             and request.model_slug == "deepseek/deepseek-v4-flash"
         ):
             raise RuntimeError("HTTP 429: upstream rate limited")
@@ -362,7 +362,7 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
             captured["catalog_args_per_call"].append(args)
             # synthesize gets two routes (so failover can be exercised); other stages get one
             task_type = args[1]
-            if task_type == "compile_synthesize":
+            if task_type == "materialize_synthesize":
                 return [
                     {"provider_slug": "openrouter", "model_slug": "deepseek/deepseek-v4-flash"},
                     {"provider_slug": "openrouter", "model_slug": "deepseek/deepseek-v4-pro"},
@@ -411,10 +411,10 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
     assert "effective_private_provider_job_catalog" in captured["catalog_query"]
     # synthesize first route fails, then succeeds on second; pill_match + author each one call
     assert captured["calls"] == [
-        ("openrouter", "deepseek/deepseek-v4-flash", "compile_synthesize"),
-        ("openrouter", "deepseek/deepseek-v4-pro", "compile_synthesize"),
-        ("openrouter", "openai/gpt-5.4-mini", "compile_pill_match"),
-        ("openrouter", "openai/gpt-5.4-mini", "compile_author"),
+        ("openrouter", "deepseek/deepseek-v4-flash", "materialize_synthesize"),
+        ("openrouter", "deepseek/deepseek-v4-pro", "materialize_synthesize"),
+        ("openrouter", "openai/gpt-5.4-mini", "materialize_pill_match"),
+        ("openrouter", "openai/gpt-5.4-mini", "materialize_author"),
     ]
     assert result["title"] == "Support Mail"
 
@@ -490,13 +490,13 @@ def test_compile_prose_reuses_definition_artifact_before_semantic_retrieval(monk
     )
     definition = first_result["definition"]
     payload_json = json.dumps(definition, sort_keys=True, separators=(",", ":"), default=str)
-    reusable = CompileArtifactRecord(
+    reusable = MaterializeArtifactRecord(
         compile_artifact_id="compile_artifact.definition.reused1234567890",
         artifact_kind="definition",
         artifact_ref=definition["definition_revision"],
         revision_ref=definition["definition_revision"],
         parent_artifact_ref=None,
-        input_fingerprint=definition["compile_provenance"]["input_fingerprint"],
+        input_fingerprint=definition["materialize_provenance"]["input_fingerprint"],
         content_hash=hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
         authority_refs=(),
         payload=definition,
@@ -504,7 +504,7 @@ def test_compile_prose_reuses_definition_artifact_before_semantic_retrieval(monk
     )
 
     monkeypatch.setattr(
-        compiler.CompileArtifactStore,
+        compiler.MaterializeArtifactStore,
         "load_reusable_artifact",
         lambda self, *, artifact_kind, input_fingerprint: reusable,
     )
@@ -526,7 +526,7 @@ def test_compile_prose_reuses_definition_artifact_before_semantic_retrieval(monk
         "reason": "definition.compile.exact_input_match",
     }
     assert result["reuse_provenance"]["decision"] == "reused"
-    assert result["reuse_provenance"]["input_fingerprint"] == definition["compile_provenance"]["input_fingerprint"]
+    assert result["reuse_provenance"]["input_fingerprint"] == definition["materialize_provenance"]["input_fingerprint"]
 
 
 def test_compile_prose_fails_on_malformed_reusable_definition_artifact(monkeypatch) -> None:
@@ -538,10 +538,10 @@ def test_compile_prose_fails_on_malformed_reusable_definition_artifact(monkeypat
         route_hints=(),
     )
     monkeypatch.setattr(
-        compiler.CompileArtifactStore,
+        compiler.MaterializeArtifactStore,
         "load_reusable_artifact",
         lambda self, *, artifact_kind, input_fingerprint: (_ for _ in ()).throw(
-            CompileArtifactError("reusable compile artifact payload hash does not match the recorded content_hash")
+            MaterializeArtifactError("reusable compile artifact payload hash does not match the recorded content_hash")
         ),
     )
 
@@ -564,10 +564,10 @@ def test_compile_prose_fails_when_definition_artifact_persistence_fails(monkeypa
     )
     monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
     monkeypatch.setattr(
-        compiler.CompileArtifactStore,
+        compiler.MaterializeArtifactStore,
         "record_definition",
         lambda self, **kwargs: (_ for _ in ()).throw(
-            CompileArtifactError("compile artifact write rejected")
+            MaterializeArtifactError("compile artifact write rejected")
         ),
     )
 
@@ -595,7 +595,7 @@ def test_compile_prose_refreshes_stale_compile_index_snapshot_when_unpinned(monk
         compiler,
         "load_compile_index_snapshot",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            compile_index.CompileIndexAuthorityError(
+            compile_index.MaterializeIndexAuthorityError(
                 "compile_index.snapshot_stale",
                 "compile index snapshot is stale",
                 details={"freshness_state": "stale"},
@@ -627,7 +627,7 @@ def test_compile_prose_preserves_stale_pinned_compile_index_failure(monkeypatch)
         compiler,
         "load_compile_index_snapshot",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            compile_index.CompileIndexAuthorityError(
+            compile_index.MaterializeIndexAuthorityError(
                 "compile_index.snapshot_stale",
                 "compile index snapshot is stale",
                 details={"freshness_state": "stale"},
@@ -764,12 +764,12 @@ def test_compile_prose_returns_plain_dict_when_llm_falls_back(monkeypatch) -> No
     assert definition["execution_setup"]["method"]["key"] == "grounded_research"
     assert definition["type"] == "operating_model"
     assert definition["source_prose"] == "Triage @gmail/search with review-agent for #ticket/status"
-    assert definition["compiled_prose"] == "Triage @gmail/search with review-agent for #ticket/status"
+    assert definition["materialized_prose"] == "Triage @gmail/search with review-agent for #ticket/status"
     assert isinstance(definition["references"], list)
     assert isinstance(definition["capabilities"], list)
     assert definition["definition_graph"]["version"] == 1
     assert any(node["kind"] == "draft_step" for node in definition["definition_graph"]["nodes"])
-    assert definition["definition_graph"]["metadata"]["compiled_prose"] == definition["compiled_prose"]
+    assert definition["definition_graph"]["metadata"]["materialized_prose"] == definition["materialized_prose"]
     assert all(isinstance(reference, dict) for reference in definition["references"])
     assert isinstance(definition["narrative_blocks"], list)
     assert isinstance(definition["draft_flow"], list)
@@ -820,7 +820,7 @@ def test_compile_prose_remains_bootstrap_only_when_projection_is_ready(monkeypat
         conn=_FakeConn(),
     )
 
-    assert result["compiled_spec"] is None
+    assert result["materialized_spec"] is None
     assert result["projection_status"]["state"] == "ready"
     assert [capability["slug"] for capability in result["definition"]["capabilities"]] == [
         "research/local-knowledge"
@@ -986,8 +986,8 @@ def test_compile_prose_sanitizes_duplicate_low_value_words_from_llm_output(monke
     result = compiler.compile_prose(prose, conn=_FakeConn())
     definition = result["definition"]
 
-    assert "and and" not in definition["compiled_prose"]
-    assert definition["compiled_prose"] == prose
+    assert "and and" not in definition["materialized_prose"]
+    assert definition["materialized_prose"] == prose
     assert result["refinement"]["applied"] is False
     assert result["refinement"]["status"] == "unchanged"
 
@@ -1033,8 +1033,8 @@ def test_compile_prose_rejects_llm_output_that_drops_critical_source_tokens(monk
     result = compiler.compile_prose(prose, conn=_FakeConn())
     definition = result["definition"]
 
-    assert definition["compiled_prose"] == prose
-    assert "UI" in definition["compiled_prose"]
+    assert definition["materialized_prose"] == prose
+    assert "UI" in definition["materialized_prose"]
     assert result["refinement"]["applied"] is False
     assert result["refinement"]["status"] == "fallback"
     assert result["refinement"]["reason"] == "unsafe_source_token_loss:ui"

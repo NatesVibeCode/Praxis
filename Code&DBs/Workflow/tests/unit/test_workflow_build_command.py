@@ -19,7 +19,7 @@ def test_handle_mutate_workflow_build_uses_runtime_build_moment() -> None:
     runtime_result = {
         "row": {"id": "wf_build", "name": "Build Workflow", "version": 1},
         "definition": {"type": "operating_model"},
-        "compiled_spec": {"compiled": True},
+        "materialized_spec": {"compiled": True},
         "build_bundle": {"projection_status": {"state": "ready"}},
         "planning_notes": ["ready"],
         "intent_brief": {"goal": "Do the thing"},
@@ -49,7 +49,7 @@ def test_handle_mutate_workflow_build_uses_runtime_build_moment() -> None:
         runtime_result["row"],
         conn=conn,
         definition=runtime_result["definition"],
-        compiled_spec=runtime_result["compiled_spec"],
+        materialized_spec=runtime_result["materialized_spec"],
         build_bundle=runtime_result["build_bundle"],
         planning_notes=runtime_result["planning_notes"],
         intent_brief=runtime_result["intent_brief"],
