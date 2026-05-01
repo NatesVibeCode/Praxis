@@ -3,6 +3,7 @@ import { APP_CONFIG } from '../config';
 import praxisSymbol from '../assets/praxis-symbol-inverse.svg';
 import { MoonWorkflowSilhouette } from './MoonWorkflowSilhouette';
 import { isAbortError } from '../shared/request';
+import { ReceiptCard } from '../primitives';
 import './dashboard.css';
 
 interface Workflow {
@@ -911,27 +912,39 @@ export function Dashboard({
                 <span>{sealedRunCount} sealed</span>
               </div>
 
-              <div className="dash-receipt dash-receipt--allow">
-                <div className="dash-receipt__row"><span>action</span><strong>workflow.inventory</strong></div>
-                <div className="dash-receipt__row"><span>live</span><strong>{summary.workflow_counts.live}</strong></div>
-                <div className="dash-receipt__row"><span>saved</span><strong>{summary.workflow_counts.saved}</strong></div>
-                <div className="dash-receipt__row"><span>drafts</span><strong>{summary.workflow_counts.draft}</strong></div>
-                <div className="dash-receipt__row dash-receipt__row--ok"><span>result</span><strong>hydrated · visible</strong></div>
-              </div>
+              <ReceiptCard
+                className="dash-receipt-card dash-receipt-card--allow"
+                state="sealed"
+                title="workflow.inventory"
+                meta="hydrated"
+                fields={[
+                  { key: 'live', value: summary.workflow_counts.live },
+                  { key: 'saved', value: summary.workflow_counts.saved },
+                  { key: 'drafts', value: summary.workflow_counts.draft },
+                  { key: 'result', value: 'hydrated · visible' },
+                ]}
+                seal={`${sealedRunCount} sealed`}
+              />
 
               <button
                 type="button"
-                className="dash-receipt dash-receipt--verify"
+                className="dash-receipt-button"
                 onClick={onOpenCosts}
                 title="View token spend (stays under Overview)"
               >
-                <div className="dash-receipt__row"><span>verifier</span><strong>dashboard.health</strong></div>
-                <div className="dash-receipt__row"><span>pass</span><strong>{passRateLabel}</strong></div>
-                <div className="dash-receipt__row"><span>runs</span><strong>{summary.runs_24h}</strong></div>
-                <div className="dash-receipt__row"><span>spend</span><strong>{spendLabel}</strong></div>
-                <div className={`dash-receipt__row dash-receipt__row--${health.tone === 'danger' ? 'warn' : 'ok'}`}>
-                  <span>state</span><strong>{health.label}</strong>
-                </div>
+                <ReceiptCard
+                  className="dash-receipt-card dash-receipt-card--verify"
+                  state={health.tone === 'danger' ? 'refused' : 'verify'}
+                  title="dashboard.health"
+                  meta="verifier"
+                  fields={[
+                    { key: 'pass', value: passRateLabel },
+                    { key: 'runs', value: summary.runs_24h },
+                    { key: 'spend', value: spendLabel },
+                    { key: 'state', value: health.label },
+                  ]}
+                  seal="view spend"
+                />
               </button>
             </div>
           </section>

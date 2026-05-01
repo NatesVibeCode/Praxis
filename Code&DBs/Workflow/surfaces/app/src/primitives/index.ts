@@ -115,4 +115,5 @@ export type {
   WizardStep,
   WorkflowBarProps,
 } from './StructuralPrimitives';
+export type { ReceiptState } from '../primitives-prx';
 export { Toast, useToast } from './Toast';

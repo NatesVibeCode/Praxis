@@ -2458,62 +2458,35 @@ button.dash-hero-card__stat--link:focus-visible {
   margin-bottom: 10px;
 }
 
-.dash-receipt {
-  display: grid;
-  gap: 4px;
+.dash-receipt-card {
   width: 100%;
-  padding: 14px 16px;
-  border: 1px solid var(--dash-border-faint);
   border-radius: 8px;
-  background: var(--surface-muted);
-  color: var(--text);
-  text-align: left;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.45;
 }
 
-button.dash-receipt {
+.dash-receipt-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
+  text-align: left;
 }
 
-button.dash-receipt:hover {
-  background: rgba(255, 255, 255, 0.045);
+.dash-receipt-button:hover .dash-receipt-card {
+  filter: brightness(1.08);
 }
 
-.dash-receipt--allow {
+.dash-receipt-card--allow {
   border-color: rgba(63, 185, 80, 0.3);
 }
 
-.dash-receipt--verify {
+.dash-receipt-card--verify {
   border-color: var(--dash-border-soft);
 }
 
-.dash-receipt__row {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 12px;
-}
-
-.dash-receipt__row span {
-  color: var(--dash-text-subtle);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.dash-receipt__row strong {
-  min-width: 0;
-  color: var(--text);
-  font-weight: 500;
+.dash-receipt-card .v {
   overflow-wrap: anywhere;
-}
-
-.dash-receipt__row--ok strong {
-  color: #7ee787;
-}
-
-.dash-receipt__row--warn strong {
-  color: var(--warning);
 }
 
 .dash-board {
