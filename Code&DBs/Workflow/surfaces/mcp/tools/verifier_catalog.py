@@ -48,6 +48,15 @@ def tool_praxis_verifier_runs_list(params: dict) -> dict:
     )
 
 
+def tool_praxis_verifier_run(params: dict) -> dict:
+    payload = {key: value for key, value in params.items() if value is not None}
+    return execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name="verifier.run",
+        payload=payload,
+    )
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_verifier_catalog": (
         tool_praxis_verifier_catalog,
@@ -87,6 +96,85 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "Maximum verifiers to return. Defaults to 100, "
                             "capped at 500 (the registry should never grow "
                             "beyond a few dozen rows in practice)."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    ),
+    "praxis_verifier_run": (
+        tool_praxis_verifier_run,
+        {
+            "kind": "write",
+            "operation_names": ["verifier.run"],
+            "description": (
+                "Run a registered verifier against a target. Records a "
+                "verification_runs row, returns the outcome (status: "
+                "passed / failed / error, plus outputs, duration_ms, "
+                "suggested_healer_ref). The verifier_ref must be one "
+                "the registry knows (use praxis_verifier_catalog to "
+                "list). target_kind / target_ref must match what the "
+                "verifier accepts: 'platform' for system-wide checks "
+                "(target_ref typically empty), 'path' for file-targeted "
+                "verifiers like pytest_file (target_ref = absolute "
+                "path), 'receipt' / 'run' for receipt or run targets. "
+                "promote_bug defaults to FALSE — leave that on only "
+                "for canonical scheduler runs that should auto-file "
+                "control-plane bugs on failure."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["verifier_ref"],
+                "properties": {
+                    "verifier_ref": {
+                        "type": "string",
+                        "description": (
+                            "Verifier authority ref to run "
+                            "(e.g. verifier.job.python.pytest_file)."
+                        ),
+                    },
+                    "target_kind": {
+                        "type": "string",
+                        "enum": ["platform", "receipt", "run", "path"],
+                        "default": "platform",
+                        "description": (
+                            "Target kind. Must match what the verifier "
+                            "accepts."
+                        ),
+                    },
+                    "target_ref": {
+                        "type": "string",
+                        "default": "",
+                        "description": (
+                            "Target reference — absolute path for "
+                            "path-kind, receipt_id for receipt-kind, "
+                            "run_id for run-kind, or empty for platform."
+                        ),
+                    },
+                    "inputs": {
+                        "type": "object",
+                        "description": (
+                            "Per-call input overrides merged onto the "
+                            "verifier's default_inputs. e.g. {\"path\": "
+                            "\"/abs/path.py\"} for path-kind verifiers."
+                        ),
+                    },
+                    "record_run": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Write the verification_runs row. False = "
+                            "dry-run, no ledger entry."
+                        ),
+                    },
+                    "promote_bug": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "On failed/error runs, file/promote a "
+                            "control-plane bug. Default False — most "
+                            "callers should not auto-file."
                         ),
                     },
                 },

@@ -197,6 +197,112 @@ def test_runs_tools_dict_shape() -> None:
     assert schema.get("additionalProperties") is False
 
 
+# =====================================================================
+# praxis_verifier_run (the headline write primitive)
+# =====================================================================
+
+
+def _stub_run_gateway(captured: dict[str, Any]) -> Any:
+    def stub(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "ok": True,
+            "operation": "verifier.run.completed",
+            "verifier_ref": "verifier.job.python.py_compile",
+            "verification_run_id": "verification_run:abc123",
+            "status": "passed",
+            "target_kind": "path",
+            "target_ref": "/abs/path.py",
+            "duration_ms": 74,
+            "suggested_healer_ref": None,
+            "bug_id": None,
+            "event_payload": {"passed": True, "verifier_ref": "verifier.job.python.py_compile"},
+        }
+
+    return stub
+
+
+def test_run_tool_dispatches_to_verifier_run(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(verifier_catalog, "execute_operation_from_env", _stub_run_gateway(captured))
+    monkeypatch.setattr(verifier_catalog, "workflow_database_env", lambda: object())
+
+    result = verifier_catalog.tool_praxis_verifier_run({
+        "verifier_ref": "verifier.job.python.py_compile",
+        "target_kind": "path",
+        "target_ref": "/abs/path.py",
+        "inputs": {"path": "/abs/path.py"},
+        "record_run": True,
+        "promote_bug": False,
+    })
+
+    assert captured["operation_name"] == "verifier.run"
+    assert captured["payload"]["verifier_ref"] == "verifier.job.python.py_compile"
+    assert captured["payload"]["target_kind"] == "path"
+    assert captured["payload"]["promote_bug"] is False
+    assert result["ok"] is True
+    assert result["status"] == "passed"
+
+
+def test_run_tool_drops_none_filters(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(verifier_catalog, "execute_operation_from_env", _stub_run_gateway(captured))
+    monkeypatch.setattr(verifier_catalog, "workflow_database_env", lambda: object())
+
+    verifier_catalog.tool_praxis_verifier_run({
+        "verifier_ref": "verifier.platform.schema_authority",
+        "target_kind": None,
+        "inputs": None,
+        "record_run": True,
+    })
+
+    payload = captured["payload"]
+    assert payload["verifier_ref"] == "verifier.platform.schema_authority"
+    assert "target_kind" not in payload
+    assert "inputs" not in payload
+    assert payload["record_run"] is True
+
+
+def test_run_tools_dict_shape() -> None:
+    tools = verifier_catalog.TOOLS
+    assert "praxis_verifier_run" in tools
+    handler, meta = tools["praxis_verifier_run"]
+    assert callable(handler)
+    assert meta["kind"] == "write"
+    assert meta["operation_names"] == ["verifier.run"]
+    schema = meta["inputSchema"]
+    assert schema["required"] == ["verifier_ref"]
+    props = schema["properties"]
+    assert set(props.keys()) == {
+        "verifier_ref", "target_kind", "target_ref", "inputs", "record_run", "promote_bug",
+    }
+    assert props["target_kind"]["enum"] == ["platform", "receipt", "run", "path"]
+    assert props["target_kind"]["default"] == "platform"
+    assert props["promote_bug"]["default"] is False
+    assert props["record_run"]["default"] is True
+    assert schema.get("additionalProperties") is False
+
+
+def test_run_command_model_requires_verifier_ref() -> None:
+    """The Pydantic command model rejects calls without verifier_ref."""
+    from runtime.operations.commands.verifier_run import VerifierRunCommand
+    import pytest as _pytest
+
+    # Valid call
+    cmd = VerifierRunCommand(verifier_ref="verifier.platform.schema_authority")
+    assert cmd.target_kind == "platform"  # default
+    assert cmd.record_run is True
+    assert cmd.promote_bug is False
+
+    # Missing required verifier_ref
+    with _pytest.raises(Exception):
+        VerifierRunCommand()  # type: ignore[call-arg]
+
+    # Invalid target_kind
+    with _pytest.raises(Exception):
+        VerifierRunCommand(verifier_ref="x", target_kind="not-a-kind")  # type: ignore[arg-type]
+
+
 def test_query_runs_list_model_validates_enums() -> None:
     """The Pydantic input model rejects out-of-enum values."""
     from runtime.operations.queries.verifier_catalog import QueryVerifierRunsList

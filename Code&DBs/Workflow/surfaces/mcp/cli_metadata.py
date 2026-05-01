@@ -2171,6 +2171,55 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_verifier_run": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="verifier-run",
+        when_to_use=(
+            "Run a registered verifier against a target as a deterministic "
+            "review gate — receipt-backed, replayable, links to a "
+            "verification_runs row. Use this from a workflow packet "
+            "(integration_id=praxis_verifier_run, integration_action=run) "
+            "to express a verify step without going through bug-resolve, "
+            "or interactively to confirm a verifier passes against a "
+            "specific target."
+        ),
+        when_not_to_use=(
+            "Do not use it for fuzzy LLM-driven review — verifiers are "
+            "deterministic. For control-plane scheduler runs that should "
+            "auto-file bugs on failure, set promote_bug=True; otherwise "
+            "leave the default (False)."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Compile-check a Python file",
+                {
+                    "verifier_ref": "verifier.job.python.py_compile",
+                    "target_kind": "path",
+                    "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/runtime/example.py",
+                    "inputs": {"path": "/Users/nate/Praxis/Code&DBs/Workflow/runtime/example.py"},
+                },
+            ),
+            _example(
+                "Run pytest on one test file",
+                {
+                    "verifier_ref": "verifier.job.python.pytest_file",
+                    "target_kind": "path",
+                    "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_smoke.py",
+                    "inputs": {"path": "/Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_smoke.py"},
+                },
+            ),
+            _example(
+                "Platform schema authority check",
+                {
+                    "verifier_ref": "verifier.platform.schema_authority",
+                    "target_kind": "platform",
+                    "target_ref": "",
+                },
+            ),
+        ],
+    ),
     "praxis_verifier_runs_list": _tool(
         surface="evidence",
         tier="stable",
