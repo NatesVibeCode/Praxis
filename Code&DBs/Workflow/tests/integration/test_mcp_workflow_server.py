@@ -1011,7 +1011,7 @@ class TestToolsListing:
         required = {
             "praxis_workflow", "praxis_workflow_validate", "praxis_status_snapshot", "praxis_metrics_reset", "praxis_query",
             "praxis_bugs", "praxis_health", "praxis_recall", "praxis_ingest",
-            "praxis_graph", "praxis_wave", "praxis_issue_backlog", "praxis_run_status",
+            "praxis_graph", "praxis_solution", "praxis_issue_backlog", "praxis_run_status",
         }
         assert required <= names, f"Missing required tools: {required - names}"
 
@@ -1714,43 +1714,16 @@ class TestDagIngest:
         assert "error" in result
 
 
-class TestPraxisWave:
-    def test_observe_empty(self):
-        result = _call_tool("praxis_wave", {"action": "observe"})
-        assert "orch_id" in result
-        assert result["waves"] == []
+class TestPraxisSolution:
+    def test_submit_requires_coordination_path(self):
+        result = _call_tool("praxis_solution", {"action": "submit"})
+        assert result["ok"] is False
+        assert result["error_code"] == "workflow_solution.coordination_path.required"
 
-    def test_wave_lifecycle(self):
-        # Add a wave directly via the orchestrator
-        orch = server._subs.get_wave_orchestrator()
-        orch.add_wave("wave-1", [
-            {"label": "j1"},
-            {"label": "j2", "depends_on": ["j1"]},
-        ])
-
-        # Observe
-        state = _call_tool("praxis_wave", {"action": "observe"})
-        assert len(state["waves"]) == 1
-        assert state["waves"][0]["wave_id"] == "wave-1"
-
-        # Start
-        started = _call_tool("praxis_wave", {"action": "start", "wave_id": "wave-1"})
-        assert started["started"] is True
-
-        # Next runnable
-        nxt = _call_tool("praxis_wave", {"action": "next", "wave_id": "wave-1"})
-        assert "j1" in nxt["runnable_jobs"]
-        assert "j2" not in nxt["runnable_jobs"]  # depends on j1
-
-        # Record j1 success
-        recorded = _call_tool("praxis_wave", {
-            "action": "record", "wave_id": "wave-1", "jobs": "j1:pass",
-        })
-        assert recorded["recorded"][0]["succeeded"] is True
-
-        # Now j2 should be runnable
-        nxt2 = _call_tool("praxis_wave", {"action": "next", "wave_id": "wave-1"})
-        assert "j2" in nxt2["runnable_jobs"]
+    def test_unknown_action_is_structured(self):
+        result = _call_tool("praxis_solution", {"action": "nonsense"})
+        assert result["ok"] is False
+        assert result["error_code"] == "workflow_solution.unknown_action"
 
 
 class TestDagDispatchDryRun:

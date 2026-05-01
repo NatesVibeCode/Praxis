@@ -258,6 +258,67 @@ CHAT_TOOLS: list[dict[str, Any]] = [
             "required": [],
         },
     },
+    {
+        "name": "praxis_search",
+        "description": (
+            "Federated search across code, decisions, knowledge, bugs, receipts, "
+            "git history, files, and DB. Use FIRST when the user asks 'where is X', "
+            "'what's filed about Y', or 'has anyone done Z'. Returns topic-anchor "
+            "clusters bundling matches per source. Modes: auto (default — /regex/ → "
+            "regex, 'quoted' → exact, prose → semantic), semantic, exact, regex."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "mode": {"type": "string", "description": "auto | semantic | exact | regex", "enum": ["auto", "semantic", "exact", "regex"]},
+                "sources": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["code", "decisions", "knowledge", "bugs", "receipts", "git_history", "files", "research", "db"]},
+                    "description": "Sources to search. Default: code+decisions+knowledge+bugs.",
+                },
+                "limit": {"type": "integer", "description": "Max results (default 8)"},
+                "shape": {"type": "string", "enum": ["match", "context", "full"], "description": "Result shape (default 'context' = ±N lines)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "praxis_agent_describe",
+        "description": (
+            "Read the full envelope for an agent_principal: scope, integrations, "
+            "standing orders, recent wakes, recent delegations, recent tool gaps. "
+            "Use to audit your own activity (when this conversation is pinned to "
+            "an agent) or to inspect another agent's recent state."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent_principal_ref": {"type": "string", "description": "Durable agent identity, e.g. 'agent.exec.nate'"},
+                "history_limit": {"type": "integer", "description": "How many recent wakes/delegations/gaps to return (default 10)"},
+            },
+            "required": ["agent_principal_ref"],
+        },
+    },
+    {
+        "name": "praxis_tool_gap_list",
+        "description": (
+            "List open / triaged / shipped agent tool gaps — the queue of "
+            "capabilities Praxis is missing as reported by working agents. "
+            "Use to surface what tooling to build next."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reporter_agent_ref": {"type": "string", "description": "Filter to one agent's reports"},
+                "severity": {"type": "string", "enum": ["low", "medium", "high", "blocking"]},
+                "status": {"type": "string", "enum": ["open", "triaged", "planned", "shipped", "declined", "duplicate"], "description": "Default: open"},
+                "missing_capability": {"type": "string"},
+                "limit": {"type": "integer", "description": "Default 50"},
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -491,6 +552,12 @@ def execute_tool(
         return _moon_suggest_next(arguments, pg_conn, selection_context)
     elif name == "moon_launch":
         return _moon_launch(arguments, pg_conn, selection_context)
+    elif name == "praxis_search":
+        return _dispatch_op(pg_conn, "search.federated", dict(arguments or {}))
+    elif name == "praxis_agent_describe":
+        return _dispatch_op(pg_conn, "agent_principal.describe", dict(arguments or {}))
+    elif name == "praxis_tool_gap_list":
+        return _dispatch_op(pg_conn, "agent_tool_gap.list", dict(arguments or {}))
     raise ValueError(f"Unknown tool: {name}")
 
 

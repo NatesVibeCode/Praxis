@@ -62,6 +62,7 @@ import {
   MOON_LAYOUT_CSS_VARS,
 } from './moonLayout';
 import { Toast, useToast } from '../primitives/Toast';
+import { Button } from '../primitives';
 import { UiActionFeed } from '../control/UiActionFeed';
 import {
   registerUiActionUndoExecutor,
@@ -2709,19 +2710,22 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                         )}
                       </div>
                     )}
-                    <div className="moon-compose__actions">
-                      <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !compileSource.trim()}>
-                        {compiling ? 'Composing workflow...' : 'Compose workflow'}
-                      </button>
-                      <button
-                        type="button"
-                        className="moon-compose__secondary-link"
+                    <div className="moon-compose__actions prx-button-row">
+                      <Button
+                        tone="primary"
+                        size="lg"
+                        onClick={handleCompile}
+                        disabled={compiling || !compileSource.trim()}
+                      >
+                        {compiling ? 'Composing workflow…' : 'Compose workflow'}
+                      </Button>
+                      <Button
+                        tone="ghost"
                         onClick={() => dispatch({ type: 'EMPTY_PICK_TRIGGER' })}
                         disabled={compiling}
-                        style={{ marginLeft: 16, background: 'none', border: 'none', color: 'var(--fg3)', cursor: compiling ? 'not-allowed' : 'pointer', fontSize: 13, textDecoration: 'underline', opacity: compiling ? 0.4 : 1 }}
                       >
                         or build from scratch (skip LLM)
-                      </button>
+                      </Button>
                     </div>
                     {compiling && (
                       <div className="moon-compose__progress" aria-live="polite" style={{

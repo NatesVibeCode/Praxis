@@ -227,6 +227,7 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
             },
         ],
         "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
+        "policy_disabled_adapters": [],
         "provider_registry_status": "loaded_from_db",
         "provider_registry_authority_available": True,
         "provider_registry_fallback_active": False,
@@ -418,6 +419,13 @@ def test_tool_dag_health_lists_policy_disabled_adapters_without_degrading(monkey
                     "policy_reason": "provider temporarily disabled",
                 }
             ],
+        }
+    ]
+    assert result["transport_support_summary"]["policy_disabled_adapters"] == [
+        {
+            "provider_slug": "openai",
+            "adapter_type": "llm_task",
+            "policy_reason": "provider temporarily disabled",
         }
     ]
 

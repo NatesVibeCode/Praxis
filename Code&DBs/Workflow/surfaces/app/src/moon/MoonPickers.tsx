@@ -621,7 +621,7 @@ export function MoonJsonEditor({
     onChange(`${value.replace(/\s+$/, '')}\n${tpl.snippet}`);
   };
 
-  const statusColor = status.kind === 'error' ? '#ff7d7d' : status.kind === 'valid' ? 'rgba(180,220,180,0.9)' : 'rgba(255,255,255,0.4)';
+  const statusColor = status.kind === 'error' ? 'var(--danger)' : status.kind === 'valid' ? 'var(--success)' : 'var(--text-muted)';
   const statusText =
     status.kind === 'empty'
       ? '—'

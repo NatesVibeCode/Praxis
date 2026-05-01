@@ -1,4 +1,4 @@
-import React, { type AriaRole, type CSSProperties, type HTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import React, { type AriaRole, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
 import {
   chipProps,
   gateProps,
@@ -455,5 +455,147 @@ export function LedDot({ tone, className = '', style }: LedDotProps) {
       style={style}
       data-testid="prx-led-dot"
     />
+  );
+}
+
+// ── Button ─────────────────────────────────────────────────────
+// Single source of truth for buttons. Tones: primary | ghost | danger.
+// Sizes: sm | md (default) | lg. Toggle state via `active` prop.
+export type ButtonTone = 'default' | 'primary' | 'ghost' | 'danger';
+export type ButtonSize = 'sm' | 'md' | 'lg';
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  tone?: ButtonTone;
+  size?: ButtonSize;
+  active?: boolean;
+}
+
+export function Button({
+  tone = 'default',
+  size = 'md',
+  active,
+  className = '',
+  type,
+  children,
+  ...rest
+}: ButtonProps) {
+  const cls = className ? `prx-button ${className}` : 'prx-button';
+  return (
+    <button
+      type={type ?? 'button'}
+      className={cls}
+      data-tone={tone === 'default' ? undefined : tone}
+      data-size={size === 'md' ? undefined : size}
+      data-active={active ? 'true' : undefined}
+      data-testid="prx-button"
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── FrameCard ──────────────────────────────────────────────────
+// Slot-based panel shell. Use for sidebar panels, workflow cards,
+// quadrant frames, anywhere a bordered card with a labelled header
+// is needed. The tone prop adds a left-edge accent ribbon.
+export type FrameCardTone = 'default' | 'ok' | 'warn' | 'err' | 'live';
+
+export interface FrameCardProps {
+  eyebrow?: ReactNode;
+  title?: ReactNode;
+  count?: ReactNode;
+  action?: ReactNode;
+  footer?: ReactNode;
+  tone?: FrameCardTone;
+  className?: string;
+  style?: CSSProperties;
+  bodyClassName?: string;
+  tight?: boolean;
+  children?: ReactNode;
+}
+
+export function FrameCard({
+  eyebrow,
+  title,
+  count,
+  action,
+  footer,
+  tone = 'default',
+  className = '',
+  style,
+  bodyClassName,
+  tight,
+  children,
+}: FrameCardProps) {
+  const cls = className ? `prx-card ${className}` : 'prx-card';
+  const hasHead = eyebrow !== undefined || title !== undefined || count !== undefined || action !== undefined;
+  const bodyCls = ['prx-card__body', tight ? 'prx-card__body--tight' : '', bodyClassName ?? '']
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <div
+      className={cls}
+      style={style}
+      data-tone={tone === 'default' ? undefined : tone}
+      data-testid="prx-frame-card"
+    >
+      {hasHead && (
+        <div className="prx-card__head">
+          <div className="prx-card__head-copy">
+            {eyebrow !== undefined && <span className="eyebrow">{eyebrow}</span>}
+            {title !== undefined && <span className="title">{title}</span>}
+          </div>
+          {(count !== undefined || action !== undefined) && (
+            <div className="prx-card__head-tail">
+              {count !== undefined && <span className="prx-card__count">{count}</span>}
+              {action}
+            </div>
+          )}
+        </div>
+      )}
+      {children !== undefined && <div className={bodyCls}>{children}</div>}
+      {footer !== undefined && <div className="prx-card__foot">{footer}</div>}
+    </div>
+  );
+}
+
+// ── SourceChip ─────────────────────────────────────────────────
+// Source-option pill with palette-tone dot. Replaces inline-color
+// chips in SourceOptionPills and surface tabs.
+export type SourceChipTone = 'default' | 'ok' | 'warn' | 'err' | 'live';
+
+export interface SourceChipProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+  tone?: SourceChipTone;
+  active?: boolean;
+  label: ReactNode;
+  subtitle?: ReactNode;
+}
+
+export function SourceChip({
+  tone = 'default',
+  active,
+  label,
+  subtitle,
+  className = '',
+  type,
+  ...rest
+}: SourceChipProps) {
+  const cls = className ? `prx-source-chip ${className}` : 'prx-source-chip';
+  return (
+    <button
+      type={type ?? 'button'}
+      className={cls}
+      data-tone={tone === 'default' ? undefined : tone}
+      data-active={active ? 'true' : undefined}
+      data-testid="prx-source-chip"
+      {...rest}
+    >
+      <span className="prx-source-chip__dot" />
+      <span className="prx-source-chip__copy">
+        <span className="prx-source-chip__label">{label}</span>
+        {subtitle !== undefined && <span className="prx-source-chip__sub">{subtitle}</span>}
+      </span>
+    </button>
   );
 }

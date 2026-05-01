@@ -1,7 +1,28 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MoonWorkflowSilhouette } from './MoonWorkflowSilhouette';
 import { isAbortError } from '../shared/request';
-import { ReceiptCard, StatusRail, type StatusRailItem } from '../primitives';
+import {
+  Button,
+  FrameCard,
+  LedDot,
+  ReceiptCard,
+  type StatusRailItem,
+} from '../primitives';
+import type { LedTone } from '../primitives-prx';
+
+function ledToneFromTone(tone: 'healthy' | 'warning' | 'danger' | 'neutral'): LedTone {
+  if (tone === 'healthy') return 'ok';
+  if (tone === 'warning') return 'live';
+  if (tone === 'danger') return 'err';
+  return 'idle';
+}
+
+function ledToneFromRunStatus(status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'): LedTone {
+  if (status === 'succeeded') return 'ok';
+  if (status === 'failed') return 'err';
+  if (status === 'running') return 'live';
+  return 'idle';
+}
 import './dashboard.css';
 
 interface Workflow {
@@ -278,26 +299,34 @@ function WorkflowCard({
   const silhouetteNodeCount = hasRun ? 3 : 2;
 
   return (
-    <article className="wf-card">
-      <div className="wf-card__header">
-        <div className="wf-card__identity">
-          <div className="wf-card__eyebrow-row">
-            <MoonWorkflowSilhouette
-              nodeCount={silhouetteNodeCount}
-              hasTrigger={hasTrigger}
-              isCron={isCron}
-              lastRunStatus={wf.latest_run?.status}
-              width={72}
-              height={18}
-              label={`${wf.name} silhouette`}
-            />
-            <div className="wf-card__eyebrow">{workflowKind}</div>
-          </div>
-          <div className="wf-card__name">{wf.name}</div>
+    <FrameCard
+      eyebrow={
+        <span className="wf-card__eyebrow-row">
+          <MoonWorkflowSilhouette
+            nodeCount={silhouetteNodeCount}
+            hasTrigger={hasTrigger}
+            isCron={isCron}
+            lastRunStatus={wf.latest_run?.status}
+            width={72}
+            height={18}
+            label={`${wf.name} silhouette`}
+          />
+          <span>{workflowKind}</span>
+        </span>
+      }
+      title={wf.name}
+      action={<span className={`wf-card__badge ${badge.class_name}`}>{badge.label}</span>}
+      footer={
+        <div className="prx-button-row">
+          <Button tone="primary" size="sm" onClick={onEdit}>Open</Button>
+          <Button size="sm" onClick={onRunNow}>Run now</Button>
+          {hasRun && (
+            <Button size="sm" onClick={onViewRun}>View latest</Button>
+          )}
+          <Button size="sm" tone="danger" onClick={onDelete}>Delete</Button>
         </div>
-        <span className={`wf-card__badge ${badge.class_name}`}>{badge.label}</span>
-      </div>
-
+      }
+    >
       <div className="wf-card__desc">
         {wf.description || 'No description yet. Use the editor to define authority, state, and execution rules.'}
       </div>
@@ -320,24 +349,7 @@ function WorkflowCard({
           <strong>{timeAgo(wf.last_invoked_at)}</strong>
         </div>
       </div>
-
-      <div className="wf-card__actions">
-        <button type="button" className="wf-card__btn wf-card__btn--primary" onClick={onEdit}>
-          Open
-        </button>
-        <button type="button" className="wf-card__btn" onClick={onRunNow}>
-          Run now
-        </button>
-        {hasRun && (
-          <button type="button" className="wf-card__btn" onClick={onViewRun}>
-            View latest
-          </button>
-        )}
-        <button type="button" className="wf-card__btn wf-card__btn--danger" onClick={onDelete}>
-          Delete
-        </button>
-      </div>
-    </article>
+    </FrameCard>
   );
 }
 
@@ -747,21 +759,12 @@ export function Dashboard({
             <div className="dash-hero__copy">
               <h1 className="dash-hero__title">{heroTitle}</h1>
               <p className="dash-hero__desc">{heroCopy}</p>
-              <StatusRail items={statusRailItems} className="dash-hero__status" />
 
-              <div className="dash-hero__actions">
-                <button type="button" className="dash-hero__primary" onClick={onDescribe}>
-                  Describe job
-                </button>
-                <button type="button" className="dash-hero__secondary" onClick={onNewWorkflow}>
-                  Blank builder
-                </button>
-                <button type="button" className="dash-hero__secondary" onClick={onChat}>
-                  Chat
-                </button>
-                <button type="button" className="dash-hero__secondary" onClick={() => instanceFileRef.current?.click()}>
-                  Add file
-                </button>
+              <div className="dash-hero__actions prx-button-row">
+                <Button tone="primary" onClick={onDescribe}>Describe job</Button>
+                <Button onClick={onNewWorkflow}>Blank builder</Button>
+                <Button onClick={onChat}>Chat</Button>
+                <Button onClick={() => instanceFileRef.current?.click()}>Add file</Button>
               </div>
 
               {error && (
@@ -776,14 +779,14 @@ export function Dashboard({
                 <button
                   key={card.id}
                   type="button"
-                  className={`dash-overview-card dash-overview-card--${card.tone}`}
+                  className="dash-tile"
                   onClick={card.onClick}
+                  aria-label={`${card.title}: ${card.value}`}
                 >
-                  <span className="dash-overview-card__source">{card.source}</span>
-                  <strong>{card.title}</strong>
-                  <span className="dash-overview-card__value">{card.value}</span>
-                  <span className="dash-overview-card__detail">{card.detail}</span>
-                  <em>{card.action}</em>
+                  <span className="dash-tile__label">{card.title}</span>
+                  <span className="dash-tile__value">{card.value}</span>
+                  <span className="dash-tile__detail">{card.detail}</span>
+                  <span className="dash-tile__action">{card.action} →</span>
                 </button>
               ))}
             </div>
@@ -791,11 +794,6 @@ export function Dashboard({
 
           <section className="dash-run-instrument">
             <div className="dash-receipts">
-              <div className="dash-receipts__head">
-                <span>receipts</span>
-                <span>{sealedRunCount} sealed</span>
-              </div>
-
               <ReceiptCard
                 className="dash-receipt-card dash-receipt-card--allow"
                 state="sealed"
@@ -860,42 +858,38 @@ export function Dashboard({
                     </div>
                   </div>
                   <div className="dash-start-panel__grid">
-                    <button type="button" className="dash-start-panel__action" onClick={onDescribe}>
+                    <Button size="lg" tone="ghost" className="dash-start-panel__action" onClick={onDescribe}>
                       <span>Describe job</span>
                       <strong>Plain language into contract</strong>
-                    </button>
-                    <button type="button" className="dash-start-panel__action" onClick={onNewWorkflow}>
+                    </Button>
+                    <Button size="lg" tone="ghost" className="dash-start-panel__action" onClick={onNewWorkflow}>
                       <span>Blank builder</span>
                       <strong>Wire the graph by hand</strong>
-                    </button>
-                    <button type="button" className="dash-start-panel__action" onClick={onChat}>
+                    </Button>
+                    <Button size="lg" tone="ghost" className="dash-start-panel__action" onClick={onChat}>
                       <span>Chat</span>
                       <strong>Shape the first lane beside the app</strong>
-                    </button>
-                    <button type="button" className="dash-start-panel__action" onClick={() => instanceFileRef.current?.click()}>
+                    </Button>
+                    <Button size="lg" tone="ghost" className="dash-start-panel__action" onClick={() => instanceFileRef.current?.click()}>
                       <span>Add file</span>
                       <strong>Attach context before the run</strong>
-                    </button>
+                    </Button>
                   </div>
                 </section>
               )}
             </div>
 
             <aside className="dash-board__rail">
-              <section className="dash-panel dash-toolbelt-panel">
-                <div className="dash-panel__header">
-                  <div>
-                    <div className="dash-panel__eyebrow">Materialize</div>
-                    <h2 className="dash-panel__title">Toolbelt Review</h2>
-                  </div>
-                  <span className="dash-review-count">{loading ? '...' : toolbeltReviewItems.length}</span>
-                </div>
-
+              <FrameCard
+                eyebrow="Materialize"
+                title="Toolbelt Review"
+                count={loading ? '…' : toolbeltReviewItems.length}
+              >
                 <div className="dash-review-list">
                   {toolbeltReviewItems.map((item) => {
                     const body = (
                       <>
-                        <span className={`dash-review-item__dot dash-review-item__dot--${item.tone}`} />
+                        <LedDot tone={ledToneFromTone(item.tone)} />
                         <span className="dash-review-item__body">
                           <strong>{item.title}</strong>
                           <span>{item.detail}</span>
@@ -922,16 +916,9 @@ export function Dashboard({
                     );
                   })}
                 </div>
-              </section>
+              </FrameCard>
 
-              <section className="dash-panel">
-                <div className="dash-panel__header">
-                  <div>
-                    <div className="dash-panel__eyebrow">Recent execution</div>
-                    <h2 className="dash-panel__title">Recent Runs</h2>
-                  </div>
-                </div>
-
+              <FrameCard eyebrow="Recent execution" title="Recent Runs">
                 {visibleRuns.length > 0 ? (
                   <div className="dash-run-list">
                     {visibleRuns.slice(0, 8).map((run) => (
@@ -941,7 +928,7 @@ export function Dashboard({
                         className="dash-run"
                         onClick={() => onViewRun(run.run_id)}
                       >
-                        <div className={`dash-run__status dash-run__status--${run.status}`} />
+                        <LedDot tone={ledToneFromRunStatus(run.status)} />
                         <div className="dash-run__body">
                           <div className="dash-run__title">
                             {runDisplayName(run)}
@@ -963,27 +950,29 @@ export function Dashboard({
                     </div>
                   </div>
                 )}
-              </section>
+              </FrameCard>
 
-              <section className="dash-panel">
-                <div className="dash-panel__header">
-                  <div>
-                    <div className="dash-panel__eyebrow">Attached context</div>
-                    <h2 className="dash-panel__title">Knowledge Base</h2>
-                  </div>
-                  <button type="button" className="dash-panel__action" onClick={() => instanceFileRef.current?.click()}>
+              <FrameCard
+                eyebrow="Attached context"
+                title="Knowledge Base"
+                action={
+                  <Button size="sm" tone="ghost" onClick={() => instanceFileRef.current?.click()}>
                     Add file
-                  </button>
-                </div>
-
+                  </Button>
+                }
+              >
                 {instanceFiles.length > 0 ? (
                   <div className="dash-file-list">
                     {instanceFiles.map((file) => (
                       <div key={file.id} className="dash-file">
                         <div className="dash-file__name">{file.filename}</div>
-                        <button type="button" className="dash-file__remove" onClick={() => deleteInstanceFile(file.id)}>
+                        <Button
+                          size="sm"
+                          tone="danger"
+                          onClick={() => deleteInstanceFile(file.id)}
+                        >
                           Remove
-                        </button>
+                        </Button>
                       </div>
                     ))}
                   </div>
@@ -1002,25 +991,19 @@ export function Dashboard({
                     </div>
                   </div>
                 )}
-              </section>
+              </FrameCard>
 
-              <section className="dash-panel">
-                <div className="dash-panel__header">
-                  <div>
-                    <div className="dash-panel__eyebrow">Repeated work</div>
-                    <h2 className="dash-panel__title">Tool Opportunities</h2>
-                  </div>
-                  <span className="dash-review-count">
-                    {loading ? '...' : (snapshot?.tool_opportunities?.length ?? 0)}
-                  </span>
-                </div>
-
+              <FrameCard
+                eyebrow="Repeated work"
+                title="Tool Opportunities"
+                count={loading ? '…' : (snapshot?.tool_opportunities?.length ?? 0)}
+              >
                 {(snapshot?.tool_opportunities?.length ?? 0) > 0 ? (
                   <div className="dash-review-list">
                     {(snapshot?.tool_opportunities ?? []).map((opp) => {
                       const label = toolOpportunityLabel(opp);
                       const detail = toolOpportunityDetail(opp);
-                      const tone = opp.distinct_surfaces > 1 ? 'healthy' : 'neutral';
+                      const tone: 'healthy' | 'neutral' = opp.distinct_surfaces > 1 ? 'healthy' : 'neutral';
                       return (
                         <button
                           key={opp.shape_hash}
@@ -1029,7 +1012,7 @@ export function Dashboard({
                           onClick={onDescribe}
                           title={`${opp.shape_hash.slice(0, 12)} · ${opp.action_kinds.join(', ')}`}
                         >
-                          <span className={`dash-review-item__dot dash-review-item__dot--${tone}`} />
+                          <LedDot tone={ledToneFromTone(tone)} />
                           <span className="dash-review-item__body">
                             <strong>{label}</strong>
                             {detail ? (
@@ -1053,7 +1036,7 @@ export function Dashboard({
                     </div>
                   </div>
                 )}
-              </section>
+              </FrameCard>
             </aside>
           </div>
         </div>

@@ -1,8 +1,10 @@
 """Projects field descriptors into the unified data dictionary authority.
 
 Walks every injection site in Praxis — Postgres tables, object_types,
-integration manifests, dataset families, ingest payload kinds, operator
-decision kinds, receipt kinds, and MCP tool input schemas — and writes an
+integration manifests, authority_domains (for lineage governance targets),
+type-contract slugs harvested from the MCP catalog, dataset families,
+ingest payload kinds, operator decision kinds, receipt kinds, and MCP tool
+input schemas — and writes an
 `auto`-layer row per (object_kind, field_path). Operator overrides in the
 `operator` source layer are left untouched.
 
@@ -41,10 +43,12 @@ class DataDictionaryProjector(HeartbeatModule):
             ("tables", self._project_tables),
             ("object_types", self._project_object_types),
             ("integrations", self._project_integration_manifests),
+            ("authority_domains", self._project_authority_domains),
             ("datasets", self._project_dataset_families),
             ("ingest", self._project_ingest_kinds),
             ("decisions", self._project_decision_kinds),
             ("receipts", self._project_receipt_kinds),
+            ("type_contract_slugs", self._project_type_contract_slugs),
             ("tools", self._project_mcp_tools),
         ]:
             try:
@@ -445,6 +449,87 @@ class DataDictionaryProjector(HeartbeatModule):
             origin_ref={"projector": "information_schema", "table": "receipts"},
         )
 
+    # -- authority domains (for lineage governed_by edges) ---------------
+
+    def _project_authority_domains(self) -> None:
+        rows = self._conn.execute(
+            """
+            SELECT authority_domain_ref, owner_ref, event_stream_ref,
+                   enabled, decision_ref
+              FROM authority_domains
+             ORDER BY authority_domain_ref
+            """,
+        )
+        for r in rows or []:
+            ref = str(r.get("authority_domain_ref") or "").strip()
+            if not ref:
+                continue
+            entries = [
+                {
+                    "field_path": "authority_domain_ref",
+                    "field_kind": "text",
+                    "description": "Stable authority domain reference.",
+                    "required": True,
+                    "display_order": 10,
+                    "origin_ref": {"projector": "authority_domains", "ref": ref},
+                },
+            ]
+            apply_projection(
+                self._conn,
+                object_kind=ref,
+                category="definition",
+                entries=entries,
+                source="auto",
+                label=ref,
+                summary=f"Authority domain {ref!r}.",
+                origin_ref={"projector": "authority_domains", "ref": ref},
+                metadata={
+                    "owner_ref": str(r.get("owner_ref") or ""),
+                    "event_stream_ref": str(r.get("event_stream_ref") or ""),
+                    "enabled": bool(r.get("enabled", True)),
+                    "decision_ref": str(r.get("decision_ref") or ""),
+                },
+            )
+
+    # -- type-contract slugs (consumes/produces in MCP catalog) ----------
+
+    def _project_type_contract_slugs(self) -> None:
+        try:
+            from surfaces.mcp.catalog import get_tool_catalog
+            definitions = list(get_tool_catalog().values())
+        except Exception:
+            return
+        slugs: set[str] = set()
+        for tool in definitions:
+            for _action, contract in tool.type_contract.items():
+                slugs.update(contract.get("consumes", []))
+                slugs.update(contract.get("produces", []))
+        for slug in sorted(slugs):
+            slug = slug.strip()
+            if not slug:
+                continue
+            kind = f"type_slug:{slug}"
+            apply_projection(
+                self._conn,
+                object_kind=kind,
+                category="object",
+                entries=[
+                    {
+                        "field_path": "slug",
+                        "field_kind": "text",
+                        "description": "Praxis typed slug from tool type_contract metadata.",
+                        "required": True,
+                        "display_order": 10,
+                        "origin_ref": {"projector": "type_contract_slugs", "slug": slug},
+                    },
+                ],
+                source="auto",
+                label=slug,
+                summary=f"Type slug {slug!r} referenced by MCP tool type_contract.",
+                origin_ref={"projector": "mcp_catalog_type_slugs", "slug": slug},
+                metadata={"slug": slug},
+            )
+
     # -- MCP tool input schemas ------------------------------------------
 
     def _project_mcp_tools(self) -> None:
@@ -476,6 +561,20 @@ class DataDictionaryProjector(HeartbeatModule):
                 })
             if not entries:
                 continue
+            raw_ops = tool.metadata.get("operation_names")
+            op_names: list[str] = []
+            if isinstance(raw_ops, list):
+                op_names = [str(x).strip() for x in raw_ops if str(x).strip()]
+            tool_metadata: dict[str, Any] = {
+                "cli_surface": tool.cli_surface,
+                "cli_tier": tool.cli_tier,
+                "risk_levels": list(tool.risk_levels),
+                "use_when": tool.cli_when_to_use or "",
+                "when_not_to_use": tool.cli_when_not_to_use or "",
+                "kind": tool.kind,
+                "operation_names": op_names,
+                "type_contract": tool.type_contract,
+            }
             apply_projection(
                 self._conn,
                 object_kind=f"tool:{name}",
@@ -485,6 +584,7 @@ class DataDictionaryProjector(HeartbeatModule):
                 label=str(name),
                 summary=str(getattr(tool, "description", "") or "")[:300],
                 origin_ref={"projector": "mcp_catalog", "tool": str(name)},
+                metadata=tool_metadata,
             )
 
 

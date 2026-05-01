@@ -4,7 +4,9 @@ import React from 'react';
 
 import {
   Bargraph,
+  Button,
   DiffBlock,
+  FrameCard,
   GateBadge,
   Gauge,
   KbdCluster,
@@ -14,6 +16,7 @@ import {
   ReceiptCard,
   Runlog,
   SectionStrip,
+  SourceChip,
   Sparkline,
   TableFilterInput,
   TokenChip,
@@ -132,5 +135,82 @@ describe('display primitives render canonical prx-* shapes', () => {
     expect(screen.getByTestId('prx-sparkline')).toHaveClass('prx-spark');
     expect(screen.getByTestId('prx-bargraph')).toHaveClass('prx-bargraph');
     expect(screen.getByTestId('prx-led-dot')).toHaveClass('prx-led');
+  });
+
+  test('Button renders prx-button with tone/size attrs and forwards onClick', () => {
+    const handler = jest.fn();
+    render(
+      <Button tone="primary" size="lg" active onClick={handler}>
+        Compose workflow
+      </Button>,
+    );
+    const btn = screen.getByTestId('prx-button');
+    expect(btn).toHaveClass('prx-button');
+    expect(btn).toHaveAttribute('data-tone', 'primary');
+    expect(btn).toHaveAttribute('data-size', 'lg');
+    expect(btn).toHaveAttribute('data-active', 'true');
+    expect(btn).toHaveAttribute('type', 'button');
+    fireEvent.click(btn);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  test('Button without tone/size omits the data attrs', () => {
+    render(<Button>plain</Button>);
+    const btn = screen.getByTestId('prx-button');
+    expect(btn).not.toHaveAttribute('data-tone');
+    expect(btn).not.toHaveAttribute('data-size');
+    expect(btn).not.toHaveAttribute('data-active');
+  });
+
+  test('FrameCard renders eyebrow / title / count / action / footer slots', () => {
+    render(
+      <FrameCard
+        eyebrow="Materialize"
+        title="Toolbelt Review"
+        count={5}
+        action={<Button size="sm">Add</Button>}
+        footer={<span data-testid="frame-foot">view all</span>}
+        tone="warn"
+      >
+        <span data-testid="frame-body">body</span>
+      </FrameCard>,
+    );
+    const card = screen.getByTestId('prx-frame-card');
+    expect(card).toHaveClass('prx-card');
+    expect(card).toHaveAttribute('data-tone', 'warn');
+    expect(card.querySelector('.prx-card__head .eyebrow')).toHaveTextContent('Materialize');
+    expect(card.querySelector('.prx-card__head .title')).toHaveTextContent('Toolbelt Review');
+    expect(card.querySelector('.prx-card__count')).toHaveTextContent('5');
+    expect(card.querySelector('.prx-card__head-tail [data-testid="prx-button"]')).toBeInTheDocument();
+    expect(screen.getByTestId('frame-body')).toBeInTheDocument();
+    expect(screen.getByTestId('frame-foot')).toBeInTheDocument();
+  });
+
+  test('FrameCard hides head when no head props provided', () => {
+    render(<FrameCard><span>just body</span></FrameCard>);
+    const card = screen.getByTestId('prx-frame-card');
+    expect(card.querySelector('.prx-card__head')).not.toBeInTheDocument();
+  });
+
+  test('SourceChip renders prx-source-chip with tone/active attrs and fires onClick', () => {
+    const handler = jest.fn();
+    render(
+      <SourceChip
+        tone="ok"
+        active
+        label="workspace_records"
+        subtitle="connected · 24 rows"
+        onClick={handler}
+      />,
+    );
+    const chip = screen.getByTestId('prx-source-chip');
+    expect(chip).toHaveClass('prx-source-chip');
+    expect(chip).toHaveAttribute('data-tone', 'ok');
+    expect(chip).toHaveAttribute('data-active', 'true');
+    expect(chip.querySelector('.prx-source-chip__label')).toHaveTextContent('workspace_records');
+    expect(chip.querySelector('.prx-source-chip__sub')).toHaveTextContent('connected · 24 rows');
+    expect(chip.querySelector('.prx-source-chip__dot')).toBeInTheDocument();
+    fireEvent.click(chip);
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 });

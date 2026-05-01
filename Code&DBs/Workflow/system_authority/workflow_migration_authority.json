@@ -418,7 +418,9 @@
     "402_register_paid_model_access_operation.sql",
     "403_materialize_table_renames.sql",
     "404_materialize_event_type_renames.sql",
-    "405_materialize_remaining_compile_remnants.sql"
+    "405_materialize_remaining_compile_remnants.sql",
+    "406_data_dictionary_lineage_capability_edge_kinds.sql",
+    "407_rename_agent_principals_to_agent_registry.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -11394,7 +11396,7 @@
     "398_agent_principal_authority.sql": [
       {
         "object_type": "table",
-        "object_name": "agent_principals"
+        "object_name": "agent_registry"
       },
       {
         "object_type": "table",
@@ -11414,7 +11416,7 @@
       },
       {
         "object_type": "row",
-        "object_name": "data_dictionary_objects.agent_principals"
+        "object_name": "data_dictionary_objects.agent_registry"
       },
       {
         "object_type": "row",
@@ -11439,6 +11441,12 @@
       {
         "object_type": "row",
         "object_name": "operation_catalog_registry.agent.command.delegate"
+      }
+    ],
+    "407_rename_agent_principals_to_agent_registry.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.agent_registry.rename_history"
       }
     ],
     "399_paid_model_access_leases.sql": [
@@ -11565,6 +11573,12 @@
       {
         "object_type": "absent_column",
         "object_name": "workflow_surface_usage_events.compiled_job_count"
+      }
+    ],
+    "406_data_dictionary_lineage_capability_edge_kinds.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.406_data_dictionary_lineage_capability_edge_kinds.sql"
       }
     ]
   },
@@ -11988,7 +12002,9 @@
       "402_register_paid_model_access_operation.sql",
       "403_materialize_table_renames.sql",
       "404_materialize_event_type_renames.sql",
-      "405_materialize_remaining_compile_remnants.sql"
+      "405_materialize_remaining_compile_remnants.sql",
+      "406_data_dictionary_lineage_capability_edge_kinds.sql",
+      "407_rename_agent_principals_to_agent_registry.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

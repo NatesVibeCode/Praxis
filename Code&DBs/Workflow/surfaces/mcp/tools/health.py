@@ -314,6 +314,9 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
             "default_adapter_type": transport_support_summary["default_adapter_type"],
             "registered_providers": list(transport_support_summary["registered_providers"]),
             "providers": list(transport_support_summary["providers"]),
+            "policy_disabled_adapters": list(
+                transport_support_summary["policy_disabled_adapters"]
+            ),
             "support_basis": transport_support_summary["support_basis"],
             "provider_registry_status": provider_registry.get("status"),
             "provider_registry_authority_available": provider_registry.get("authority_available"),

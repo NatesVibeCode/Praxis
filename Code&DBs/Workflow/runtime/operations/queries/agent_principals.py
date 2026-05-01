@@ -91,14 +91,14 @@ def handle_list_agent_principals(
     conn = subsystems.get_pg_conn()
     if query.status == "any":
         rows = conn.execute(
-            """SELECT * FROM agent_principals
+            """SELECT * FROM agent_registry
                ORDER BY agent_principal_ref
                LIMIT $1""",
             int(query.limit),
         )
     else:
         rows = conn.execute(
-            """SELECT * FROM agent_principals
+            """SELECT * FROM agent_registry
                WHERE status = $1
                ORDER BY agent_principal_ref
                LIMIT $2""",
@@ -168,7 +168,7 @@ def handle_describe_agent_principal(
 ) -> dict[str, Any]:
     conn = subsystems.get_pg_conn()
     rows = conn.execute(
-        "SELECT * FROM agent_principals WHERE agent_principal_ref = $1",
+        "SELECT * FROM agent_registry WHERE agent_principal_ref = $1",
         query.agent_principal_ref,
     )
     if not rows:

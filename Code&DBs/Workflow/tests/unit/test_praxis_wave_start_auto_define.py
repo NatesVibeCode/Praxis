@@ -160,15 +160,8 @@ def test_start_does_not_redefine_already_defined_wave(patched_subs):
     assert orch.start_wave_calls == ["existing"]
 
 
-def test_start_jobs_field_still_describes_both_grammars_in_schema():
-    """Schema self-documentation: tooling that reads the input schema should
-    see both the start and record job-string grammars. Guards against a
-    future refactor hiding the start grammar and leaving operators stuck
-    with the pre-fix behavior again."""
+def test_praxis_wave_is_retired_from_tool_catalog():
+    """The in-memory wave helper is not an operator-facing tool anymore."""
     from surfaces.mcp.tools.wave import TOOLS
 
-    _, meta = TOOLS["praxis_wave"]
-    jobs_desc = meta["inputSchema"]["properties"]["jobs"]["description"]
-    assert "start" in jobs_desc.lower()
-    assert "record" in jobs_desc.lower()
-    assert "|" in jobs_desc  # dep separator documented
+    assert "praxis_wave" not in TOOLS

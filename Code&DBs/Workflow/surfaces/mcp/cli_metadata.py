@@ -39,6 +39,123 @@ def _tool(
 
 
 CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
+    "praxis_agent_forge": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Preview and validate the CQRS path before registering or changing an agent principal.",
+        when_not_to_use="Do not use it to mutate agent state; call praxis_agent_register after forge validation.",
+        risks={"default": "read"},
+        examples=[
+            _example("Preview one agent principal", {"agent_principal_ref": "agent.exec.example"}),
+        ],
+    ),
+    "praxis_agent_register": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Register or update one durable agent principal after praxis_agent_forge validation.",
+        when_not_to_use="Do not use it for wake execution, delegation, or status-only reads.",
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Register one agent principal",
+                {"agent_principal_ref": "agent.exec.example", "title": "Example Agent"},
+            ),
+        ],
+    ),
+    "praxis_agent_list": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="List durable agent principals and their current lifecycle status.",
+        when_not_to_use="Do not use it to inspect one agent in depth; use praxis_agent_describe.",
+        risks={"default": "read"},
+        examples=[_example("List active agents", {"status": "active"})],
+    ),
+    "praxis_agent_describe": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Inspect one durable agent principal, including trust and scope metadata.",
+        when_not_to_use="Do not use it for mutation; use register/status/wake tools for writes.",
+        risks={"default": "read"},
+        examples=[
+            _example("Describe one agent", {"agent_principal_ref": "agent.exec.example"}),
+        ],
+    ),
+    "praxis_agent_status": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Pause, activate, or kill one durable agent principal.",
+        when_not_to_use="Do not use it for ordinary run/job status; use praxis_workflow.",
+        risks={"default": "write"},
+        examples=[
+            _example("Pause one agent", {"agent_principal_ref": "agent.exec.example", "status": "paused"}),
+        ],
+    ),
+    "praxis_agent_wake": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Record or request one agent wake through the agent-principal authority.",
+        when_not_to_use="Do not use it for direct workflow launches; use praxis_workflow or praxis_solution.",
+        risks={"default": "write"},
+        examples=[
+            _example("Wake one agent", {"agent_principal_ref": "agent.exec.example", "trigger_kind": "manual"}),
+        ],
+    ),
+    "praxis_agent_wake_list": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="List recent agent wake records for inspection and debugging.",
+        when_not_to_use="Do not use it to create wakes; use praxis_agent_wake.",
+        risks={"default": "read"},
+        examples=[
+            _example("List recent wakes", {"agent_principal_ref": "agent.exec.example", "limit": 10}),
+        ],
+    ),
+    "praxis_agent_delegate": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Create a governed delegation from one agent principal to a child task.",
+        when_not_to_use="Do not use it for human operator workflow launches.",
+        risks={"default": "write"},
+        examples=[
+            _example("Delegate one task", {"parent_agent_ref": "agent.exec.parent", "child_task": "review"}),
+        ],
+    ),
+    "praxis_tool_gap_file": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="File a missing-tool gap as roadmap fuel before improvising around the missing capability.",
+        when_not_to_use="Do not use it for ordinary bug reports; use praxis_bugs.",
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "File one tool gap",
+                {
+                    "reporter_agent_ref": "agent.exec.example",
+                    "missing_capability": "calendar read",
+                    "attempted_task": "schedule prep",
+                    "blocked_action": "inspect availability",
+                },
+            ),
+        ],
+    ),
+    "praxis_tool_gap_list": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="List filed tool gaps and their triage state.",
+        when_not_to_use="Do not use it to file a new gap; use praxis_tool_gap_file.",
+        risks={"default": "read"},
+        examples=[_example("List open tool gaps", {"status": "open", "limit": 10})],
+    ),
     "praxis_access_control": _tool(
         surface="operations",
         tier="advanced",
@@ -67,6 +184,41 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "provider_slug": "openai",
                     "transport_type": "CLI",
                     "decision_ref": "architecture-policy::routing::disable-openai-cli",
+                },
+            ),
+        ],
+    ),
+    "praxis_paid_model_access": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Preview, grant, revoke, bind, or inspect exact one-run leases for paid model access.",
+        when_not_to_use="Do not use it for broad provider enables or unpaid route changes; use praxis_access_control for hard-off policy.",
+        risks={
+            "default": "read",
+            "actions": {
+                "bind_run": "write",
+                "consume": "write",
+                "grant_once": "write",
+                "preview": "read",
+                "revoke": "write",
+                "soft_off": "write",
+                "soft_on": "write",
+                "status": "read",
+            },
+        },
+        examples=[
+            _example("Preview paid access state", {"action": "preview", "runtime_profile_ref": "praxis"}),
+            _example(
+                "Grant one exact paid route",
+                {
+                    "action": "grant_once",
+                    "runtime_profile_ref": "praxis",
+                    "job_type": "build",
+                    "transport_type": "API",
+                    "adapter_type": "llm_task",
+                    "provider_slug": "fireworks",
+                    "model_slug": "accounts/fireworks/models/kimi-k2p6",
                 },
             ),
         ],
@@ -2853,25 +3005,27 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Poll build-state events", {"channel": "build_state", "limit": 50}),
         ],
     ),
-    "praxis_wave": _tool(
+    "praxis_solution": _tool(
         surface="workflow",
         tier="advanced",
-        recommended_alias=None,
-        when_to_use="Observe or coordinate wave-based execution programs.",
-        when_not_to_use="Do not use it for single workflow runs with no wave orchestration.",
+        recommended_alias="solution",
+        when_to_use="Submit, list, or inspect durable multi-workflow Solutions.",
+        when_not_to_use="Do not use it for one workflow run; use praxis_workflow.",
         risks={
             "default": "read",
             "actions": {
+                "list": "read",
                 "observe": "read",
-                "next": "read",
+                "show": "read",
+                "status": "read",
                 "start": "launch",
-                "record": "write",
+                "submit": "launch",
             },
         },
         examples=[
-            _example("List runnable jobs on one wave", {"action": "next", "wave_id": "wave_1"}),
-            _example("Observe current wave state", {"action": "observe"}),
-            _example("Record results on one wave", {"action": "record", "wave_id": "wave_1", "jobs": "build:pass,test:fail"}),
+            _example("List recent Solutions", {"action": "list", "limit": 10}),
+            _example("Inspect one Solution", {"action": "status", "solution_id": "workflow_chain_123"}),
+            _example("Submit a Solution", {"action": "submit", "coordination_path": "artifacts/workflow/solution.json"}),
         ],
     ),
     "praxis_workflow": _tool(

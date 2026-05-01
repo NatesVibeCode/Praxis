@@ -158,44 +158,11 @@ def tool_praxis_wave(params: dict) -> dict:
     return {"error": f"Unknown wave action: {action}"}
 
 
-TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
-    "praxis_wave": (
-        tool_praxis_wave,
-        {
-            "description": (
-                "Manage execution waves — groups of jobs with dependency ordering. "
-                "Waves track which jobs are runnable (all dependencies met) and which are blocked.\n\n"
-                "USE WHEN: you're orchestrating multi-phase work where later jobs depend on earlier "
-                "ones completing successfully.\n\n"
-                "WORKFLOW:\n"
-                "  1. praxis_wave(action='observe')                                          — see current wave state\n"
-                "  2. praxis_wave(action='start', wave_id='wave_1', jobs='a,b,c|a')          — auto-define + begin a new wave\n"
-                "     (jobs grammar for start: comma-separated labels; 'b|a' means b depends on a)\n"
-                "  3. praxis_wave(action='next', wave_id='wave_1')                            — get jobs ready on a wave\n"
-                "  4. praxis_wave(action='record', wave_id='wave_1', jobs='build:pass')       — record results on a wave\n\n"
-                "DO NOT USE: for simple flat workflow launches (use praxis_workflow). Waves are for complex "
-                "multi-step pipelines with explicit dependency tracking."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "Operation: observe, start, next, record.",
-                        "enum": ["observe", "start", "next", "record"],
-                    },
-                    "wave_id": {"type": "string", "description": "Wave identifier (required for start/next/record)."},
-                    "jobs": {
-                        "type": "string",
-                        "description": (
-                            "For start: comma-separated job labels to auto-define the wave, "
-                            "e.g. 'a1,a2,a3'. Use '|' to declare intra-wave deps: 'a1,a2|a1,a3|a2'. "
-                            "For record: job outcomes, format 'label:pass,label2:fail'."
-                        ),
-                    },
-                },
-                "required": ["action"],
-            },
-        },
-    ),
-}
+# Retired from the MCP catalog on 2026-05-01.
+#
+# The in-memory wave tool was not a durable multi-workflow authority: a fresh
+# process could lose a started wave. The operator-facing replacement is
+# praxis_solution, backed by workflow_chain DB authority. Keep the helper
+# functions in this module temporarily for old unit coverage and archaeology,
+# but expose no tool binding from this file.
+TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {}

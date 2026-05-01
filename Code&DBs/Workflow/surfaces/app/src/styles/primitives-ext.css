@@ -83,3 +83,248 @@
 .prx-roi[data-testid="prx-metric-card"] > .stat {
   border-right: none;
 }
+
+/* ── prx-button ──────────────────────────────────────────────── *
+ * Single source of truth for buttons across every surface.
+ * Tones via [data-tone="primary|ghost|danger"], sizes via
+ * [data-size="sm|lg"]; default size is the unstyled medium.
+ * Active state via [data-active="true"] for toggle-style buttons.
+ */
+.prx-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  min-height: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, filter 140ms ease;
+  white-space: nowrap;
+}
+.prx-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(243, 238, 228, 0.24);
+  background: var(--bg-alt);
+}
+.prx-button:active { transform: translateY(0); }
+.prx-button:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.prx-button:disabled,
+.prx-button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+.prx-button[data-tone="primary"] {
+  background: var(--accent);
+  color: var(--text-inverse);
+  border-color: var(--accent);
+}
+.prx-button[data-tone="primary"]:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.prx-button[data-tone="ghost"] { background: transparent; }
+.prx-button[data-tone="ghost"]:hover { background: rgba(255, 255, 255, 0.04); }
+.prx-button[data-tone="danger"] {
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--danger);
+  border-color: var(--border-danger-soft);
+}
+.prx-button[data-tone="danger"]:hover {
+  background: rgba(248, 81, 73, 0.14);
+  border-color: rgba(248, 81, 73, 0.42);
+}
+
+.prx-button[data-active="true"] {
+  border-color: var(--border-accent-soft);
+  background: rgba(243, 238, 228, 0.1);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.prx-button[data-size="sm"] {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+.prx-button[data-size="lg"] {
+  min-height: 44px;
+  padding: 0 18px;
+  font-size: 14px;
+  border-radius: 7px;
+}
+
+.prx-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── prx-card ────────────────────────────────────────────────── *
+ * Slot-based panel shell: head / body / foot. Used for sidebar
+ * panels (Toolbelt Review, Recent Runs), workflow cards,
+ * quadrant frames, anywhere a bordered card with a labelled
+ * header is needed.
+ */
+.prx-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+  position: relative;
+}
+.prx-card[data-tone="ok"]::before,
+.prx-card[data-tone="warn"]::before,
+.prx-card[data-tone="err"]::before,
+.prx-card[data-tone="live"]::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  pointer-events: none;
+}
+.prx-card[data-tone="ok"]::before   { background: var(--success); }
+.prx-card[data-tone="warn"]::before { background: var(--warning); }
+.prx-card[data-tone="err"]::before  { background: var(--danger);  }
+.prx-card[data-tone="live"]::before { background: var(--accent);  box-shadow: 0 0 12px var(--accent); }
+
+.prx-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.prx-card__head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prx-card__head .eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.prx-card__head .title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-card__head-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.prx-card__count {
+  min-width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.prx-card__body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.prx-card__body--tight { padding: 8px; gap: 6px; }
+.prx-card__foot {
+  padding: 10px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* ── prx-source-chip ─────────────────────────────────────────── *
+ * Source-option pill with palette-tone dot. Replaces the
+ * inline-color-hex chips in SourceOptionPills and surface tabs.
+ */
+.prx-source-chip {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.prx-source-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(243, 238, 228, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+}
+.prx-source-chip:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.prx-source-chip[data-active="true"] {
+  border-color: rgba(243, 238, 228, 0.42);
+  background: rgba(243, 238, 228, 0.08);
+}
+.prx-source-chip__dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 2px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.prx-source-chip[data-tone="ok"]   .prx-source-chip__dot { background: var(--success); }
+.prx-source-chip[data-tone="warn"] .prx-source-chip__dot { background: var(--warning); }
+.prx-source-chip[data-tone="err"]  .prx-source-chip__dot { background: var(--danger);  }
+.prx-source-chip[data-tone="live"] .prx-source-chip__dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+.prx-source-chip__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prx-source-chip__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.prx-source-chip__sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.3;
+}

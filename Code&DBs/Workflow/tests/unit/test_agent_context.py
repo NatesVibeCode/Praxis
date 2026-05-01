@@ -67,7 +67,7 @@ def test_compile_agent_context_returns_none_for_unknown_principal():
 def test_compile_agent_context_active_principal_emits_inline_spec():
     pg = _FakePg(
         responses={
-            "FROM agent_principals\n           WHERE agent_principal_ref": [_principal_row()],
+            "FROM agent_registry\n           WHERE agent_principal_ref": [_principal_row()],
             "FROM operator_decisions": [
                 {
                     "decision_key": "architecture-policy::business-agent-substrate::delegated-workers-praxis-only-no-internet",
@@ -116,7 +116,7 @@ def test_compile_agent_context_active_principal_emits_inline_spec():
 def test_compile_agent_context_paused_principal_returns_skip_envelope():
     pg = _FakePg(
         responses={
-            "FROM agent_principals": [_principal_row(status="paused")],
+            "FROM agent_registry": [_principal_row(status="paused")],
         }
     )
     envelope = compile_agent_context(
@@ -132,7 +132,7 @@ def test_compile_agent_context_paused_principal_returns_skip_envelope():
 def test_compile_agent_context_killed_principal_does_not_emit_spec():
     pg = _FakePg(
         responses={
-            "FROM agent_principals": [_principal_row(status="killed")],
+            "FROM agent_registry": [_principal_row(status="killed")],
         }
     )
     envelope = compile_agent_context(
@@ -158,7 +158,7 @@ def test_in_flight_wake_count_zero_when_no_rows():
 def test_payload_hash_changes_with_trigger_kind():
     pg = _FakePg(
         responses={
-            "FROM agent_principals": [_principal_row()],
+            "FROM agent_registry": [_principal_row()],
             "FROM operator_decisions": [],
             "FROM agent_wakes": [],
             "FROM chat_messages": [],
@@ -179,7 +179,7 @@ def test_payload_hash_changes_with_trigger_kind():
 def test_payload_hash_identical_for_identical_inputs():
     pg = _FakePg(
         responses={
-            "FROM agent_principals": [_principal_row()],
+            "FROM agent_registry": [_principal_row()],
             "FROM operator_decisions": [],
             "FROM agent_wakes": [],
             "FROM chat_messages": [],
@@ -205,7 +205,7 @@ def test_jsonb_list_normalisation_handles_string_input():
     The normaliser should accept both."""
     pg = _FakePg(
         responses={
-            "FROM agent_principals": [
+            "FROM agent_registry": [
                 _principal_row(
                     write_envelope='["a/**", "b/**"]',  # raw json string
                     allowed_tools='["t1", "t2"]',

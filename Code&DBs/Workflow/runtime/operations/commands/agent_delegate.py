@@ -154,7 +154,7 @@ def handle_agent_delegate(
                standing_order_keys,
                allowed_tools,
                network_policy
-           FROM agent_principals
+           FROM agent_registry
            WHERE agent_principal_ref = $1""",
         command.parent_agent_ref,
     )

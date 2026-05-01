@@ -13,6 +13,14 @@ Walks the live surface of Praxis and emits auto-layer edges:
   (`references`) for every manifest capability that names a bound tool.
 * **MCP tools** → `tool:<name> -> table:<t>` or `-> object_type:<t>` when
   the tool's input schema references a known table/object_type by name.
+* **MCP operation_names** → `tool:<name> -> operation.<op>` (`dispatches`)
+  when the catalog lists gateway operations for the tool and the operation
+  row exists in the data dictionary.
+* **MCP type_contract** → `tool:<name> -> type_slug:<slug>` as ``consumes``
+  or ``produces`` for typed slugs registered from catalog metadata.
+* **Operation catalog** → `operation.<name> -> <authority_domain_ref>`
+  (`governed_by`) from ``operation_catalog_registry`` when the domain is
+  projected as a ``definition`` object.
 
 Operator overrides in the `operator` source layer are untouched. Each
 projector step writes with `origin_ref.projector = <step_tag>` so
@@ -67,6 +75,9 @@ class DataDictionaryLineageProjector(HeartbeatModule):
             ("dataset_promotions", lambda: self._project_dataset_promotions(known)),
             ("integration_manifests", lambda: self._project_integration_manifests(known)),
             ("tool_schema_refs", lambda: self._project_tool_schema_refs(known)),
+            ("tool_operation_edges", lambda: self._project_tool_operation_edges(known)),
+            ("tool_type_contract_edges", lambda: self._project_tool_type_contract_edges(known)),
+            ("operation_authority_edges", lambda: self._project_operation_authority_edges(known)),
         ]:
             try:
                 fn()
@@ -309,6 +320,160 @@ class DataDictionaryLineageProjector(HeartbeatModule):
         apply_projected_edges(
             self._conn,
             projector_tag="lineage_tool_schema_refs",
+            edges=edges,
+            source="auto",
+        )
+
+    # -- tool -> operation (catalog operation_names) -----------------------
+
+    def _project_tool_operation_edges(self, known: dict[str, set[str]]) -> None:
+        try:
+            from surfaces.mcp.catalog import get_tool_catalog
+            definitions = list(get_tool_catalog().values())
+        except Exception:
+            return
+        known_tools = known.get("tool", set())
+        known_ops = known.get("command", set()) | known.get("query", set())
+        edges: list[dict[str, Any]] = []
+        for tool in definitions:
+            name = getattr(tool, "name", None)
+            if not name:
+                continue
+            src_kind = f"tool:{name}"
+            if src_kind not in known_tools:
+                continue
+            raw_ops = tool.metadata.get("operation_names")
+            if not isinstance(raw_ops, list):
+                continue
+            for op in raw_ops:
+                op_name = str(op).strip()
+                if not op_name:
+                    continue
+                dst_kind = f"operation.{op_name}"
+                if dst_kind not in known_ops:
+                    continue
+                edges.append({
+                    "src_object_kind": src_kind,
+                    "dst_object_kind": dst_kind,
+                    "edge_kind": "dispatches",
+                    "origin_ref": {
+                        "projector": "lineage_tool_operation_edges",
+                        "tool": str(name),
+                        "operation_name": op_name,
+                    },
+                    "metadata": {},
+                })
+        edges = _dedupe_edges(edges)
+        apply_projected_edges(
+            self._conn,
+            projector_tag="lineage_tool_operation_edges",
+            edges=edges,
+            source="auto",
+        )
+
+    # -- tool -> type_slug (catalog type_contract) -----------------------
+
+    def _project_tool_type_contract_edges(self, known: dict[str, set[str]]) -> None:
+        try:
+            from surfaces.mcp.catalog import get_tool_catalog
+            definitions = list(get_tool_catalog().values())
+        except Exception:
+            return
+        known_tools = known.get("tool", set())
+        known_slugs = known.get("object", set())
+        edges: list[dict[str, Any]] = []
+        for tool in definitions:
+            name = getattr(tool, "name", None)
+            if not name:
+                continue
+            src_kind = f"tool:{name}"
+            if src_kind not in known_tools:
+                continue
+            for action, contract in tool.type_contract.items():
+                action_tag = str(action).strip()
+                for slug in contract.get("consumes", []):
+                    slug = str(slug).strip()
+                    if not slug:
+                        continue
+                    dst_kind = f"type_slug:{slug}"
+                    if dst_kind not in known_slugs:
+                        continue
+                    edges.append({
+                        "src_object_kind": src_kind,
+                        "src_field_path": action_tag,
+                        "dst_object_kind": dst_kind,
+                        "edge_kind": "consumes",
+                        "origin_ref": {
+                            "projector": "lineage_tool_type_contract_edges",
+                            "tool": str(name),
+                            "action": action_tag,
+                        },
+                        "metadata": {},
+                    })
+                for slug in contract.get("produces", []):
+                    slug = str(slug).strip()
+                    if not slug:
+                        continue
+                    dst_kind = f"type_slug:{slug}"
+                    if dst_kind not in known_slugs:
+                        continue
+                    edges.append({
+                        "src_object_kind": src_kind,
+                        "src_field_path": action_tag,
+                        "dst_object_kind": dst_kind,
+                        "edge_kind": "produces",
+                        "origin_ref": {
+                            "projector": "lineage_tool_type_contract_edges",
+                            "tool": str(name),
+                            "action": action_tag,
+                        },
+                        "metadata": {},
+                    })
+        edges = _dedupe_edges(edges)
+        apply_projected_edges(
+            self._conn,
+            projector_tag="lineage_tool_type_contract_edges",
+            edges=edges,
+            source="auto",
+        )
+
+    # -- operation -> authority domain (catalog) -------------------------
+
+    def _project_operation_authority_edges(self, known: dict[str, set[str]]) -> None:
+        known_ops = known.get("command", set()) | known.get("query", set())
+        known_defs = known.get("definition", set())
+        rows = self._conn.execute(
+            """
+            SELECT operation_name, authority_domain_ref
+              FROM operation_catalog_registry
+             WHERE enabled IS TRUE
+               AND authority_domain_ref IS NOT NULL
+               AND btrim(authority_domain_ref) <> ''
+            """,
+        )
+        edges: list[dict[str, Any]] = []
+        for r in rows or []:
+            op_name = str(r.get("operation_name") or "").strip()
+            domain = str(r.get("authority_domain_ref") or "").strip()
+            if not op_name or not domain:
+                continue
+            src_kind = f"operation.{op_name}"
+            if src_kind not in known_ops or domain not in known_defs:
+                continue
+            edges.append({
+                "src_object_kind": src_kind,
+                "dst_object_kind": domain,
+                "edge_kind": "governed_by",
+                "origin_ref": {
+                    "projector": "lineage_operation_authority_edges",
+                    "operation_name": op_name,
+                },
+                "metadata": {"authority_domain_ref": domain},
+            })
+        edges = _dedupe_edges(edges)
+        apply_projected_edges(
+            self._conn,
+            projector_tag="lineage_operation_authority_edges",
             edges=edges,
             source="auto",
         )

@@ -84,7 +84,7 @@ def load_agent_principal(conn: Any, agent_principal_ref: str) -> Mapping[str, An
                default_conversation_id,
                routing_policy,
                metadata
-           FROM agent_principals
+           FROM agent_registry
            WHERE agent_principal_ref = $1
            LIMIT 1""",
         agent_principal_ref,

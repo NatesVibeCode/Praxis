@@ -151,7 +151,6 @@ describe('Dashboard', () => {
 
     await screen.findByText(/3 workflows in scope/);
     expect(screen.getByText('1 live - 1 saved - 1 draft')).toBeInTheDocument();
-    expect(screen.getByText('/api/dashboard')).toBeInTheDocument();
     expect(screen.getAllByText('Healthy').length).toBeGreaterThan(0);
     expect(screen.getByText('dashboard.health')).toBeInTheDocument();
     expect(screen.getByText('$14.25')).toBeInTheDocument();

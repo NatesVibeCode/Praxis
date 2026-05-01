@@ -90,7 +90,7 @@ def test_register_agent_principal_returns_ok_and_emits_event():
     assert result["ok"] is True
     assert result["agent_principal_ref"] == "agent.exec.nate"
     assert result["status"] == "active"
-    assert any("INSERT INTO agent_principals" in sql for sql, _ in conn.calls)
+    assert any("INSERT INTO agent_registry" in sql for sql, _ in conn.calls)
 
 
 def test_register_agent_principal_validates_non_empty_title():

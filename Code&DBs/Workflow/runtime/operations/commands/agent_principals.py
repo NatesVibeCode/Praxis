@@ -104,7 +104,7 @@ def handle_register_agent_principal(
 ) -> dict[str, Any]:
     conn = subsystems.get_pg_conn()
     rows = conn.execute(
-        """INSERT INTO agent_principals (
+        """INSERT INTO agent_registry (
                agent_principal_ref,
                title,
                status,
@@ -191,7 +191,7 @@ def handle_update_agent_principal_status(
 ) -> dict[str, Any]:
     conn = subsystems.get_pg_conn()
     rows = conn.execute(
-        """UPDATE agent_principals
+        """UPDATE agent_registry
               SET status = $2, updated_at = now()
             WHERE agent_principal_ref = $1
         RETURNING agent_principal_ref, status, updated_at""",
@@ -242,7 +242,7 @@ def handle_request_agent_wake(
     )
 
     principal_rows = conn.execute(
-        "SELECT status FROM agent_principals WHERE agent_principal_ref = $1",
+        "SELECT status FROM agent_registry WHERE agent_principal_ref = $1",
         command.agent_principal_ref,
     )
     if not principal_rows:

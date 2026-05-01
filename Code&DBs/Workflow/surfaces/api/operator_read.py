@@ -283,6 +283,7 @@ def build_transport_support_summary(
     )
     registered_providers: list[str] = []
     providers: list[dict[str, Any]] = []
+    policy_disabled_adapters: list[dict[str, Any]] = []
     probe_targets: list[tuple[str, str]] = []
     for raw_provider in provider_rows:
         if not isinstance(raw_provider, Mapping):
@@ -308,6 +309,13 @@ def build_transport_support_summary(
             if not bool(raw_support.get("supported")) and raw_status != "disabled_by_policy":
                 continue
             if raw_status == "disabled_by_policy":
+                policy_disabled_adapters.append(
+                    {
+                        "provider_slug": provider_slug,
+                        "adapter_type": normalized_adapter,
+                        "policy_reason": policy_reason,
+                    }
+                )
                 disabled_adapters.append(
                     {
                         "adapter_type": normalized_adapter,
@@ -331,6 +339,7 @@ def build_transport_support_summary(
         "default_adapter_type": str(transport_support_payload.get("default_adapter_type") or "").strip(),
         "registered_providers": registered_providers,
         "providers": providers,
+        "policy_disabled_adapters": policy_disabled_adapters,
         "probe_targets": tuple(probe_targets),
         "support_basis": str(transport_support_payload.get("support_basis") or "").strip() or None,
     }
