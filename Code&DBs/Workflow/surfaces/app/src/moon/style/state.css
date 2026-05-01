@@ -3,20 +3,24 @@
 @layer moon-state {
   /* Canonical state hooks */
   .is-active .moon-graph-node,
-  .is-active.moon-graph-node,
-  .moon-graph-node--selected {
-    outline: 3px solid var(--moon-accent);
-    box-shadow: var(--moon-shadow-line-strong);
-    outline-offset: 3px;
+  .is-active.moon-graph-node {
+    outline: 1px solid rgba(210, 153, 34, 0.5);
+    box-shadow:
+      0 0 0 3px rgba(210, 153, 34, 0.08),
+      var(--moon-shadow-line-mid);
+    outline-offset: 2px;
     z-index: 3;
   }
 
   .is-selected .moon-graph-node,
   .is-selected.moon-graph-node,
   .moon-graph-node--selected {
-    outline: 3px solid var(--moon-accent);
-    box-shadow: var(--moon-shadow-line-strong);
-    outline-offset: 3px;
+    border-color: rgba(243, 238, 228, 0.34);
+    outline: 1px solid rgba(243, 238, 228, 0.16);
+    outline-offset: 2px;
+    box-shadow:
+      0 0 0 3px rgba(243, 238, 228, 0.018),
+      0 10px 24px rgba(0, 0, 0, 0.24);
     z-index: 3;
   }
 

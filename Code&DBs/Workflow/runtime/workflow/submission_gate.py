@@ -391,6 +391,28 @@ def resolve_submission_for_job(
             ).strip(),
         }
 
+    # ── Stage 4b: scope drift is a hard contract failure ───────────────────
+    # Sandbox scratch is not authority. If the runner observed an artifact
+    # outside declared write_scope, the job must fail even if the subprocess
+    # exited 0 and produced a sealed submission candidate.
+    artifact_scope_drift = result.get("artifact_scope_drift")
+    if final_status == "succeeded" and isinstance(artifact_scope_drift, list) and artifact_scope_drift:
+        final_status = "failed"
+        final_error_code = "workflow_scope.out_of_scope_write"
+        drift_refs = ", ".join(
+            str(entry.get("artifact_ref") or "<unknown>")
+            for entry in artifact_scope_drift[:5]
+            if isinstance(entry, dict)
+        )
+        result = {
+            **result,
+            "stderr": (
+                str(result.get("stderr") or "")
+                + "\nsandbox artifact scope drift: "
+                + (drift_refs or "artifact outside declared write_scope")
+            ).strip(),
+        }
+
     # ── Stage 5: enforce acceptance contract ───────────────────────────────
     # If the submission was sealed and has an acceptance_status of "failed",
     # the job fails regardless of other status.

@@ -2,13 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "atlas",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8765"],
-      "port": 8765,
-      "cwd": "artifacts"
-    },
-    {
       "name": "praxis-app",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["vite", "--port", "5173"],
@@ -21,6 +14,13 @@
       "runtimeArgs": ["-m", "http.server", "8770"],
       "port": 8770,
       "cwd": "Code&DBs/Workflow/surfaces/app/src/styles"
+    },
+    {
+      "name": "docs",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8771"],
+      "port": 8771,
+      "cwd": "docs"
     }
   ]
 }

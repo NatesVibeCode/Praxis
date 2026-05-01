@@ -87,6 +87,19 @@ interface DashboardSnapshot {
   }>;
   workflows: Workflow[];
   recent_runs: RecentRun[];
+  tool_opportunities?: ToolOpportunity[];
+}
+
+interface ToolOpportunity {
+  shape_hash: string;
+  decision_key: string;
+  occurrence_count: number;
+  distinct_surfaces: number;
+  action_kinds: string[];
+  operation_names: string[];
+  sample_commands: string[];
+  sample_path_shapes: string[];
+  last_seen: string | null;
 }
 
 interface DashboardProps {
@@ -186,6 +199,53 @@ function runDisplayName(run: RecentRun): string {
   return (run.spec_name || run.run_id.slice(0, 12))
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (character: string) => character.toUpperCase());
+}
+
+const ACTION_KIND_LABEL: Record<string, string> = {
+  shell: 'shell commands',
+  edit: 'file edits',
+  multi_edit: 'file edits',
+  write: 'file writes',
+  read: 'file reads',
+  gateway_op: 'tool calls',
+};
+
+function humanizeOpName(name: string): string {
+  const parts = name.split('.');
+  const tail = parts.length > 1 ? parts.slice(1).join(' ') : name;
+  return tail.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function extractExtension(shape: string): string {
+  const m = shape.match(/\*\.(\w+)$/);
+  return m?.[1] ?? '';
+}
+
+function toolOpportunityLabel(opp: ToolOpportunity): string {
+  const kind = opp.action_kinds[0] ?? 'shape';
+
+  if (kind === 'gateway_op') {
+    const opName = (opp.operation_names ?? [])[0];
+    return opName ? humanizeOpName(opName) : 'Gateway operation';
+  }
+
+  if (kind === 'shell') {
+    const cmd = (opp.sample_commands ?? [])[0] ?? '';
+    const verb = cmd.split(/\s+/)[0];
+    return verb ? `${verb} pattern` : 'Shell pattern';
+  }
+
+  const shape = (opp.sample_path_shapes ?? [])[0] ?? '';
+  const ext = extractExtension(shape);
+  const kindLabel = kind === 'edit' || kind === 'multi_edit' ? 'Editing' : kind === 'write' ? 'Writing' : 'Reading';
+  return ext ? `${kindLabel} .${ext} files` : (ACTION_KIND_LABEL[kind] ?? kind.replace(/_/g, ' '));
+}
+
+function toolOpportunityDetail(opp: ToolOpportunity): string {
+  const kind = opp.action_kinds[0];
+  if (kind === 'gateway_op') return (opp.operation_names ?? [])[0] ?? '';
+  if (kind === 'shell') return (opp.sample_commands ?? [])[0] ?? '';
+  return (opp.sample_path_shapes ?? [])[0] ?? '';
 }
 
 function WorkflowCard({
@@ -1035,6 +1095,55 @@ export function Dashboard({
                     <div className="dash-empty__title">No files attached</div>
                     <div className="dash-empty__copy">
                       Upload briefs, notes, or source files so the workspace can reason over them during execution.
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className="dash-panel">
+                <div className="dash-panel__header">
+                  <div>
+                    <div className="dash-panel__eyebrow">Repeated work</div>
+                    <h2 className="dash-panel__title">Tool Opportunities</h2>
+                  </div>
+                  <span className="dash-review-count">
+                    {loading ? '...' : (snapshot?.tool_opportunities?.length ?? 0)}
+                  </span>
+                </div>
+
+                {(snapshot?.tool_opportunities?.length ?? 0) > 0 ? (
+                  <div className="dash-review-list">
+                    {(snapshot?.tool_opportunities ?? []).map((opp) => {
+                      const label = toolOpportunityLabel(opp);
+                      const detail = toolOpportunityDetail(opp);
+                      const tone = opp.distinct_surfaces > 1 ? 'healthy' : 'neutral';
+                      return (
+                        <div
+                          key={opp.shape_hash}
+                          className="dash-review-item dash-review-item--static"
+                          title={`${opp.shape_hash.slice(0, 12)} · ${opp.action_kinds.join(', ')}`}
+                        >
+                          <span className={`dash-review-item__dot dash-review-item__dot--${tone}`} />
+                          <span className="dash-review-item__body">
+                            <strong>{label}</strong>
+                            {detail ? (
+                              <span className="dash-review-item__detail--mono">{detail}</span>
+                            ) : null}
+                          </span>
+                          <em>
+                            {`${opp.occurrence_count}×`}
+                            {opp.distinct_surfaces > 1 ? ` · ${opp.distinct_surfaces} surfaces` : ''}
+                            {opp.last_seen ? ` · ${timeAgo(opp.last_seen)}` : ''}
+                          </em>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="dash-empty dash-empty--compact">
+                    <div className="dash-empty__title">Nothing repeating yet</div>
+                    <div className="dash-empty__copy">
+                      Patterns appear here once the same action shape is captured 3+ times — a signal that it's worth folding into a tool.
                     </div>
                   </div>
                 )}

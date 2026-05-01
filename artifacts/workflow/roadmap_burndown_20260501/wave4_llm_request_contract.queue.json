@@ -1,0 +1,79 @@
+{
+  "name": "Roadmap Burn Down Wave 4 - LLM Request Contract",
+  "workflow_id": "roadmap_burndown_20260501_wave4_llm_request_contract",
+  "phase": "execute",
+  "workdir": ".",
+  "outcome_goal": "Make provider/model routing and request shape deterministic, inspectable, and promotion-safe.",
+  "jobs": [
+    {
+      "label": "provider_capability_matrix_verify",
+      "agent": "google/gemini-3.1-pro-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave4.provider_capability_matrix_verify"
+      ],
+      "timeout": 1200,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/registry",
+        "Code&DBs/Workflow/runtime/operations",
+        "Code&DBs/Workflow/storage",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Finish or verify the provider capability matrix authority behind the effective provider/job catalog. Use BUG-EBE27625 and related provider catalog items if available. The outcome should be queryable route capability truth, not another helper that recomputes policy privately."
+    },
+    {
+      "label": "task_assembler_policy_route",
+      "agent": "google/gemini-3.1-pro-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave4.task_assembler_policy_route"
+      ],
+      "timeout": 1200,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/task_assembler.py",
+        "Code&DBs/Workflow/runtime/task_type_router.py",
+        "Code&DBs/Workflow/registry",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Remove hardcoded provider/model request paths in task assembler and route through policy-backed task_type_routing. Start from BUG-F09C561A and BUG-60623452 if present. Respect the OpenRouter primary chat decision and Anthropic CLI-only decision. Add tests that prove route selection comes from recorded authority."
+    },
+    {
+      "label": "provider_freshness_preproof_gate",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave4.provider_freshness_preproof_gate"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow",
+        "Code&DBs/Workflow/runtime/operations",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Encode provider freshness as a pre-proof launch gate instead of a stale projection warning. Use BUG-72420B56 if available. The gate should fail closed with actionable remediation when freshness cannot be proven. Add focused tests around launch/firecheck behavior."
+    },
+    {
+      "label": "task_route_request_shape",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave4.task_route_request_shape"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/operations",
+        "Code&DBs/Workflow/registry",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Tighten request-shape authority for task routes: reasoning control, max tokens, structured output, cache policy, and streaming policy should be explicit route data with receipts. Make the smallest useful improvement and include tests or operator-query proof."
+    }
+  ]
+}

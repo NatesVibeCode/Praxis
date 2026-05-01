@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code@latest @openai/codex@latest \
+RUN npm install -g @anthropic-ai/claude-code@latest @openai/codex@latest @google/gemini-cli@latest \
     && npm cache clean --force
 
 RUN mkdir -p /opt/praxis/workflow/runtime /opt/praxis/workflow/scripts

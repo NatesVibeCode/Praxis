@@ -1,0 +1,66 @@
+{
+  "program": "roadmap_burndown_20260501",
+  "mode": "wave_gated_burndown",
+  "why": "Burn down the cleaned roadmap in dependency order. Max parallelism is capped by construction: each wave has at most four runnable jobs, below the requested maximum of ten. Explicit model routes are used until auto-routing authority is repaired.",
+  "validate_order": [
+    "artifacts/workflow/roadmap_burndown_20260501/wave0_triage_prune.queue.json",
+    "artifacts/workflow/roadmap_burndown_20260501/wave1_validation_foundation.queue.json",
+    "artifacts/workflow/roadmap_burndown_20260501/wave2_gateway_authority_cleanup.queue.json",
+    "artifacts/workflow/roadmap_burndown_20260501/wave3_public_beta_wedge.queue.json",
+    "artifacts/workflow/roadmap_burndown_20260501/wave4_llm_request_contract.queue.json",
+    "artifacts/workflow/roadmap_burndown_20260501/wave5_deferred_product_quarantine.queue.json"
+  ],
+  "waves": [
+    {
+      "wave_id": "wave_0_triage_prune",
+      "specs": [
+        "artifacts/workflow/roadmap_burndown_20260501/wave0_triage_prune.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_1_validation_foundation",
+      "depends_on": [
+        "wave_0_triage_prune"
+      ],
+      "specs": [
+        "artifacts/workflow/roadmap_burndown_20260501/wave1_validation_foundation.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_2_gateway_authority_cleanup",
+      "depends_on": [
+        "wave_1_validation_foundation"
+      ],
+      "specs": [
+        "artifacts/workflow/roadmap_burndown_20260501/wave2_gateway_authority_cleanup.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_3_public_beta_wedge",
+      "depends_on": [
+        "wave_2_gateway_authority_cleanup"
+      ],
+      "specs": [
+        "artifacts/workflow/roadmap_burndown_20260501/wave3_public_beta_wedge.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_4_llm_request_contract",
+      "depends_on": [
+        "wave_3_public_beta_wedge"
+      ],
+      "specs": [
+        "artifacts/workflow/roadmap_burndown_20260501/wave4_llm_request_contract.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_5_deferred_product_quarantine",
+      "depends_on": [
+        "wave_4_llm_request_contract"
+      ],
+      "specs": [
+        "artifacts/workflow/roadmap_burndown_20260501/wave5_deferred_product_quarantine.queue.json"
+      ]
+    }
+  ]
+}

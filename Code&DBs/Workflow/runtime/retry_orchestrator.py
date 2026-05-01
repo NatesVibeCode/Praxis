@@ -96,15 +96,25 @@ def decide(
         outputs={"stderr": stderr} if stderr else None,
     )
 
-    # Find current position in failover chain
-    chain_idx = 0
+    # Find current position in failover chain. The route scorer may select any
+    # candidate in the chain, not just the head, so failover must be based on
+    # the actually failed agent and wrap to the next available candidate.
+    chain_idx: int | None = None
     if resolved_agent and chain:
         try:
             chain_idx = chain.index(resolved_agent)
         except ValueError:
-            chain_idx = 0
+            chain_idx = None
 
-    has_more_models = chain_idx < len(chain) - 1 if chain else False
+    if not chain:
+        next_failover_agent = None
+    elif chain_idx is None:
+        next_failover_agent = chain[0]
+    elif len(chain) > 1:
+        next_failover_agent = chain[(chain_idx + 1) % len(chain)]
+    else:
+        next_failover_agent = None
+    has_failover_model = bool(next_failover_agent and next_failover_agent != resolved_agent)
     has_more_retries = attempt < max_attempts
 
     # Decision tree:
@@ -127,8 +137,8 @@ def decide(
 
     # 2. Rate-limited with more models → immediate failover (different provider)
     #    Don't waste attempts retrying a provider that's actively rate-limiting.
-    if classification.category == FailureCategory.RATE_LIMIT and has_more_models:
-        next_agent = chain[chain_idx + 1]
+    if classification.category == FailureCategory.RATE_LIMIT and has_failover_model:
+        next_agent = next_failover_agent
         return RetryDecision(
             action="failover",
             next_agent=next_agent,
@@ -141,8 +151,8 @@ def decide(
         FailureCategory.PROVIDER_ERROR,
         FailureCategory.NETWORK_ERROR,
         FailureCategory.INFRASTRUCTURE,
-    ) and has_more_models:
-        next_agent = chain[chain_idx + 1]
+    ) and has_failover_model:
+        next_agent = next_failover_agent
         return RetryDecision(
             action="failover",
             next_agent=next_agent,
@@ -171,8 +181,8 @@ def decide(
         )
 
     # 6. Has more models but exhausted retries on current → failover
-    if has_more_models:
-        next_agent = chain[chain_idx + 1]
+    if has_failover_model:
+        next_agent = next_failover_agent
         return RetryDecision(
             action="failover",
             next_agent=next_agent,
@@ -194,5 +204,8 @@ def decide(
         action="fail",
         next_agent=None,
         backoff_seconds=0,
-        reason=f"All attempts exhausted: {attempt}/{max_attempts}, chain position {chain_idx + 1}/{len(chain)}",
+        reason=(
+            f"All attempts exhausted: {attempt}/{max_attempts}, "
+            f"chain position {(chain_idx + 1) if chain_idx is not None else 'unbound'}/{len(chain)}"
+        ),
     )

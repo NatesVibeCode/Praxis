@@ -116,6 +116,39 @@ def _tie_break_aware_full_bootstrap(
     return tuple(ordered)
 
 
+def _validate_bootstrap_prerequisites(
+    *,
+    bootstrap_prerequisites: dict[str, tuple[str, ...]],
+    full_bootstrap: tuple[str, ...],
+) -> None:
+    order_index = {filename: index for index, filename in enumerate(full_bootstrap)}
+    problems: list[str] = []
+    for filename, prerequisites in sorted(bootstrap_prerequisites.items()):
+        if filename not in order_index:
+            problems.append(
+                f"{filename!r} declares bootstrap prerequisites but is not bootstrap-eligible"
+            )
+            continue
+        if len(set(prerequisites)) != len(prerequisites):
+            problems.append(f"{filename!r} has duplicate bootstrap prerequisites")
+        for prerequisite in prerequisites:
+            if prerequisite not in order_index:
+                problems.append(
+                    f"{filename!r} prerequisite {prerequisite!r} is not bootstrap-eligible"
+                )
+                continue
+            if order_index[prerequisite] >= order_index[filename]:
+                problems.append(
+                    f"{filename!r} prerequisite {prerequisite!r} must appear earlier "
+                    "in full bootstrap order"
+                )
+    if problems:
+        raise SystemExit(
+            "workflow migration authority bootstrap_prerequisites drift:\n  - "
+            + "\n  - ".join(problems)
+        )
+
+
 def main() -> None:
     workflow_root = _WORKFLOW_ROOT
     output_path = workflow_root / "storage" / "_generated_workflow_migration_authority.py"
@@ -154,6 +187,14 @@ def main() -> None:
         full_bootstrap=full_bootstrap_set,
         tie_break_order=tie_break_order,
     )
+    bootstrap_prerequisites = {
+        str(filename): tuple(str(prerequisite) for prerequisite in prerequisites)
+        for filename, prerequisites in (spec.get("bootstrap_prerequisites") or {}).items()
+    }
+    _validate_bootstrap_prerequisites(
+        bootstrap_prerequisites=bootstrap_prerequisites,
+        full_bootstrap=full_bootstrap,
+    )
     expected_objects = {
         filename: tuple(
             (str(item["object_type"]), str(item["object_name"]))
@@ -171,11 +212,10 @@ def main() -> None:
     }
     # Migrations whose only schema-effect is `CREATE OR REPLACE FUNCTION`
     # (or trigger) on objects already created by an earlier migration.
-    # These re-define behavior without adding new objects, so the
-    # readiness check (which only inspects existence) can never tell the
-    # function body has drifted. The bootstrap loop must re-apply them
-    # every pass — otherwise an earlier migration's CREATE OR REPLACE
-    # silently wins on subsequent bootstraps. See BUG-193C9A50.
+    # These re-define behavior without adding new objects, so readiness
+    # inspection cannot tell when the function body drifted. Startup bootstrap
+    # intentionally ignores this list; explicit repair/migration operations may
+    # use it when asked to refresh function or trigger bodies.
     migrations_always_reapply = tuple(spec.get("migrations_always_reapply") or ())
 
     generated = "\n".join(
@@ -194,6 +234,9 @@ def main() -> None:
             "",
             "WORKFLOW_MIGRATION_POLICIES = "
             + pformat(migration_policies, width=88, sort_dicts=False),
+            "",
+            "WORKFLOW_BOOTSTRAP_PREREQUISITES = "
+            + pformat(bootstrap_prerequisites, width=88, sort_dicts=False),
             "",
             "WORKFLOW_MIGRATION_EXPECTED_OBJECTS = "
             + pformat(expected_objects, width=88, sort_dicts=False),

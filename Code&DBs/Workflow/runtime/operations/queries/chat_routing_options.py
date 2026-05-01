@@ -40,14 +40,16 @@ class QueryChatRoutingOptions(BaseModel):
         ),
     )
     include_cli: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "When false (default), only transport_type='API' rows are returned."
-            " CLI from chat is currently broken end-to-end (see"
-            " project_chat_api_only_for_now memory): the runtime hardcodes"
-            " transport_type='CLI' in upsert_derived_route, which trigger"
-            " 378 then rejects for HTTP-only providers, breaking dispatch."
-            " Set include_cli=true only for diagnostic purposes."
+            "When true (default since 2026-04-30), CLI candidates appear in"
+            " the picker alongside API candidates. The runtime hardcoding bug"
+            " in upsert_derived_route was fixed and per-provider smoke tests"
+            " (google gemini, openai non-codex) returned successfully."
+            " anthropic CLI requires a fresh `claude /login` on the host."
+            " HTTP-only providers (openrouter, together, fireworks, deepseek)"
+            " continue to have no CLI rows because trigger 378 blocks them."
+            " Pass include_cli=false to filter to API-only diagnostically."
         ),
     )
 

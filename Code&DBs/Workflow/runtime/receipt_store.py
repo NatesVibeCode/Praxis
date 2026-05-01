@@ -379,6 +379,7 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
             f"failure_category:{_normalize_tag_value(failure_category or 'unknown')}",
             f"provider:{_normalize_tag_value(str(payload.get('provider_slug') or 'unknown'))}",
             f"model:{_normalize_tag_value(str(payload.get('model_slug') or 'unknown'))}",
+            f"receipt_failure_identity:{_normalize_tag_value(source_issue_id)}",
         )
         dedupe_tags = (
             "auto-filed",
@@ -423,7 +424,11 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
                 source_kind="receipt_store",
                 discovered_in_run_id=run_id or None,
                 discovered_in_receipt_id=receipt_id or None,
-                source_issue_id=source_issue_id,
+                # `source_issue_id` is a real FK to `issues.issue_id`. The
+                # auto-filer's receipt.failure:* value is an aggregation
+                # identity, not an issue row. Keep it in tags/context for
+                # dedupe and observability; do not write it into the FK column.
+                source_issue_id=None,
                 tags=signature_tags,
                 resume_context={
                     "auto_bug_identity": {

@@ -1,0 +1,36 @@
+{
+  "name": "Roadmap Burn Down Wave 0 - Triage And Prune",
+  "workflow_id": "roadmap_burndown_20260501_wave0_triage_prune",
+  "phase": "execute",
+  "workdir": ".",
+  "outcome_goal": "Turn the cleaned roadmap into an execution-ready authority map before build work begins.",
+  "jobs": [
+    {
+      "label": "roadmap_keep_kill_reparent",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "analysis",
+      "timeout": 600,
+      "submission_required": false,
+      "workdir": ".",
+      "prompt": "Use the canonical Praxis operator surfaces, not markdown drift, to inspect the open roadmap. Produce a compact operator packet with four lists: keep active now, retire as stale, reparent or merge, and keep parked as future bet. Treat evidence, receipts, and current bug/heatmap authority as stronger than old roadmap prose. Do not mutate roadmap state in this job."
+    },
+    {
+      "label": "bug_evidence_readiness",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "analysis",
+      "timeout": 600,
+      "submission_required": false,
+      "workdir": ".",
+      "prompt": "Inspect the live bug triage packet and work assignment matrix. Classify the active work into evidence debt, stale projection, live defect, and implementation-ready. Return the top ten work items that should become proof-first burn-down jobs, with the authority domain, why it matters, and what evidence would prove done. Do not mutate bug state."
+    },
+    {
+      "label": "wave_dependency_check",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "planner",
+      "timeout": 600,
+      "submission_required": false,
+      "workdir": ".",
+      "prompt": "Review the six-wave burn-down shape for dependency mistakes. The intended order is: triage/prune, validation foundation, gateway authority cleanup, public beta wedge, LLM request contract, deferred product quarantine. Identify anything that should not run yet, anything missing from earlier gates, and any write-scope collision risk. Do not mutate state."
+    }
+  ]
+}

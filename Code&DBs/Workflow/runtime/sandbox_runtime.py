@@ -76,6 +76,7 @@ _CLI_AGENT_USER = "praxis-agent"
 _CLI_AGENT_UID = 1100
 _CLI_AGENT_GID = 1100
 _OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
+_GOOGLE_AUTH_SEED_PATH = str(container_auth_seed_dir() / "google-gemini-oauth_creds.json")
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,14 +181,86 @@ def _execution_write_scope(metadata: Mapping[str, Any] | None) -> tuple[str, ...
     )
 
 
+def _execution_write_scope_entries(metadata: Mapping[str, Any] | None) -> tuple[tuple[str, bool], ...]:
+    if not isinstance(metadata, Mapping):
+        return ()
+    execution_bundle = metadata.get("execution_bundle")
+    if not isinstance(execution_bundle, Mapping):
+        return ()
+    access_policy = execution_bundle.get("access_policy")
+    if not isinstance(access_policy, Mapping):
+        return ()
+    raw_scope = access_policy.get("write_scope")
+    if raw_scope is None:
+        return ()
+    raw_values = [raw_scope] if isinstance(raw_scope, (str, Path)) else raw_scope
+    if not isinstance(raw_values, Sequence) or isinstance(raw_values, (str, bytes, bytearray)):
+        return ()
+    entries: list[tuple[str, bool]] = []
+    for value in raw_values:
+        raw_text = str(value or "").strip()
+        if not raw_text:
+            continue
+        normalized_path = _normalize_relative_path(
+            raw_text,
+            field_name="execution_bundle.access_policy.write_scope",
+        )
+        is_directory = raw_text.endswith("/")
+        entry = (normalized_path, is_directory)
+        if entry not in entries:
+            entries.append(entry)
+    return tuple(entries)
+
+
+def _chmod_workspace(path: str | Path, mode_expr: str) -> None:
+    try:
+        subprocess.run(
+            ["chmod", "-R", mode_expr, str(path)],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+    except Exception:
+        pass
+
+
+def _make_workspace_writable(workspace_root: str) -> None:
+    _chmod_workspace(workspace_root, "a+rwX")
+
+
+def _prepare_workspace_write_scope(
+    workspace_root: str,
+    write_scope_entries: Sequence[tuple[str, bool]],
+) -> None:
+    root = Path(workspace_root)
+    if not root.exists():
+        return
+    for relpath, is_directory in write_scope_entries:
+        target = root / relpath
+        if is_directory or target.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch(exist_ok=True)
+
+    _chmod_workspace(root, "a-w,a+rX")
+    for relpath, is_directory in write_scope_entries:
+        target = root / relpath
+        if is_directory or target.is_dir():
+            _chmod_workspace(target, "a+rwX")
+        else:
+            try:
+                target.chmod(0o666)
+            except OSError:
+                pass
+
+
 def _submission_required(metadata: Mapping[str, Any] | None) -> bool:
-    # Determines whether this job runs under the sealed-submission contract
-    # (workflow_execution::mutating-jobs-use-sealed-submission-and-verify-refs-
-    # only). Under that contract, the sandbox filesystem is ephemeral scratch:
-    # the authoritative deliverable is the workflow_job_submissions row the
-    # agent writes via the candidate or artifact submission tool,
-    # not on-disk artifacts. Filesystem write_scope enforcement and host
-    # dehydration are legacy-mode only.
+    # Determines whether this job runs under the sealed-submission contract.
+    # Under that contract, the sandbox filesystem is ephemeral scratch and the
+    # authoritative deliverable is the workflow_job_submissions row. Scope
+    # drift is still captured as structured evidence and elevated to job
+    # failure by the execution envelope.
     if not isinstance(metadata, Mapping):
         return False
     execution_bundle = metadata.get("execution_bundle")
@@ -357,8 +430,9 @@ def _validated_artifact_refs(
         for ref in out_of_scope_refs
     )
 
-    # Submission contract: drift is captured, job continues. Authority is
-    # the workflow_job_submissions row.
+    # Submission contract: drift is captured for the receipt path. The workflow
+    # execution envelope marks the job failed instead of promoting the scratch
+    # artifact.
     if submission_required:
         return normalized_refs, drift_records
 
@@ -492,8 +566,14 @@ def _cli_auth_volume_flags(*, provider_slug: str | None = None) -> list[str]:
         if spec.provider_slug == "anthropic" and spec.host_relative_path == ".claude.json":
             continue
         host_path = os.path.join(home, spec.host_relative_path)
+        container_path = spec.container_path
+        # Gemini rewrites oauth_creds.json during normal CLI startup. Mount the
+        # host file as a read-only seed, then copy it into writable tmpfs during
+        # bootstrap instead of overlaying the live target with a read-only file.
+        if spec.provider_slug == "google" and spec.host_relative_path == ".gemini/oauth_creds.json":
+            container_path = _GOOGLE_AUTH_SEED_PATH
         if any(os.path.isfile(os.path.join(probe_home, spec.host_relative_path)) for probe_home in probe_homes):
-            flags.extend(["-v", f"{host_path}:{spec.container_path}:ro"])
+            flags.extend(["-v", f"{host_path}:{container_path}:ro"])
     return flags
 
 
@@ -513,33 +593,40 @@ def _cli_home_tmpfs_flags(*, uid: int = _CLI_AGENT_UID, gid: int = _CLI_AGENT_GI
 def _cli_requires_root_auth_bootstrap(
     *, provider_slug: str | None, auth_mount_policy: str, requested_user: str | None
 ) -> bool:
-    """OpenAI CLI needs root only long enough to copy the host auth file."""
+    """Some CLIs need root only long enough to copy host auth seeds."""
     normalized_provider = str(provider_slug or "").strip().lower()
     normalized_policy = str(auth_mount_policy or "").strip().lower()
     return (
-        normalized_provider == "openai"
+        normalized_provider in {"openai", "google"}
         and normalized_policy != "none"
         and bool(requested_user)
     )
 
 
 def _cli_auth_bootstrap_command(command: str, *, provider_slug: str | None) -> str:
-    """Copy root-readable OpenAI auth into the agent home, then drop privileges."""
-    if str(provider_slug or "").strip().lower() != "openai":
+    """Copy root-readable provider auth into the agent home, then drop privileges."""
+    normalized_provider = str(provider_slug or "").strip().lower()
+    if normalized_provider == "openai":
+        seed_path = _OPENAI_AUTH_SEED_PATH
+        auth_dir = str(_SANDBOX_HOME / ".codex")
+        auth_target = str(_SANDBOX_HOME / ".codex" / "auth.json")
+    elif normalized_provider == "google":
+        seed_path = _GOOGLE_AUTH_SEED_PATH
+        auth_dir = str(_SANDBOX_HOME / ".gemini")
+        auth_target = str(_SANDBOX_HOME / ".gemini" / "oauth_creds.json")
+    else:
         return command
 
     quoted_command = shlex.quote(command)
     fallback_command = shlex.quote(f"HOME={shlex.quote(str(_SANDBOX_HOME))} bash -lc {quoted_command}")
     return (
         "set -e; "
-        f"if [ -f {shlex.quote(_OPENAI_AUTH_SEED_PATH)} ]; then "
-        f"mkdir -p {shlex.quote(str(_SANDBOX_HOME / '.codex'))}; "
-        f"cp {shlex.quote(_OPENAI_AUTH_SEED_PATH)} "
-        f"{shlex.quote(str(_SANDBOX_HOME / '.codex' / 'auth.json'))}; "
+        f"if [ -f {shlex.quote(seed_path)} ]; then "
+        f"mkdir -p {shlex.quote(auth_dir)}; "
+        f"cp {shlex.quote(seed_path)} {shlex.quote(auth_target)}; "
         f"chown {_CLI_AGENT_UID}:{_CLI_AGENT_GID} "
-        f"{shlex.quote(str(_SANDBOX_HOME / '.codex'))} "
-        f"{shlex.quote(str(_SANDBOX_HOME / '.codex' / 'auth.json'))}; "
-        f"chmod 600 {shlex.quote(str(_SANDBOX_HOME / '.codex' / 'auth.json'))}; "
+        f"{shlex.quote(auth_dir)} {shlex.quote(auth_target)}; "
+        f"chmod 600 {shlex.quote(auth_target)}; "
         "fi; "
         "if command -v setpriv >/dev/null 2>&1; then "
         f"exec setpriv --reuid={_CLI_AGENT_UID} --regid={_CLI_AGENT_GID} "
@@ -669,11 +756,9 @@ class SandboxExecutionResult:
     container_cpu_percent: float | None = None
     container_mem_bytes: int | None = None
     # Scratch-drift record for submission-contract jobs. When an agent writes
-    # files outside the declared write_scope while a sealed submission is the
-    # authoritative deliverable, we still collect the observation as structured
-    # evidence for downstream ingestion (verifier worker, drift tracker, or
-    # shard-suggestion feedback) rather than failing the job. Empty tuple when
-    # no drift detected or the job is legacy-mode.
+    # files outside the declared write_scope, the sandbox reports the finding
+    # here so the execution envelope can fail the job and the receipt can carry
+    # the exact out-of-scope artifact evidence.
     artifact_scope_drift: tuple[Mapping[str, Any], ...] = ()
     workspace_manifest_audit: Mapping[str, Any] = field(default_factory=dict)
 
@@ -1945,6 +2030,7 @@ class SandboxRuntime:
             provider_metadata,
         )
         write_scope = _execution_write_scope(provider_metadata)
+        write_scope_entries = _execution_write_scope_entries(provider_metadata)
         submission_required = _submission_required(provider_metadata)
         session = provider.create_session(
             SandboxSessionSpec(
@@ -1995,22 +2081,16 @@ class SandboxRuntime:
                         path_filter=shard_path_filter,
                     ),
                 )
-            # The hydrated workspace is owned by the worker uid (root). The
-            # ephemeral CLI container runs as uid 1100 and cannot write into
-            # root-owned directories; Write-tool calls silently fail and the
-            # agent summarizes as "written" without checking. Make the
-            # materialized tree writable by any container uid.
             if getattr(provider, "execution_lane", "") == "local":
-                import subprocess as _sp
-                try:
-                    _sp.run(
-                        ["chmod", "-R", "a+rwX", session.workspace_root],
-                        check=False,
-                        capture_output=True,
-                        timeout=30,
-                    )
-                except Exception:
-                    pass
+                # The hydrated workspace is copied into a temp sandbox. Default
+                # it to read-only, then open only declared write targets so the
+                # local Docker lane denies obvious out-of-scope writes before
+                # they can become drift. Jobs without a declared write_scope keep
+                # the legacy all-writable behavior.
+                if write_scope_entries:
+                    _prepare_workspace_write_scope(session.workspace_root, write_scope_entries)
+                else:
+                    _make_workspace_writable(session.workspace_root)
             before_manifest = _workspace_manifest(session.workspace_root)
             result = provider.exec(
                 session,
@@ -2134,6 +2214,8 @@ class SandboxRuntime:
             disposition = "failed"
             raise
         finally:
+            if getattr(provider, "execution_lane", "") == "local":
+                _make_workspace_writable(session.workspace_root)
             provider.destroy_session(session, disposition)
 
 

@@ -1,0 +1,229 @@
+/* =============================================================
+ * Praxis primitives — PRINT MODE
+ *
+ * For investor decks, board memos, hand-out PDFs. Ink-conservative,
+ * pure black/white, no shadows, no animation, no color accents.
+ *
+ * Activated by:
+ *   - body.print (manual toggle)
+ *   - @media print (automatic when File > Print, applied to body)
+ * ============================================================= */
+
+/* Token overrides — body.print */
+body.print {
+  --bg:           #ffffff;
+  --bg-edge:      #ffffff;
+  --bg-card:      #ffffff;
+  --bg-alt:       #f8f8f8;
+  --bg-input:     #ffffff;
+  --bg-editor:    #f8f8f8;
+
+  --text:         #000000;
+  --text-muted:   #4a4a4a;
+  --text-inverse: #ffffff;
+  --fg-faint:     #b8b8b8;
+  --fg1:          #000000;
+  --fg2:          #4a4a4a;
+  --fg3:          #6e6e6e;
+  --fg-inverse:   #ffffff;
+
+  --accent:        #000000;
+  --accent-strong: #000000;
+  --accent-warm:   #000000;
+  --warning:        #4a4a4a;
+  --warning-strong: #000000;
+  --success:        #4a4a4a;
+  --success-bright: #000000;
+  --danger:         #4a4a4a;
+  --danger-soft:    #6e6e6e;
+
+  --border:        #000000;
+  --border-soft:   #4a4a4a;
+  --border-faint:  #b8b8b8;
+  --border-accent: #000000;
+  --border-accent-soft: #000000;
+  --border-success-soft: #4a4a4a;
+  --border-warning-soft: #4a4a4a;
+  --border-danger-soft:  #4a4a4a;
+
+  --surface-hover:        transparent;
+  --surface-muted:        #f8f8f8;
+  --surface-subtle:       #ffffff;
+  --surface-accent-soft:  #f0f0f0;
+  --surface-accent-strong:#e8e8e8;
+  --surface-success-soft: #f0f0f0;
+  --surface-warning-soft: #f0f0f0;
+  --surface-danger-soft:  #f0f0f0;
+
+  --shadow-card:    none;
+  --shadow-panel:   none;
+  --shadow-popover: none;
+  --shadow-modal:   none;
+  --shadow-drawer:  none;
+  --shadow-ambient: none;
+  --shadow-lifted:  none;
+  --card-shadow:    none;
+
+  --surface-elevated: #ffffff;
+  --surface-raised:   #ffffff;
+
+  --accent-glow-soft:   none;
+  --accent-glow-strong: none;
+  --focus-ring:         none;
+
+  color-scheme: light;
+  background: #ffffff;
+  color: #000000;
+  font-family: 'Inter', Georgia, 'Times New Roman', serif;
+}
+
+/* Kill animations */
+body.print, body.print * { animation: none !important; transition: none !important; }
+
+/* Suppress retro idioms */
+body.print .prx-section-strip .label::before,
+body.print .prx-section-strip .label::after,
+body.print .prx-receipt .hd > span:first-child::before,
+body.print .prx-receipt .hd > span:first-child::after,
+body.print .prx-frame::before,
+body.print .prx-frame::after,
+body.print .prx-drawer-panel > header .title::before,
+body.print .prx-drawer-panel > header .title::after,
+body.print .prx-wizard-preview .preview-cap::before { content: none; }
+
+body.print [data-scanlines]::after,
+body.print [data-scanlines="sweep"]::before { display: none; }
+
+body.print .prx-cursor,
+body.print .prx-spinner,
+body.print .prx-radar svg .sweep,
+body.print .prx-radar svg .trail { display: none; }
+
+body.print .prx-drawer,
+body.print .prx-palette { display: none !important; }
+
+/* Cards: thin black border, no shadow */
+body.print .prx-receipt,
+body.print .prx-table,
+body.print .prx-friction,
+body.print .prx-subscribers,
+body.print .prx-idem,
+body.print .prx-roi,
+body.print .prx-diag,
+body.print .prx-workflow-bar,
+body.print .prx-flow,
+body.print .prx-wizard,
+body.print .prx-step-builder,
+body.print .prx-cmd-bar,
+body.print .prx-flow-node,
+body.print .stage,
+body.print .prx-frame,
+body.print .prx-vgap,
+body.print .prx-transport,
+body.print .prx-dispatch {
+  background: #ffffff;
+  border: 1px solid #000000;
+  box-shadow: none;
+}
+
+/* Marquee rules → flat black 1px */
+body.print .prx-rule {
+  display: block;
+  font-size: 0;
+  height: 1px;
+  background: #000000;
+  color: transparent;
+  margin: 12px 0;
+}
+
+/* Status caps: black text, no color */
+body.print .stat-cap,
+body.print .prx-table .stat-cap,
+body.print .prx-runlog .stat,
+body.print .prx-flow-node .ft .stat-cap {
+  color: #000000;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Diff lines: grayscale */
+body.print .prx-diff .line[data-mark="+"] { color: #000000; background: transparent; font-weight: 600; }
+body.print .prx-diff .line[data-mark="-"] { color: #4a4a4a; background: transparent; text-decoration: line-through; }
+body.print .prx-diff .line[data-mark="="] { color: #6e6e6e; }
+body.print .prx-diff .line[data-mark="!"] { color: #000000; background: transparent; font-style: italic; }
+
+/* Block-character bars: full=black */
+body.print .prx-gauge .ticks .t.on,
+body.print .prx-lcd .bar .on { background: #000000; color: #000000; }
+
+/* Buttons: black border, white fill */
+body.print button {
+  background: #ffffff !important;
+  color: #000000 !important;
+  border: 1px solid #000000 !important;
+  box-shadow: none !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+/* Toggle hidden in print */
+body.print #mode-toggle { display: none; }
+
+/* Page-break friendliness */
+body.print section.demo { page-break-inside: avoid; break-inside: avoid; }
+body.print .topline { page-break-after: avoid; }
+
+/* Typography — sentence case, no tracked uppercase */
+body.print .prx-section-strip,
+body.print .prx-table thead th,
+body.print .prx-table-meta,
+body.print .prx-receipt .hd,
+body.print .prx-receipt .k,
+body.print .prx-form-group-title,
+body.print .prx-field-label,
+body.print .prx-runlog .row .stat,
+body.print .prx-friction .hd,
+body.print .prx-subscribers .hd,
+body.print .prx-flow-node .body .kind,
+body.print .prx-wizard-steps,
+body.print .prx-wizard-foot,
+body.print .prx-roi .hd .kind,
+body.print .prx-roi .stat .label,
+body.print .prx-diag .hd,
+body.print .prx-diag .row .k,
+body.print .prx-workflow-bar .id .meta,
+body.print .prx-palette-foot,
+body.print .prx-palette-row .kind {
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #000000;
+}
+
+body.print code, body.print pre, body.print .mono,
+body.print .prx-receipt .ft .hash,
+body.print .prx-idem .hash,
+body.print .prx-dispatch .hash,
+body.print .prx-wizard-preview pre { font-family: 'IBM Plex Mono', ui-monospace, monospace; color: #000000; }
+
+/* @media print — auto-apply when File > Print */
+@media print {
+  body { /* alias body.print rules by adding the class via CSS */ }
+  body.print, body { /* ensure tokens flow even without manual toggle */ }
+}
+@media print {
+  body {
+    --bg: #ffffff; --bg-card: #ffffff; --bg-alt: #f8f8f8;
+    --text: #000000; --text-muted: #4a4a4a;
+    --accent: #000000; --warning: #4a4a4a; --success: #4a4a4a; --danger: #4a4a4a;
+    --border: #000000; --border-faint: #b8b8b8;
+    --shadow-card: none; --shadow-modal: none; --shadow-drawer: none;
+    background: #ffffff; color: #000000;
+    font-family: 'Inter', sans-serif;
+  }
+  body, body * { animation: none !important; transition: none !important; }
+  body .prx-drawer, body .prx-palette, #mode-toggle { display: none !important; }
+  body [data-scanlines]::after, body [data-scanlines="sweep"]::before { display: none; }
+  body .prx-cursor, body .prx-spinner, body .prx-radar svg .sweep, body .prx-radar svg .trail { display: none; }
+  body section.demo { page-break-inside: avoid; }
+}

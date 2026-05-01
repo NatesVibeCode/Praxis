@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { StatusRail } from '../primitives';
 import { materializePlan, triggerWorkflow } from '../shared/buildController';
 import type { BuildPayload } from '../shared/types';
 import type { ComposeDraftSpec, ComposeSurfaceSpec, PraxisSurfaceBundleV4 } from './manifest';
 import {
   WorkspaceClauseEditor,
+  WorkspaceBoundaryFence,
   WorkspaceCompiledReceiptGrid,
   WorkspaceContractList,
   WorkspacePathScopePicker,
@@ -139,6 +141,13 @@ export function WorkspaceComposeSurface({
         : 'out of date'
       : 'draft';
   const readyLabel = canDispatch ? 'ready to dispatch' : buildPayload ? 'compile changed' : 'unsealed';
+  const scopeTone = readScopeLines.length || writeScopeLines.length ? 'ok' as const : 'warn' as const;
+  const proofTone = verifierMissing || !verifiers.length ? 'warn' as const : 'ok' as const;
+  const contractTone = contractState === 'compiled'
+    ? 'ok' as const
+    : contractState === 'draft'
+      ? 'dim' as const
+      : 'warn' as const;
 
   const contractText = useMemo(() => {
     const sections = [
@@ -360,9 +369,15 @@ export function WorkspaceComposeSurface({
           {error ? <div className="workspace-compose__error">{error}</div> : null}
 
           <div className="workspace-compose__actionbar">
-            <span className="workspace-compose__status">
-              scope <b>{scopeLabel}</b> / proof gate <b>{verifierLabel}</b> / clauses <b>{requirementLines.length + antiRequirementLines.length}</b> / {contractState}
-            </span>
+            <StatusRail
+              className="workspace-compose__status"
+              items={[
+                { label: 'scope', value: scopeLabel, tone: scopeTone },
+                { label: 'proof gate', value: verifierLabel, tone: proofTone },
+                { label: 'clauses', value: requirementLines.length + antiRequirementLines.length },
+                { label: 'contract', value: contractState, tone: contractTone },
+              ]}
+            />
             <button
               type="button"
               className="workspace-compose__ghost"
@@ -410,8 +425,7 @@ export function WorkspaceComposeSurface({
             </div>
           ) : null}
 
-          <WorkspaceContractList title="read scope" items={readScopeLines} empty="No read scope locked yet." locked />
-          <WorkspaceContractList title="write scope" items={writeScopeLines} empty="No write scope locked yet." locked />
+          <WorkspaceBoundaryFence readScope={readScopeLines} writeScope={writeScopeLines} />
           <WorkspaceContractList
             title="requirements"
             items={requirementLines.length ? requirementLines : derivedRequirements}
@@ -442,12 +456,15 @@ export function WorkspaceComposeSurface({
         </aside>
       </div>
 
-      <div className="workspace-compose__meta-rail">
-        <span>STATUS · <b>{contractState}</b></span>
-        <span>SCOPE · <b>{scopeLabel}</b></span>
-        <span>PROOF GATE · <b>{verifierLabel}</b></span>
-        <span>WORKSPACE · <b>{workspaceTitle}</b></span>
-      </div>
+      <StatusRail
+        className="workspace-compose__meta-rail"
+        items={[
+          { label: 'status', value: contractState, tone: contractTone },
+          { label: 'scope', value: scopeLabel, tone: scopeTone },
+          { label: 'proof gate', value: verifierLabel, tone: proofTone },
+          { label: 'workspace', value: workspaceTitle },
+        ]}
+      />
     </div>
   );
 }

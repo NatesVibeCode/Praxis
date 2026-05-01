@@ -133,7 +133,7 @@ const TEST_ROUTES: RouteRegistryRow[] = [
     tab_label_template: '{{moonRunId ? "Run view" : buildWorkflowId ? "Workflow workspace" : "New workflow"}}',
     context_label: 'App builder',
     context_detail_template: 'Shape the workflow graph.',
-    nav_description_template: 'Jump back into Moon Build.',
+    nav_description_template: 'Jump back into Workflow Build.',
     nav_keywords: ['build', 'workflow', 'moon'],
     event_bus_kind: 'build',
     keyboard_shortcut: 'ctrl+n',

@@ -73,3 +73,83 @@ def test_client_operating_model_query_builds_side_effect_free_builder_validation
         for item in result["operator_view"]["payload"]["validation"]["errors"]
     }
     assert "builder.block_not_approved" in reasons
+
+
+def test_client_operating_model_query_builds_workflow_context_composite() -> None:
+    query = QueryClientOperatingModelView(
+        view="workflow_context_composite",
+        generated_at="2026-04-30T12:00:00Z",
+        permission_scope={"scope_ref": "workflow.renewal", "visibility": "full"},
+        inputs={
+            "workflow_ref": "workflow.renewal",
+            "context_pack": {
+                "context_ref": "workflow_context:renewal",
+                "workflow_ref": "workflow.renewal",
+                "context_mode": "synthetic",
+                "truth_state": "synthetic",
+                "confidence_score": 0.41,
+                "confidence": {
+                    "score": 0.41,
+                    "state": "low",
+                    "inputs": {
+                        "promotion_evidence_count": 0,
+                    },
+                },
+                "entities": [
+                    {"entity_kind": "object", "label": "Account", "truth_state": "synthetic"},
+                    {"entity_kind": "system", "label": "CRM", "truth_state": "synthetic"},
+                ],
+                "blockers": [
+                    {
+                        "severity": "hard",
+                        "reason_code": "workflow_context.unknown_mutator_risk",
+                    }
+                ],
+                "evidence_refs": [
+                    {"evidence_ref": "synthetic.fixture", "evidence_tier": "synthetic"},
+                    {"evidence_ref": "sop.renewal", "evidence_tier": "documented"},
+                ],
+                "verifier_expectations": [{"verifier_ref": "verifier.workflow_context.renewal"}],
+                "synthetic_world": {
+                    "world_ref": "world.renewal",
+                    "seed": "seed-1",
+                    "synthetic": True,
+                    "records": [{"record_id": "synthetic:account:1"}],
+                },
+                "review_packet": {
+                    "queued_decisions": [
+                        {"decision_type": "accepted_risk_or_blocker_resolution"}
+                    ]
+                },
+            },
+            "builder_validation_view": {
+                "operator_view": {
+                    "state": "healthy",
+                    "payload": {
+                        "validation": {
+                            "ok": True,
+                            "errors": [],
+                            "warnings": [],
+                        },
+                        "safe_action_summary": [{"action_ref": "workflow_builder.save_candidate"}],
+                    },
+                }
+            },
+        },
+    )
+
+    result = handle_client_operating_model_view(query, subsystems=None)
+
+    assert result["ok"] is True
+    assert result["view"] == "workflow_context_composite"
+    assert result["state"] == "blocked"
+    payload = result["operator_view"]["payload"]
+    assert payload["buildability"]["ok"] is True
+    assert payload["synthetic_proof"]["record_count"] == 1
+    assert payload["binding_coverage"]["state"] == "missing"
+    assert payload["real_evidence"]["state"] == "missing"
+    assert payload["deployability"]["state"] == "blocked"
+    assert payload["truth_state_classes"]["synthetic"] >= 3
+    assert set(payload["truth_state_classes"]).issuperset(
+        {"none", "inferred", "synthetic", "verified", "promoted", "blocked"}
+    )

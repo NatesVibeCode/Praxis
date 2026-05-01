@@ -64,6 +64,56 @@ _ALLOWLIST: dict[str, dict[str, Any]] = {
         "select": ("module_id", "module_path", "kind", "name", "indexed_at"),
         "where": ("kind", "module_path"),
     },
+    "action_fingerprints": {
+        "select": (
+            "fingerprint_id",
+            "source_surface",
+            "action_kind",
+            "operation_name",
+            "normalized_command",
+            "path_shape",
+            "shape_hash",
+            "session_ref",
+            "receipt_id",
+            "ts",
+        ),
+        "where": (
+            "source_surface",
+            "action_kind",
+            "operation_name",
+            "shape_hash",
+            "session_ref",
+        ),
+    },
+    "tool_opportunities_pending": {
+        "select": (
+            "shape_hash",
+            "proposed_decision_key",
+            "occurrence_count",
+            "distinct_surfaces",
+            "distinct_sessions",
+            "action_kinds",
+            "surfaces",
+            "operation_names",
+            "sample_commands",
+            "sample_path_shapes",
+            "first_seen",
+            "last_seen",
+        ),
+        "where": ("shape_hash",),
+    },
+    "gateway_op_recurrence": {
+        "select": (
+            "operation_name",
+            "occurrence_count",
+            "distinct_surfaces",
+            "distinct_sessions",
+            "surfaces",
+            "first_seen",
+            "last_seen",
+        ),
+        "where": ("operation_name",),
+    },
 }
 
 

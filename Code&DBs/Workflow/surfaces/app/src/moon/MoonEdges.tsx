@@ -90,19 +90,19 @@ export function edgeStyleFromFamily(edge: OrbitEdge, isFlowing: boolean): EdgeSt
     : 'var(--moon-fg-muted, rgba(232, 232, 232, 0.55))';
   switch (edge.gateFamily) {
     case 'conditional':
-      return { color: 'var(--moon-fg, #ffffff)', strokeDasharray: '7 5', baseWidth: 1.75 };
+      return { color: isFlowing ? 'var(--moon-fg, #ffffff)' : baseColor, strokeDasharray: '6 6', baseWidth: 1.15 };
     case 'after_failure':
       return {
         color: 'var(--moon-danger, #ff8a6a)',
         strokeDasharray: undefined,
-        baseWidth: 1.9,
+        baseWidth: 1.35,
       };
     case 'after_any':
-      return { color: baseColor, strokeDasharray: '2 4', baseWidth: 1.5 };
+      return { color: baseColor, strokeDasharray: '2 5', baseWidth: 1.05 };
     case 'after_success':
-      return { color: 'var(--moon-fg, #ffffff)', strokeDasharray: undefined, baseWidth: 1.9 };
+      return { color: isFlowing ? 'var(--moon-fg, #ffffff)' : baseColor, strokeDasharray: undefined, baseWidth: 1.25 };
     default:
-      return { color: baseColor, strokeDasharray: undefined, baseWidth: 1.75 };
+      return { color: baseColor, strokeDasharray: undefined, baseWidth: 1.15 };
   }
 }
 
@@ -140,11 +140,11 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
 
         const isSelected = edge.id === selectedEdgeId;
         const isFlowing = isSelected || edge.isOnDominantPath;
-        const style = edgeStyleFromFamily(edge, isFlowing);
+        const style = edgeStyleFromFamily(edge, isSelected);
         // When 3+ siblings share a source, thin each blade so the bundle
         // reads as a single fan gesture rather than three competing lines.
         const fanThin = edge.siblingCount >= 3 ? 0.8 : 1;
-        const baseWidth = isSelected ? style.baseWidth + 0.75 : style.baseWidth;
+        const baseWidth = isSelected ? style.baseWidth + 0.55 : style.baseWidth;
         const width = Math.max(1, baseWidth * fanThin);
 
         // Focus-lineage dim: when a selection has reduced this edge out of
@@ -155,13 +155,13 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
         return (
           <g
             key={edge.id}
-            filter={isFlowing ? 'url(#moon-edge-glow)' : undefined}
+            filter={isSelected ? 'url(#moon-edge-glow)' : undefined}
             style={{ opacity: groupOpacity, transition: 'opacity 240ms ease' }}
           >
             <path
               d={geometry.path}
-              stroke={isFlowing ? 'rgba(246, 241, 232, 0.52)' : 'rgba(246, 241, 232, 0.36)'}
-              strokeWidth={Math.max(9, width * 3.6)}
+              stroke={isSelected ? 'rgba(246, 241, 232, 0.24)' : 'rgba(246, 241, 232, 0.1)'}
+              strokeWidth={isSelected ? Math.max(4, width * 2) : Math.max(3, width * 1.8)}
               strokeLinecap="round"
               strokeLinejoin="round"
               fill="none"
@@ -181,8 +181,8 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
             />
             <path
               d={geometry.path}
-              stroke={isFlowing ? 'rgba(255, 255, 255, 0.92)' : style.color}
-              strokeWidth={Math.max(width, 3.25)}
+              stroke={isSelected ? 'rgba(255, 255, 255, 0.78)' : style.color}
+              strokeWidth={isSelected ? Math.max(width, 1.9) : Math.max(width, 1.2)}
               strokeLinecap="round"
               strokeLinejoin="round"
               fill="none"
@@ -192,32 +192,32 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
             <circle
               cx={geometry.startX}
               cy={geometry.startY}
-              r={4.4}
-              fill={isFlowing ? 'rgba(255, 255, 255, 0.96)' : 'rgba(246, 241, 232, 0.76)'}
+              r={isSelected ? 3.2 : 2.4}
+              fill={isSelected ? 'rgba(255, 255, 255, 0.76)' : 'rgba(246, 241, 232, 0.42)'}
               stroke="rgba(8, 8, 8, 0.82)"
-              strokeWidth={1.8}
+              strokeWidth={1.2}
               style={{ pointerEvents: 'none' }}
             />
             <circle
               cx={geometry.endX}
               cy={geometry.endY}
-              r={4.4}
-              fill={isFlowing ? 'rgba(255, 255, 255, 0.96)' : 'rgba(246, 241, 232, 0.76)'}
+              r={isSelected ? 3.2 : 2.4}
+              fill={isSelected ? 'rgba(255, 255, 255, 0.76)' : 'rgba(246, 241, 232, 0.42)'}
               stroke="rgba(8, 8, 8, 0.82)"
-              strokeWidth={1.8}
+              strokeWidth={1.2}
               style={{ pointerEvents: 'none' }}
             />
-            {isFlowing && (
+            {isSelected && (
               <path
                 d={geometry.path}
                 stroke={style.color}
-                strokeWidth={width * 1.6}
+                strokeWidth={Math.max(width * 1.2, 1.2)}
                 strokeLinecap="round"
                 fill="none"
-                strokeDasharray="4 24"
+                strokeDasharray="3 28"
                 style={{
                   pointerEvents: 'none',
-                  opacity: 0.35,
+                  opacity: 0.24,
                   animation: 'moon-edge-flow 2.5s infinite linear'
                 }}
               />

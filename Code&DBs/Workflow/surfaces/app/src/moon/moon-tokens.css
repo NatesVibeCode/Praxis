@@ -46,7 +46,8 @@
     --moon-font-size-xl: 18px;
     --moon-font-weight-medium: 500;
     --moon-font-weight-semibold: 600;
-    --moon-font-mono: var(--font-mono, monospace);
+    --moon-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --moon-font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
     --moon-radius-pill: 999px;
     --moon-radius-sm: 8px;

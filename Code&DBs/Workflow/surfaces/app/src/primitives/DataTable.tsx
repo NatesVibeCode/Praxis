@@ -14,6 +14,11 @@ interface DataTableProps {
   emptyState?: React.ReactNode;
 }
 
+/**
+ * DataTable — renders the prx-table CSS structure.
+ * Public API unchanged from the inline-styles version; only the rendered
+ * markup changes. Sort, click, selection behavior preserved.
+ */
 export function DataTable({ columns, data, onRowClick, selectedIndex, emptyState }: DataTableProps) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -37,100 +42,77 @@ export function DataTable({ columns, data, onRowClick, selectedIndex, emptyState
 
   if (columns.length === 0) {
     return (
-      <div style={{ padding: 'var(--space-lg, 16px)', color: 'var(--text-muted, #8b949e)', fontSize: 13 }}>
-        No columns configured
+      <div className="prx-table" data-testid="prx-data-table-empty">
+        <div style={{ padding: '16px', color: 'var(--text-muted, #8b949e)', fontSize: 13 }}>
+          No columns configured
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ width: '100%', overflowX: 'auto', boxSizing: 'border-box' }}>
-      <table style={{
-        width: '100%',
-        tableLayout: 'fixed',
-        borderCollapse: 'collapse',
-        fontSize: 13,
-        color: 'var(--text, #e6edf3)',
-      }}>
-        <thead>
-          <tr>
-            {columns.map((col) => (
-              <th
-                key={col.key}
-                onClick={col.sortable !== false ? () => handleSort(col.key) : undefined}
-                style={{
-                  padding: '8px 12px',
-                  textAlign: 'left',
-                  fontWeight: 600,
-                  fontSize: 12,
-                  color: 'var(--text-muted, #8b949e)',
-                  borderBottom: '1px solid var(--border, #30363d)',
-                  cursor: col.sortable !== false ? 'pointer' : 'default',
-                  userSelect: 'none',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {col.label ?? col.key}
-                {sortKey === col.key && (
-                  <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.length === 0 ? (
+    <div className="prx-table" data-testid="prx-data-table">
+      <div className="body">
+        <table style={{ width: '100%', tableLayout: 'fixed' }}>
+          <thead>
             <tr>
-              <td
-                colSpan={columns.length}
-                style={{ padding: '16px 12px', color: 'var(--text-muted, #8b949e)', textAlign: 'center' }}
-              >
-                {emptyState ?? 'No data'}
-              </td>
-            </tr>
-          ) : (
-            sorted.map((row, i) => (
-              <tr
-                key={i}
-                onClick={() => onRowClick?.(row, i)}
-                style={{
-                  background: selectedIndex === i
-                    ? 'var(--bg-selected, rgba(88,166,255,0.1))'
-                    : 'transparent',
-                  cursor: onRowClick ? 'pointer' : 'default',
-                  borderBottom: '1px solid var(--border, #21262d)',
-                }}
-                onMouseEnter={(e) => {
-                  if (selectedIndex !== i) {
-                    (e.currentTarget as HTMLTableRowElement).style.background = 'var(--bg-hover, rgba(255,255,255,0.04))';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (selectedIndex !== i) {
-                    (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
-                  }
-                }}
-              >
-                {columns.map((col) => (
-                  <td
+              {columns.map((col) => {
+                const isSorted = sortKey === col.key;
+                const cls = isSorted ? `sort-${sortDir}` : '';
+                return (
+                  <th
                     key={col.key}
-                    style={{
-                      padding: '8px 12px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
+                    className={cls}
+                    data-key={col.key}
+                    onClick={col.sortable !== false ? () => handleSort(col.key) : undefined}
+                    style={{ cursor: col.sortable !== false ? 'pointer' : 'default' }}
                   >
-                    {String(row[col.key] ?? '')}
-                  </td>
-                ))}
+                    {col.label ?? col.key}
+                    <span className="arrow" />
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={columns.length}
+                  className="empty"
+                  style={{ textAlign: 'center', padding: '16px 12px' }}
+                >
+                  {emptyState ?? 'No data'}
+                </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+            ) : (
+              sorted.map((row, i) => (
+                <tr
+                  key={i}
+                  className={selectedIndex === i ? 'selected' : ''}
+                  data-row-index={i}
+                  onClick={() => onRowClick?.(row, i)}
+                  style={{ cursor: onRowClick ? 'pointer' : 'default' }}
+                >
+                  {columns.map((col) => (
+                    <td
+                      key={col.key}
+                      style={{
+                        padding: '9px 14px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {String(row[col.key] ?? '')}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

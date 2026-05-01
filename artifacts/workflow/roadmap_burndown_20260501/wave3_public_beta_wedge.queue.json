@@ -1,0 +1,83 @@
+{
+  "name": "Roadmap Burn Down Wave 3 - Public Beta Wedge",
+  "workflow_id": "roadmap_burndown_20260501_wave3_public_beta_wedge",
+  "phase": "execute",
+  "workdir": ".",
+  "outcome_goal": "Build the smallest public-beta wedge around lifecycle, service startup, setup, and operator boundaries.",
+  "jobs": [
+    {
+      "label": "workflow_lifecycle_projection",
+      "agent": "google/gemini-3.1-pro-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave3.workflow_lifecycle_projection"
+      ],
+      "timeout": 1200,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow",
+        "Code&DBs/Workflow/storage",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Collapse workflow terminal lifecycle state, receipts, leases, and status projection toward one queryable lifecycle authority. Start from BUG-0DEF0D0A and BUG-98228556 if present. Do not build a monitor around broken state. Make a bounded change with tests that prove one source owns the transition being fixed."
+    },
+    {
+      "label": "service_lifecycle_target_authority",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave3.service_lifecycle_target_authority"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/service_lifecycle.py",
+        "Code&DBs/Workflow/runtime/setup_wizard.py",
+        "Code&DBs/Workflow/surfaces",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Promote service lifecycle behavior toward runtime-target-neutral authority and keep shell/docker scripts as adapters. Focus on one high-value split-brain path where setup or health claims success from the wrong authority. Add focused tests or an operator-view proof."
+    },
+    {
+      "label": "setup_onboarding_frontdoor",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave3.setup_onboarding_frontdoor"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "README.md",
+        "SETUP.md",
+        "config",
+        "Code&DBs/Workflow/runtime/onboarding",
+        "Code&DBs/Workflow/runtime/setup_wizard.py",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Make zero-to-operational setup more deterministic without making docs the authority. If public setup instructions and runtime profiles disagree, fix the runtime/profile source and leave docs as projections. Include a validation path for fresh-clone or first-run behavior."
+    },
+    {
+      "label": "operator_surface_boundary",
+      "agent": "google/gemini-3.1-pro-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave3.operator_surface_boundary"
+      ],
+      "timeout": 1200,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/operator_write.py",
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/runtime/operations",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Reduce operator surface authority ambiguity without a broad rewrite. Pick one direct surface-owned behavior that should be a gateway operation or repository boundary, move it to the clearer authority, and add tests. Avoid cosmetic decomposition; the change must reduce hidden state or duplicated authority."
+    }
+  ]
+}

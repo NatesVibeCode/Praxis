@@ -83,16 +83,16 @@ export type GateState = 'empty' | 'proposed' | 'configured' | 'blocked' | 'passe
 
 // --- Graph layout ---
 
-export const RANK_SPACING = 228;   // vertical: distance between readable workflow cards
-export const COLUMN_SPACING = 368; // horizontal: card-width branch lanes with readable labels
+export const RANK_SPACING = 168;   // vertical: compact workflow-card rhythm
+export const COLUMN_SPACING = 272; // horizontal: compact branch lanes with readable labels
 
 export type NodeShape = 'task' | 'decision' | 'checkpoint' | 'note';
 
 export const NODE_SHAPE_DIMENSIONS: Record<NodeShape, { width: number; height: number }> = {
-  checkpoint: { width: 118, height: 118 },
-  decision: { width: 154, height: 118 },
-  note: { width: 244, height: 138 },
-  task: { width: 244, height: 96 },
+  checkpoint: { width: 96, height: 96 },
+  decision: { width: 132, height: 104 },
+  note: { width: 208, height: 112 },
+  task: { width: 188, height: 78 },
 };
 
 export interface LayoutNode {

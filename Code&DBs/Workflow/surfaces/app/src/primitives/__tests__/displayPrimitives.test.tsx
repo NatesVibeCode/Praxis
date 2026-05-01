@@ -1,0 +1,107 @@
+import '@testing-library/jest-dom';
+import { render, screen } from '@testing-library/react';
+import React from 'react';
+
+import {
+  Bargraph,
+  DiffBlock,
+  GateBadge,
+  Gauge,
+  KbdCluster,
+  LedDot,
+  ManifestTree,
+  ReceiptCard,
+  Runlog,
+  SectionStrip,
+  Sparkline,
+  TokenChip,
+} from '../DisplayPrimitives';
+
+describe('display primitives render canonical prx-* shapes', () => {
+  test('SectionStrip renders prx-section-strip', () => {
+    render(<SectionStrip number={1} label="contract" />);
+    expect(screen.getByTestId('prx-section-strip')).toHaveClass('prx-section-strip');
+  });
+
+  test('TokenChip renders prx-chip data attrs', () => {
+    render(<TokenChip tone="locked" source="redacted">customer.email</TokenChip>);
+    const chip = screen.getByTestId('prx-token-chip');
+    expect(chip).toHaveClass('prx-chip');
+    expect(chip).toHaveAttribute('data-tone', 'locked');
+    expect(chip).toHaveAttribute('data-source', 'redacted');
+  });
+
+  test('GateBadge renders prx-gate state', () => {
+    render(<GateBadge state="approved">approved</GateBadge>);
+    const gate = screen.getByTestId('prx-gate-badge');
+    expect(gate).toHaveClass('prx-gate');
+    expect(gate).toHaveAttribute('data-state', 'approved');
+    expect(gate.querySelector('.glyph')).toBeInTheDocument();
+  });
+
+  test('ManifestTree renders rows', () => {
+    render(<ManifestTree rows={[{ glyph: '├─', label: 'read_scope', meta: 'read' }]} />);
+    const tree = screen.getByTestId('prx-manifest-tree');
+    expect(tree).toHaveClass('prx-tree');
+    expect(tree.querySelector('.row .glyph')).toBeInTheDocument();
+    expect(tree.querySelector('.row .meta')).toBeInTheDocument();
+  });
+
+  test('Runlog renders prx-runlog rows', () => {
+    render(<Runlog rows={[{ ts: '12:04', actor: 'agent', what: 'read ledger', status: 'ok', tone: 'ok' }]} />);
+    const runlog = screen.getByTestId('prx-runlog');
+    expect(runlog).toHaveClass('prx-runlog');
+    expect(runlog.querySelector('.row .stat')).toHaveAttribute('data-tone', 'ok');
+  });
+
+  test('DiffBlock renders prx-diff lines', () => {
+    render(<DiffBlock lines={[{ mark: '+', text: 'verifier: pass' }]} />);
+    const diff = screen.getByTestId('prx-diff-block');
+    expect(diff).toHaveClass('prx-diff');
+    expect(diff.querySelector('.line')).toHaveAttribute('data-mark', '+');
+  });
+
+  test('KbdCluster renders prx-kbd-cluster', () => {
+    render(<KbdCluster keys={['cmd', 'K']} />);
+    const cluster = screen.getByTestId('prx-kbd-cluster');
+    expect(cluster).toHaveClass('prx-kbd-cluster');
+    expect(cluster.querySelectorAll('.prx-kbd')).toHaveLength(2);
+  });
+
+  test('Gauge renders active ticks', () => {
+    render(<Gauge filled={4} total={6} label="0.66 confidence" tone="warn" />);
+    const gauge = screen.getByTestId('prx-gauge');
+    expect(gauge).toHaveClass('prx-gauge');
+    expect(gauge).toHaveAttribute('data-tone', 'warn');
+    expect(gauge.querySelectorAll('.ticks .t.on')).toHaveLength(4);
+  });
+
+  test('ReceiptCard renders prx-receipt fields', () => {
+    render(
+      <ReceiptCard
+        state="sealed"
+        title="receipt r_8af3"
+        fields={[{ key: 'runtime', value: '4.3s' }]}
+        hash="sha256:abc"
+        seal="sealed"
+      />,
+    );
+    const receipt = screen.getByTestId('prx-receipt-card');
+    expect(receipt).toHaveClass('prx-receipt');
+    expect(receipt).toHaveAttribute('data-state', 'sealed');
+    expect(receipt.querySelector('.ft .hash')).toBeInTheDocument();
+  });
+
+  test('Sparkline, Bargraph, and LedDot render canonical classes', () => {
+    render(
+      <div>
+        <Sparkline values={[1, 4, 2, 5]} />
+        <Bargraph bars="▁▃▅█" label="history" value="4 runs" tone="bad" />
+        <LedDot tone="live" />
+      </div>,
+    );
+    expect(screen.getByTestId('prx-sparkline')).toHaveClass('prx-spark');
+    expect(screen.getByTestId('prx-bargraph')).toHaveClass('prx-bargraph');
+    expect(screen.getByTestId('prx-led-dot')).toHaveClass('prx-led');
+  });
+});

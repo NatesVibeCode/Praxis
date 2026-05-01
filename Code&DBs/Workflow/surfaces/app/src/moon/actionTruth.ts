@@ -220,9 +220,9 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
   if (item.dropKind === 'edge') {
     if (item.gateFamily === 'conditional' || item.gateFamily === 'after_failure') {
       return {
-        tier: 'primary',
-        badge: 'Core',
-        detail: 'This is one of the few gate types that changes execution today.',
+        tier: 'hidden',
+        badge: 'Removed',
+        detail: 'Branching is now a first-class UI concept, so it is removed from the gate type dropdown.',
       };
     }
     if (item.gateFamily === 'approval') {

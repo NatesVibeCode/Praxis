@@ -1,0 +1,36 @@
+{
+  "name": "Roadmap Burn Down Wave 5 - Deferred Product Quarantine",
+  "workflow_id": "roadmap_burndown_20260501_wave5_deferred_product_quarantine",
+  "phase": "execute",
+  "workdir": ".",
+  "outcome_goal": "Keep stale or future-product roadmap work from consuming build capacity until core authority and validation are healthy.",
+  "jobs": [
+    {
+      "label": "future_bets_quarantine",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "analysis",
+      "timeout": 600,
+      "submission_required": false,
+      "workdir": ".",
+      "prompt": "Inspect the open roadmap for A2A, cartridge, primitive extractor, design-partner, and other future-bet work. Produce a preview-only operator packet that says which items should remain P2/deferred, which are duplicates, and what evidence would justify promotion. Do not mutate roadmap state."
+    },
+    {
+      "label": "stale_workflow_packet_quarantine",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "analysis",
+      "timeout": 600,
+      "submission_required": false,
+      "workdir": ".",
+      "prompt": "Inspect stale workflow packet fleets and old retryable specs. Produce quarantine criteria and a list of packets that should not be retried without a fresh proof gate. The goal is to prevent old failures from looking like active roadmap work. Do not mutate state."
+    },
+    {
+      "label": "closeout_candidate_packet",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "analysis",
+      "timeout": 600,
+      "submission_required": false,
+      "workdir": ".",
+      "prompt": "Find roadmap or bug items that look already done, superseded, or fixed-pending-verification based on receipts and current code. Produce a closeout candidate packet with item refs, evidence to verify, and the operator surface that should perform the closeout. Do not claim FIXED and do not mutate state."
+    }
+  ]
+}

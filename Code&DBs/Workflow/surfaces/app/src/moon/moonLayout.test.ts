@@ -6,16 +6,16 @@ import {
 } from './moonLayout';
 
 describe('moonLayout', () => {
-  test('uses the larger Moon workspace geometry contract', () => {
+  test('uses the compact Moon workspace geometry contract', () => {
     expect(MOON_LAYOUT).toMatchObject({
-      graphAppendRadius: 24,
-      graphAppendSize: 48,
+      graphAppendRadius: 18,
+      graphAppendSize: 36,
       minGraphHeight: 260,
-      nodeHeight: 96,
+      nodeHeight: 78,
       nodeRadius: 36,
       nodeSize: 72,
-      nodeSpacing: 144,
-      nodeWidth: 244,
+      nodeSpacing: 120,
+      nodeWidth: 188,
       projectedNodeSize: 52,
       triggerMenuWidth: 400,
     });

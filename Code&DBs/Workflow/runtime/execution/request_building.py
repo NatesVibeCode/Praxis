@@ -69,32 +69,86 @@ def _execution_boundary_ref(*, intake_outcome: WorkflowIntakeOutcome) -> str:
     bundle_hash = getattr(authority_context, "bundle_hash", "")
     bundle_payload = getattr(authority_context, "bundle_payload", None)
     workspace_ref = getattr(authority_context, "workspace_ref", "")
-    if (
-        not isinstance(context_bundle_id, str)
-        or not context_bundle_id.strip()
-        or not isinstance(bundle_hash, str)
-        or not bundle_hash.strip()
-        or not isinstance(bundle_payload, Mapping)
-    ):
-        raise RuntimeBoundaryError("runtime.execution_boundary_missing")
-    if (
-        route_identity.authority_context_ref != context_bundle_id
-        or route_identity.authority_context_digest != bundle_hash
-        or _authority_payload_hash(bundle_payload) != bundle_hash
-    ):
-        raise RuntimeBoundaryError("runtime.execution_boundary_authority_mismatch")
+    if not isinstance(context_bundle_id, str) or not context_bundle_id.strip():
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_missing.context_bundle_id",
+            "authority context bundle id is missing",
+            details={"value_type": type(context_bundle_id).__name__},
+        )
+    if not isinstance(bundle_hash, str) or not bundle_hash.strip():
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_missing.bundle_hash",
+            "authority context bundle hash is missing",
+            details={"value_type": type(bundle_hash).__name__},
+        )
+    if not isinstance(bundle_payload, Mapping):
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_missing.bundle_payload",
+            "authority context bundle payload must be a mapping",
+            details={"value_type": type(bundle_payload).__name__},
+        )
+    if route_identity.authority_context_ref != context_bundle_id:
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_authority_mismatch.context_ref",
+            "route authority context ref does not match admitted context bundle",
+            details={
+                "route_authority_context_ref": route_identity.authority_context_ref,
+                "context_bundle_id": context_bundle_id,
+            },
+        )
+    if route_identity.authority_context_digest != bundle_hash:
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_authority_mismatch.context_digest",
+            "route authority context digest does not match admitted bundle hash",
+            details={
+                "route_authority_context_digest": route_identity.authority_context_digest,
+                "bundle_hash": bundle_hash,
+            },
+        )
+    computed_hash = _authority_payload_hash(bundle_payload)
+    if computed_hash != bundle_hash:
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_authority_mismatch.payload_hash",
+            "authority context payload hash does not match admitted bundle hash",
+            details={
+                "computed_payload_hash": computed_hash,
+                "bundle_hash": bundle_hash,
+            },
+        )
     workspace_payload = bundle_payload.get("workspace")
+    if "workspace" not in bundle_payload:
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_authority_mismatch.workspace_payload_missing",
+            "authority context bundle payload is missing workspace admission data",
+        )
     if not isinstance(workspace_payload, Mapping):
-        raise RuntimeBoundaryError("runtime.execution_boundary_authority_mismatch")
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_authority_mismatch.workspace_payload_type",
+            "authority context workspace payload must be a mapping",
+            details={"value_type": type(workspace_payload).__name__},
+        )
     admitted_workspace_ref = workspace_payload.get("workspace_ref")
-    if (
-        not isinstance(admitted_workspace_ref, str)
-        or not admitted_workspace_ref.strip()
-        or not isinstance(workspace_ref, str)
-        or not workspace_ref.strip()
-        or workspace_ref != admitted_workspace_ref
-    ):
-        raise RuntimeBoundaryError("runtime.execution_boundary_authority_mismatch")
+    if not isinstance(admitted_workspace_ref, str) or not admitted_workspace_ref.strip():
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_authority_mismatch.admitted_workspace_ref_missing",
+            "admitted workspace ref is missing from authority context bundle",
+            details={"value_type": type(admitted_workspace_ref).__name__},
+        )
+    if not isinstance(workspace_ref, str) or not workspace_ref.strip():
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_authority_mismatch.authority_workspace_ref_missing",
+            "authority context workspace ref is missing",
+            details={"value_type": type(workspace_ref).__name__},
+        )
+    if workspace_ref != admitted_workspace_ref:
+        raise RuntimeBoundaryError(
+            "runtime.execution_boundary_authority_mismatch.workspace_ref",
+            "authority context workspace ref does not match admitted workspace ref",
+            details={
+                "workspace_ref": workspace_ref,
+                "admitted_workspace_ref": admitted_workspace_ref,
+            },
+        )
     return admitted_workspace_ref
 
 

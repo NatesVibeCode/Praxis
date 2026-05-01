@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 159 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 177 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -20,6 +20,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_audit_summary` | `cqrs` | `stable` | - | `read` | - | Aggregate audit lens over the gateway dispatch ledger and policy-enforcement ledger. Returns trailing-window totals (receipts, completed, replayed, failed, untagged_transport) plus per-transport / per-execution-status / per-operation-kind buckets, top-10 operations with failure counts, and a compliance breakdown (admits, rejects, top tables, top policies). Backed by authority_operation_receipts + authority_compliance_receipts. |
 | `praxis_resolve_compose_authority_binding` | `cqrs` | `advanced` | - | `read` | - | Resolve the compose-time canonical authority binding for a set of target authority units. Returns the canonical write scope (units the worker may edit), the read-only predecessor obligation pack (units the worker must read but not extend), and explicit blocked-compat units. The active prevention behind the impact contract — when a packet is composed against this binding, duplicate authority becomes invisible to the worker. |
 | `praxis_data` | `data` | `stable` | `workflow data` | `launch`, `read`, `write` | - | Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, filter records, sort rows, normalize values, repair rows, run repair loops, backfill missing values, redact sensitive fields, checkpoint state, replay cursor windows, approve plans, apply approved plans, validate contracts, transform records, join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, route dead-letter rows, reconcile source vs target state, sync target state deterministically, generate workflow specs, and launch those jobs through Praxis. |
+| `praxis_action_fingerprints` | `evidence` | `advanced` | - | `write` | - | Record raw shell/edit/write/read action shapes into the action fingerprint ledger. |
 | `praxis_artifacts` | `evidence` | `stable` | `workflow artifacts` | `read` | - | Browse and compare files produced by workflow sandbox runs. Each workflow job can write artifacts (code, logs, reports) — this tool lets you find, search, and diff them. |
 | `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `launch`, `read`, `write` | - | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | - | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
@@ -50,13 +51,15 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_story` | `knowledge` | `advanced` | - | `read` | - | Compose a short narrative from one entity's graph neighborhood. Useful when you want the graph to explain itself in plain language instead of only returning edges. |
 | `praxis_access_control` | `operations` | `advanced` | - | `read`, `write` | - | Mutate the control-panel model-access denial table — the first-class checkbox surface for turning a (provider × transport × job_type × model) tuple on or off. |
 | `praxis_authority_domain_forge` | `operations` | `advanced` | `workflow authority-domain-forge` | `read` | - | Preview the authority-domain ownership path before creating a new authority boundary or attaching operations, tables, workflows, or tools to it. Returns existing domain state, nearby domains, attached operations, authority objects, missing inputs, reject paths, and the safe register payload. |
+| `praxis_authority_managed_runtime_read` | `operations` | `advanced` | `workflow managed-runtime-read` | `read` | - | Read persisted managed-runtime run receipts, metering, cost, heartbeat health, audit events, pricing schedules, and customer observability through the CQRS gateway. |
+| `praxis_authority_managed_runtime_record` | `operations` | `advanced` | `workflow managed-runtime-record` | `write` | - | Record optional managed/exported/hybrid runtime accounting snapshots, metering, run receipts, pricing schedule refs, heartbeat health, internal audit, and customer-safe observability through the CQRS gateway. |
 | `praxis_authority_memory_refresh` | `operations` | `advanced` | - | `write` | - | Project authority FK data into memory_edges so the knowledge graph reflects real structure. Upserts canonical-class edges for roadmap parent_of/dependencies, roadmap resolves_bug, operator_object_relations, workflow build intent links, bug and issue lineage, bug evidence links, workflow job/chain relationships, and operator decision scopes. Idempotent; safe to re-run. |
 | `praxis_authority_portable_cartridge_read` | `operations` | `advanced` | `workflow portable-cartridge-read` | `read` | - | Read persisted portable cartridge deployment contract records, dependencies, assets, binding contracts, verifier checks, drift hooks, and readiness state through the CQRS gateway. |
 | `praxis_authority_portable_cartridge_record` | `operations` | `advanced` | `workflow portable-cartridge-record` | `write` | - | Validate and persist portable cartridge manifests, Object Truth dependencies, assets, binding contracts, verifier checks, drift hooks, runtime assumptions, and deployment readiness through the CQRS gateway. |
 | `praxis_bug_replay_provenance_backfill` | `operations` | `advanced` | - | `write` | - | Backfill replay provenance from canonical bug and receipt authority. |
 | `praxis_chat_routing_options_list` | `operations` | `stable` | - | `read` | - | List task_type_routing candidates for a chat task slug. Surfaces provider_slug, model_slug, transport_type, rank, route_health_score, benchmark_score, route_tier, latency_class. Filters to permitted=true rows by default; pass include_disabled=true to surface disabled candidates with their disable signals. Replaces hardcoded OPERATOR_CHAT_ENGINE constants in the operator console picker drawer. |
 | `praxis_circuits` | `operations` | `stable` | `workflow circuits` | `read`, `write` | - | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
-| `praxis_client_operating_model` | `operations` | `advanced` | `workflow client-operating-model` | `read` | - | Build one read-only Client Operating Model operator view through the CQRS gateway. Views include system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed runtime accounting, next safe actions, and workflow-builder validation. The tool normalizes provided evidence into an operator read model; it does not persist, mutate, or call live client systems. |
+| `praxis_client_operating_model` | `operations` | `advanced` | `workflow client-operating-model` | `read` | - | Build one read-only Client Operating Model operator view through the CQRS gateway. Views include system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed runtime accounting, next safe actions, and workflow-builder validation, plus Workflow Context customer-facing composite readouts. The tool normalizes provided evidence into an operator read model; it does not persist, mutate, or call live client systems. |
 | `praxis_client_operating_model_snapshot_store` | `operations` | `advanced` | - | `write` | - | Persist one Client Operating Model operator-view snapshot through the CQRS gateway for historical readback. This stores the already built operator_view payload; it does not call client systems. |
 | `praxis_client_operating_model_snapshots` | `operations` | `advanced` | - | `read` | - | Read stored Client Operating Model operator-view snapshots by snapshot ref, digest, view, or scope through the CQRS gateway. |
 | `praxis_client_system_discovery` | `operations` | `advanced` | `workflow client-system-discovery` | `read` | - | Persist or query client system discovery authority: typed system census rows, connector surface evidence, credential-health references, and typed discovery gaps. This compatibility wrapper dispatches to the CQRS gateway operations for census record/read and gap record. |
@@ -79,6 +82,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_object_truth_compare_versions` | `operations` | `advanced` | `workflow object-truth-compare` | `read` | - | Compare two persisted object-truth object versions by digest. This is a thin read-only MCP wrapper over the gateway query `object_truth_compare_versions`; it compares field observations and freshness hints without deciding business truth. |
 | `praxis_object_truth_ingestion_sample_read` | `operations` | `advanced` | `workflow object-truth-ingestion-sample-read` | `read` | - | Read queryable Object Truth ingestion sample evidence and replay fixture packets through the gateway query `object_truth_ingestion_sample_read`. |
 | `praxis_object_truth_ingestion_sample_record` | `operations` | `advanced` | `workflow object-truth-ingestion-sample-record` | `write` | - | Record receipt-backed Object Truth ingestion sample evidence. This thin MCP wrapper dispatches to the gateway command `object_truth_ingestion_sample_record`; it persists a system snapshot, source-query evidence, sample capture, redacted payload previews, raw payload references, object versions, field observations, and replay fixture evidence. |
+| `praxis_object_truth_latest_version_read` | `operations` | `advanced` | `workflow object-truth-latest-version` | `read` | - | Read the latest trusted Object Truth object version by system/object/identity/client filters through the CQRS gateway. Returns freshness, conflicts, and no-go states. |
 | `praxis_object_truth_mdm_resolution_read` | `operations` | `advanced` | `workflow object-truth-mdm-resolution-read` | `read` | - | Read queryable Object Truth MDM/source-authority resolution packets and decomposed evidence through the gateway query `object_truth_mdm_resolution_read`. |
 | `praxis_object_truth_mdm_resolution_record` | `operations` | `advanced` | `workflow object-truth-mdm-resolution-record` | `write` | - | Record receipt-backed Object Truth MDM/source-authority evidence. This thin MCP wrapper dispatches to the gateway command `object_truth_mdm_resolution_record`; it persists a resolution packet plus decomposed identity clusters, field comparisons, normalization rules, source authority evidence, hierarchy signals, and typed gaps. |
 | `praxis_object_truth_readiness` | `operations` | `advanced` | `workflow object-truth-readiness` | `read` | - | Inspect whether Object Truth authority is ready for downstream client-system discovery, ingestion, and Virtual Lab planning. This is a thin read-only MCP wrapper over the gateway query `object_truth_readiness`; blocked readiness is returned as a query result with explicit no-go conditions. |
@@ -111,6 +115,11 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_virtual_lab_state_read` | `operations` | `advanced` | `workflow virtual-lab-state-read` | `read` | - | Read receipt-backed Virtual Lab environment revisions, object state projections, event streams, command receipts, and typed gaps through the CQRS gateway. |
 | `praxis_virtual_lab_state_record` | `operations` | `advanced` | `workflow virtual-lab-state-record` | `write` | - | Record receipt-backed Virtual Lab environment revisions, copy-on-write object state projections, event envelopes, command receipts, replay validation, and typed gaps through the CQRS gateway. |
 | `praxis_work_assignment_matrix` | `operations` | `stable` | - | `read` | - | Read the model-tier work assignment matrix through CQRS authority. |
+| `praxis_workflow_context_bind` | `operations` | `advanced` | `workflow workflow-context-bind` | `write` | - | Bind inferred or synthetic Workflow Context entities to Object Truth or another authority ref. Context owns the binding record; Object Truth owns evidence. |
+| `praxis_workflow_context_compile` | `operations` | `advanced` | `workflow workflow-context-compile` | `write` | - | Compile Workflow Context from intent and optional graph through the CQRS gateway. It persists inferred assumptions, scenario packs, computed confidence, blockers, verifier expectations, and optional deterministic synthetic worlds. It does not call live client systems. |
+| `praxis_workflow_context_guardrail_check` | `operations` | `advanced` | `workflow workflow-context-guardrails` | `read` | - | Read allowed next LLM actions, review requirements, and no-go states for a Workflow Context pack through the CQRS gateway. |
+| `praxis_workflow_context_read` | `operations` | `advanced` | `workflow workflow-context-read` | `read` | - | Read Workflow Context packs, entities, bindings, transitions, guardrails, and review packets through the CQRS gateway. |
+| `praxis_workflow_context_transition` | `operations` | `advanced` | `workflow workflow-context-transition` | `write` | - | Transition Workflow Context truth state through backend guardrails. Synthetic and inferred context can continue building, but promotion is blocked unless verified evidence and risk requirements are satisfied. |
 | `tool_dag_health` | `operations` | `stable` | - | `read` | workflow health | Backwards-compatible alias for praxis_health. |
 | `praxis_bug_triage_packet` | `operator` | `advanced` | - | `read` | - | Read a compact LLM-oriented packet that classifies bugs as live defects, evidence debt, stale projections, platform friction, fixed-pending-verification, or inactive without mutating bug authority. |
 | `praxis_execution_proof` | `operator` | `advanced` | - | `read` | - | Prove whether a workflow run or trace anchor actually produced runtime execution evidence. Queued/running labels are treated as weak context, not proof; the result names the concrete evidence and missing proof. |
@@ -166,11 +175,20 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_decompose_intent` | `workflow` | `stable` | `workflow decompose` | `read` | - | Layer 2 (Decompose) of the planning stack: split prose intent into ordered steps by parsing explicit step markers (numbered lists, bulleted lists, or first/then/finally ordering). Deterministic — does NOT do free-prose semantic decomposition. |
 | `praxis_generate_plan` | `workflow` | `stable` | `workflow generate-plan` | `read`, `write` | - | Shared CQRS plan-generation front door. action='generate_plan' recognizes messy prose, matches spans to authority, returns suggestions and gaps, and does not mutate state. action='materialize_plan' creates or updates a draft workflow through the canonical workflow build mutation. |
 | `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | - | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
-| `praxis_moon` | `workflow` | `advanced` | `workflow moon` | `launch`, `read`, `write` | - | Graph-authoring co-pilot for the Moon canvas. Five actions over the same workflow build authority, all CQRS-gateway dispatched (each call leaves a receipt + the command actions emit authority events). |
+| `praxis_model_eval` | `workflow` | `advanced` | `workflow model-eval` | `read`, `write` | - | Plan, run, inspect, compare, promote, or export model/job/prompt evaluation matrices. Imports canonical Workflow specs as fixed fixtures and varies model/provider/prompt/effort/tool/swarm configuration under strict privacy gates. |
+| `praxis_moon` | `workflow` | `advanced` | `workflow moon` | `launch`, `read`, `write` | - | Workflow graph-authoring co-pilot exposed through the legacy praxis_moon tool name. Five actions over the same workflow build authority, all CQRS-gateway dispatched (each call leaves a receipt + the command actions emit authority events). |
 | `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | - | Q-side of the planning stack: read every plan.* authority_event for one workflow_id in order. Pair with gateway-backed praxis_compose_plan / praxis_launch_plan on the C side. |
 | `praxis_promote_experiment_winner` | `workflow` | `advanced` | - | `write` | - | Promote one compose-experiment leg into the canonical task_type_routing row for that task type. The winning leg's temperature and max_tokens are applied; provider/model changes remain visible only in the returned diff. |
 | `praxis_suggest_plan_atoms` | `workflow` | `stable` | `workflow suggest-atoms` | `read` | - | Layer 0 (Suggest): free prose → pills + step types + parameters. Deterministic; no LLM call; no order or count produced. |
 | `praxis_synthesize_skeleton` | `workflow` | `advanced` | - | `read` | - | Layer 0.5 (Synthesize): atoms + skeleton with deterministic depends_on, consumes/produces/capabilities floors, scaffolded gates from data dictionary. |
+| `praxis_synthetic_data_generate` | `workflow` | `advanced` | `workflow synthetic-data-generate` | `write` | - | Generate and persist a deterministic Synthetic Data dataset with stable record refs, stable name refs, an explicit naming plan, reserved-term checks, collision gates, schema contract, privacy posture, and quality report. Synthetic Data can seed Workflow Context and Virtual Lab but cannot become Object Truth evidence. |
+| `praxis_synthetic_data_read` | `workflow` | `advanced` | `workflow synthetic-data-read` | `read` | - | Read Synthetic Data datasets, records, naming plans, schema contracts, privacy posture, and quality reports through the CQRS gateway. |
+| `praxis_synthetic_environment_clear` | `workflow` | `advanced` | `workflow synthetic-environment-clear` | `write` | - | Clear current Synthetic Environment records while preserving the original seed, operation receipts, and effect history. |
+| `praxis_synthetic_environment_clock_advance` | `workflow` | `advanced` | `workflow synthetic-environment-clock-advance` | `write` | - | Advance or set a Synthetic Environment clock with a recorded effect. |
+| `praxis_synthetic_environment_create` | `workflow` | `advanced` | `workflow synthetic-environment-create` | `write` | - | Create a mutable Synthetic Environment seeded from one Synthetic Data dataset. The environment keeps seed state, current state, clock state, permissions, and the first effect receipt. |
+| `praxis_synthetic_environment_event_inject` | `workflow` | `advanced` | `workflow synthetic-environment-event-inject` | `write` | - | Inject a deterministic outside event into a Synthetic Environment and persist the exact effect on current state. |
+| `praxis_synthetic_environment_read` | `workflow` | `advanced` | `workflow synthetic-environment-read` | `read` | - | Read Synthetic Environments, current state, seed state, effect ledger, and current-vs-seed diffs through the CQRS gateway. |
+| `praxis_synthetic_environment_reset` | `workflow` | `advanced` | `workflow synthetic-environment-reset` | `write` | - | Reset a Synthetic Environment back to its seed state with a recorded effect. |
 | `praxis_wave` | `workflow` | `advanced` | - | `launch`, `read`, `write` | - | Manage execution waves — groups of jobs with dependency ordering. Waves track which jobs are runnable (all dependencies met) and which are blocked. |
 | `praxis_workflow` | `workflow` | `advanced` | - | `launch`, `read`, `write` | - | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
 | `praxis_workflow_validate` | `workflow` | `advanced` | - | `read` | - | Dry-run a workflow spec to check for errors before executing it. Returns whether the spec is valid, how many jobs it contains, and which agents each job resolves to. |
@@ -306,6 +324,36 @@ Example input:
 ```
 
 ### Evidence
+
+#### `praxis_action_fingerprints`
+
+- Surface: `evidence`
+- Tier: `advanced`
+- Badges: `advanced`, `evidence`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_action_fingerprints`
+- CLI schema help: `workflow tools describe praxis_action_fingerprints`
+- When to use: Record one raw shell/edit/write/read harness action so recurring patterns can surface as tool opportunities.
+- When not to use: Do not use it for gateway operation receipts or general friction analytics.
+- Selector: `action`; default `record`; values `record`
+- Required args: `tool_name`, `tool_input`, `source_surface`
+
+Example input:
+
+```json
+{
+  "action": "record",
+  "tool_name": "local_shell",
+  "source_surface": "codex:host",
+  "tool_input": {
+    "command": [
+      "pytest",
+      "Code&DBs/Workflow/tests/test_x.py",
+      "-q"
+    ]
+  }
+}
+```
 
 #### `praxis_artifacts`
 
@@ -980,6 +1028,86 @@ Example input:
 }
 ```
 
+#### `praxis_authority_managed_runtime_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:managed-runtime-read`
+- Risks: `read`
+- CLI entrypoint: `workflow managed-runtime-read`
+- CLI schema help: `workflow tools describe praxis_authority_managed_runtime_read`
+- When to use: Inspect persisted managed-runtime run receipts, metering, cost basis, heartbeat health, audit events, pricing schedules, and customer observability without reading raw tables.
+- When not to use: Do not use it to record new runtime evidence; use praxis_authority_managed_runtime_record for writes.
+- Recommended alias: `workflow managed-runtime-read`
+- Selector: `action`; default `list_records`; values `list_records`, `describe_record`, `list_meter_events`, `list_heartbeats`, `list_pool_health`, `list_audit_events`, `list_pricing_schedules`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe_record",
+  "runtime_record_id": "managed_runtime_record.demo",
+  "include_meter_events": true,
+  "include_pool_health": true
+}
+```
+
+#### `praxis_authority_managed_runtime_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:managed-runtime-record`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow managed-runtime-record`
+- CLI schema help: `workflow tools describe praxis_authority_managed_runtime_record`
+- When to use: Record an optional managed/exported/hybrid runtime accounting snapshot with mode policy, metering, run receipt, pricing schedule reference, heartbeat health, audit context, and customer-safe observability through CQRS.
+- When not to use: Do not use it as a scheduler, invoice generator, or hidden required runtime path. It records the cost and health evidence for a run; customers may still use exported or hybrid execution.
+- Recommended alias: `workflow managed-runtime-record`
+- Selector: none
+- Required args: `identity`, `policy`, `meter_events`, `terminal_status`, `generated_at`, `runtime_version_ref`
+
+Example input:
+
+```json
+{
+  "identity": {
+    "run_id": "run.managed.demo",
+    "tenant_ref": "tenant.acme",
+    "environment_ref": "env.prod",
+    "workflow_ref": "workflow.object_truth",
+    "workload_class": "workflow_build"
+  },
+  "policy": {
+    "tenant_ref": "tenant.acme",
+    "environment_ref": "env.prod",
+    "configured_mode": "managed",
+    "managed_workload_classes": [
+      "workflow_build"
+    ]
+  },
+  "meter_events": [
+    {
+      "event_kind": "run_started",
+      "occurred_at": "2026-04-30T12:00:00Z"
+    },
+    {
+      "event_kind": "resource_usage",
+      "occurred_at": "2026-04-30T12:00:30Z",
+      "cpu_core_seconds": "120",
+      "memory_gib_seconds": "240"
+    },
+    {
+      "event_kind": "run_finished",
+      "occurred_at": "2026-04-30T12:01:00Z"
+    }
+  ],
+  "terminal_status": "succeeded",
+  "generated_at": "2026-04-30T12:01:01Z",
+  "runtime_version_ref": "runtime.managed.v1"
+}
+```
+
 #### `praxis_authority_memory_refresh`
 
 - Surface: `operations`
@@ -1125,10 +1253,10 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow client-operating-model`
 - CLI schema help: `workflow tools describe praxis_client_operating_model`
-- When to use: Build one read-only Client Operating Model operator view from provided evidence: system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed-runtime accounting, next safe actions, or workflow-builder validation.
+- When to use: Build one read-only Client Operating Model operator view from provided evidence: system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed-runtime accounting, next safe actions, workflow-builder validation, or Workflow Context customer composite deployability.
 - When not to use: Do not use it to persist client evidence, mutate workflows, call live systems, or claim a source of truth not backed by the supplied evidence. This is the CQRS read-surface slice; durable projections remain separate.
 - Recommended alias: `workflow client-operating-model`
-- Selector: `view`; default `system_census`; values `system_census`, `object_truth`, `identity_authority`, `simulation_timeline`, `verifier_results`, `sandbox_drift`, `cartridge_status`, `managed_runtime`, `next_safe_actions`, `workflow_builder_validation`
+- Selector: `view`; default `system_census`; values `system_census`, `object_truth`, `identity_authority`, `simulation_timeline`, `verifier_results`, `sandbox_drift`, `cartridge_status`, `managed_runtime`, `next_safe_actions`, `workflow_builder_validation`, `workflow_context_composite`
 - Required args: `view`
 
 Example input:
@@ -1197,7 +1325,7 @@ Example input:
 - CLI schema help: `workflow tools describe praxis_client_operating_model_snapshots`
 - When to use: Read stored Client Operating Model operator-view snapshots by snapshot ref, digest, view, or scope.
 - When not to use: Do not use it for request-time derivation from fresh evidence; use praxis_client_operating_model for that.
-- Selector: `view`; default `system_census`; values `system_census`, `object_truth`, `identity_authority`, `simulation_timeline`, `verifier_results`, `sandbox_drift`, `cartridge_status`, `managed_runtime`, `next_safe_actions`, `workflow_builder_validation`
+- Selector: `view`; default `system_census`; values `system_census`, `object_truth`, `identity_authority`, `simulation_timeline`, `verifier_results`, `sandbox_drift`, `cartridge_status`, `managed_runtime`, `next_safe_actions`, `workflow_builder_validation`, `workflow_context_composite`
 - Required args: (none)
 
 Example input:
@@ -1717,6 +1845,31 @@ Example input:
   ],
   "privacy_classification": "confidential",
   "retention_policy_ref": "retention.object_truth.redacted_hashes"
+}
+```
+
+#### `praxis_object_truth_latest_version_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:object-truth-latest-version`
+- Risks: `read`
+- CLI entrypoint: `workflow object-truth-latest-version`
+- CLI schema help: `workflow tools describe praxis_object_truth_latest_version_read`
+- When to use: Read the latest trusted Object Truth version for a system/object/identity/client filter when the caller should not know or manage exact version digests.
+- When not to use: Do not use it to ingest new evidence or change Object Truth. Do not treat stale or conflict no-go states as deployable proof.
+- Recommended alias: `workflow object-truth-latest-version`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "system_ref": "salesforce",
+  "object_ref": "account",
+  "identity_digest": "identity.digest.account.001",
+  "max_age_seconds": 86400
 }
 ```
 
@@ -2585,6 +2738,135 @@ Example input:
 }
 ```
 
+#### `praxis_workflow_context_bind`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:workflow-context-bind`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow workflow-context-bind`
+- CLI schema help: `workflow tools describe praxis_workflow_context_bind`
+- When to use: Bind an inferred or synthetic Workflow Context entity to Object Truth or another explicit authority ref while preserving risk, review, confidence, and reversibility.
+- When not to use: Do not use it to decide source authority implicitly or to accept high-risk bindings without review evidence.
+- Recommended alias: `workflow workflow-context-bind`
+- Selector: none
+- Required args: `context_ref`, `entity_ref`, `target_ref`
+
+Example input:
+
+```json
+{
+  "context_ref": "workflow_context:renewal_risk:demo",
+  "entity_ref": "workflow_context:renewal_risk:demo:entity:object:account",
+  "target_ref": "object_truth_object_version:account.digest",
+  "risk_level": "medium"
+}
+```
+
+#### `praxis_workflow_context_compile`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:workflow-context-compile`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow workflow-context-compile`
+- CLI schema help: `workflow tools describe praxis_workflow_context_compile`
+- When to use: Compile a Workflow Context pack from intent and optional graph so the LLM can infer systems, objects, fields, risks, blockers, and optional deterministic synthetic worlds before real integrations exist.
+- When not to use: Do not use it to call live client systems or promote synthetic evidence. Promotion is a guarded transition, not a compile side effect.
+- Recommended alias: `workflow workflow-context-compile`
+- Selector: none
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "intent": "Detect renewal risk from CRM, billing, support, and Slack signals.",
+  "context_mode": "synthetic",
+  "scenario_pack_refs": [
+    "renewal_risk"
+  ],
+  "seed": "demo-renewal-risk"
+}
+```
+
+#### `praxis_workflow_context_guardrail_check`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:workflow-context-guardrails`
+- Risks: `read`
+- CLI entrypoint: `workflow workflow-context-guardrails`
+- CLI schema help: `workflow tools describe praxis_workflow_context_guardrail_check`
+- When to use: Ask backend policy what the LLM can safely do next with a Workflow Context pack, including no-go states and review requirements.
+- When not to use: Do not use it as a substitute for the transition command when the state actually needs to change.
+- Recommended alias: `workflow workflow-context-guardrails`
+- Selector: none
+- Required args: `context_ref`
+
+Example input:
+
+```json
+{
+  "context_ref": "workflow_context:renewal_risk:demo",
+  "target_truth_state": "promoted"
+}
+```
+
+#### `praxis_workflow_context_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:workflow-context-read`
+- Risks: `read`
+- CLI entrypoint: `workflow workflow-context-read`
+- CLI schema help: `workflow tools describe praxis_workflow_context_read`
+- When to use: Read persisted Workflow Context packs, entities, bindings, transition history, blockers, guardrails, synthetic worlds, and review packets.
+- When not to use: Do not use it to mutate context state. Use compile, transition, or bind operations for writes.
+- Recommended alias: `workflow workflow-context-read`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "context_ref": "workflow_context:renewal_risk:demo",
+  "include_entities": true,
+  "include_bindings": true
+}
+```
+
+#### `praxis_workflow_context_transition`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:workflow-context-transition`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow workflow-context-transition`
+- CLI schema help: `workflow tools describe praxis_workflow_context_transition`
+- When to use: Move a Workflow Context pack between truth states through backend policy, for example inferred to schema_bound or verified to promoted.
+- When not to use: Do not use it to bypass review at real trust boundaries. Synthetic or inferred context cannot be promoted by supplying nicer labels.
+- Recommended alias: `workflow workflow-context-transition`
+- Selector: none
+- Required args: `context_ref`, `to_truth_state`, `transition_reason`
+
+Example input:
+
+```json
+{
+  "context_ref": "workflow_context:renewal_risk:demo",
+  "to_truth_state": "verified",
+  "transition_reason": "verifier passed against observed Object Truth",
+  "evidence": [
+    {
+      "evidence_ref": "verification.run.123",
+      "evidence_tier": "verified"
+    }
+  ]
+}
+```
+
 #### `tool_dag_health`
 
 - Surface: `operations`
@@ -2772,7 +3054,7 @@ Example input:
 - Risks: `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_operator_closeout`
 - CLI schema help: `workflow tools describe praxis_operator_closeout`
-- When to use: Preview or commit operator work-item closeout through the shared gate.
+- When to use: Preview or commit operator closeout through the shared gate, including bug-backed work items and parent initiatives with completed direct children.
 - When not to use: Do not use it for roadmap item creation or read-only status views.
 - Selector: `action`; default `preview`; values `preview`, `commit`
 - Required args: (none)
@@ -2795,7 +3077,7 @@ Example input:
 - CLI entrypoint: `workflow tools call praxis_operator_decisions`
 - CLI schema help: `workflow tools describe praxis_operator_decisions`
 - Replacement: `praxis_next`
-- When to use: List or record durable operator decisions such as architecture policy rows in the canonical operator_decisions table. New records should pass scope_clamp={'applies_to': [...], 'does_not_apply_to': [...]} so downstream surfaces can quote the clamp verbatim instead of paraphrasing rationale; rows omit it default to a 'pending_review' placeholder for the operator to fill in via the Moon Decisions panel.
+- When to use: List or record durable operator decisions such as architecture policy rows in the canonical operator_decisions table. New records should pass scope_clamp={'applies_to': [...], 'does_not_apply_to': [...]} so downstream surfaces can quote the clamp verbatim instead of paraphrasing rationale; rows omit it default to a 'pending_review' placeholder for the operator to fill in via the Workflow Decisions panel.
 - When not to use: Do not use it for roadmap item authoring or cutover-gate admission.
 - Selector: `action`; default `list`; values `list`, `record`
 - Required args: (none)
@@ -3869,6 +4151,32 @@ Example input:
 }
 ```
 
+#### `praxis_model_eval`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:model-eval`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow model-eval`
+- CLI schema help: `workflow tools describe praxis_model_eval`
+- When to use: Use for consistent model selection: same Workflow spec, same fixtures, same verifier, varied model/prompt/provider configuration.
+- When not to use: Do not use as a production route mutation surface. The promote action emits a proposal only.
+- Recommended alias: `workflow model-eval`
+- Selector: `action`; default `plan`; values `plan`, `run`, `inspect`, `compare`, `promote`, `export`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "plan",
+  "suite_slugs": [
+    "docs",
+    "csv"
+  ]
+}
+```
+
 #### `praxis_moon`
 
 - Surface: `workflow`
@@ -3877,7 +4185,7 @@ Example input:
 - Risks: `launch`, `read`, `write`
 - CLI entrypoint: `workflow moon`
 - CLI schema help: `workflow tools describe praxis_moon`
-- When to use: Read, compose, suggest, mutate, or launch Moon workflow graphs through the same CQRS-backed build authority used by the in-app Moon surface.
+- When to use: Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_moon tool name and moon alias remain compatibility entrypoints.
 - When not to use: Do not use it for unrelated roadmap, bug, provider-routing, or direct database work. Read the graph before mutating fields.
 - Recommended alias: `workflow moon`
 - Selector: `action`; default `get_build`; values `get_build`, `compose`, `suggest_next`, `mutate_field`, `launch`
@@ -3976,6 +4284,210 @@ Example input:
 ```json
 {
   "intent": "Build a connector workflow from app docs and smoke-test it"
+}
+```
+
+#### `praxis_synthetic_data_generate`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:synthetic-data-generate`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow synthetic-data-generate`
+- CLI schema help: `workflow tools describe praxis_synthetic_data_generate`
+- When to use: Use when a workflow, Virtual Lab run, demo, test fixture, or model-eval fixture needs generated data with durable records and a quality-checked naming plan.
+- When not to use: Do not use as Object Truth evidence or as a live client system read. Bind or promote only through verified evidence.
+- Recommended alias: `workflow synthetic-data-generate`
+- Selector: none
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "intent": "Renewal risk demo data for CRM, billing, support, and Slack.",
+  "namespace": "renewal-risk-demo",
+  "scenario_pack_refs": [
+    "renewal_risk"
+  ],
+  "object_counts": {
+    "Account": 1000,
+    "Ticket": 1000,
+    "Subscription": 1000
+  },
+  "seed": "renewal-risk-demo-v1",
+  "reserved_terms": [
+    "Acme",
+    "Praxis"
+  ]
+}
+```
+
+#### `praxis_synthetic_data_read`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:synthetic-data-read`
+- Risks: `read`
+- CLI entrypoint: `workflow synthetic-data-read`
+- CLI schema help: `workflow tools describe praxis_synthetic_data_read`
+- When to use: Use to inspect generated datasets, naming plans, quality reports, and individual synthetic records.
+- When not to use: Do not use to infer observed client truth; Object Truth owns observed evidence.
+- Recommended alias: `workflow synthetic-data-read`
+- Selector: `action`; default `list_datasets`; values `list_datasets`, `describe_dataset`, `list_records`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe_dataset",
+  "dataset_ref": "synthetic_dataset:renewal_risk_demo:abc123",
+  "include_records": true
+}
+```
+
+#### `praxis_synthetic_environment_clear`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:synthetic-environment-clear`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow synthetic-environment-clear`
+- CLI schema help: `workflow tools describe praxis_synthetic_environment_clear`
+- When to use: Use when an environment must be emptied without erasing audit history.
+- When not to use: Do not use to delete receipts, seed data, or generated datasets.
+- Recommended alias: `workflow synthetic-environment-clear`
+- Selector: none
+- Required args: `environment_ref`
+
+Example input:
+
+```json
+{
+  "environment_ref": "synthetic_environment:renewal_risk_demo:abc123",
+  "reason": "Reset demo state before replay."
+}
+```
+
+#### `praxis_synthetic_environment_clock_advance`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:synthetic-environment-clock-advance`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow synthetic-environment-clock-advance`
+- CLI schema help: `workflow tools describe praxis_synthetic_environment_clock_advance`
+- When to use: Use to simulate time passing without mutating seed data.
+- When not to use: Do not use as a scheduler or workflow run clock.
+- Recommended alias: `workflow synthetic-environment-clock-advance`
+- Selector: none
+- Required args: `environment_ref`
+
+Example input:
+
+```json
+{
+  "environment_ref": "synthetic_environment:renewal_risk_demo:abc123",
+  "seconds": 86400
+}
+```
+
+#### `praxis_synthetic_environment_create`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:synthetic-environment-create`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow synthetic-environment-create`
+- CLI schema help: `workflow tools describe praxis_synthetic_environment_create`
+- When to use: Use after generating Synthetic Data when you need a mutable, resettable world for outside events, demos, or simulation setup.
+- When not to use: Do not use as observed client truth or as proof of real-world system behavior. Virtual Lab and Object Truth own those lanes.
+- Recommended alias: `workflow synthetic-environment-create`
+- Selector: none
+- Required args: `dataset_ref`
+
+Example input:
+
+```json
+{
+  "dataset_ref": "synthetic_dataset:renewal_risk_demo:abc123",
+  "namespace": "renewal-risk-demo",
+  "seed": "renewal-risk-env-v1"
+}
+```
+
+#### `praxis_synthetic_environment_event_inject`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:synthetic-environment-event-inject`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow synthetic-environment-event-inject`
+- CLI schema help: `workflow tools describe praxis_synthetic_environment_event_inject`
+- When to use: Use to model external system changes such as owner changes, payment failures, escalations, webhook arrivals, or identity merges.
+- When not to use: Do not use as a replacement for Virtual Lab consequence proof.
+- Recommended alias: `workflow synthetic-environment-event-inject`
+- Selector: none
+- Required args: `environment_ref`, `event_type`
+
+Example input:
+
+```json
+{
+  "environment_ref": "synthetic_environment:renewal_risk_demo:abc123",
+  "event_type": "crm.owner_changed",
+  "event_payload": {
+    "owner_id": "synthetic:user:owner-2"
+  }
+}
+```
+
+#### `praxis_synthetic_environment_read`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:synthetic-environment-read`
+- Risks: `read`
+- CLI entrypoint: `workflow synthetic-environment-read`
+- CLI schema help: `workflow tools describe praxis_synthetic_environment_read`
+- When to use: Use to inspect what changed, list effects, or compare current environment state back to seed.
+- When not to use: Do not use to infer observed client truth.
+- Recommended alias: `workflow synthetic-environment-read`
+- Selector: `action`; default `list_environments`; values `list_environments`, `describe_environment`, `list_effects`, `diff`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe_environment",
+  "environment_ref": "synthetic_environment:renewal_risk_demo:abc123",
+  "include_state": true,
+  "include_effects": true
+}
+```
+
+#### `praxis_synthetic_environment_reset`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:synthetic-environment-reset`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow synthetic-environment-reset`
+- CLI schema help: `workflow tools describe praxis_synthetic_environment_reset`
+- When to use: Use to return a mutated or cleared world to its original synthetic seed.
+- When not to use: Do not use to regenerate names or replace the source Synthetic Data dataset.
+- Recommended alias: `workflow synthetic-environment-reset`
+- Selector: none
+- Required args: `environment_ref`
+
+Example input:
+
+```json
+{
+  "environment_ref": "synthetic_environment:renewal_risk_demo:abc123",
+  "reason": "Replay from deterministic seed."
 }
 ```
 

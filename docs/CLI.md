@@ -36,16 +36,19 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow recall` | `praxis_recall` | `knowledge` | `read` | Search the knowledge graph for decisions, patterns, entities, and prior analysis using ranked text, graph, and vector retrieval. |
 | `praxis workflow search` | `praxis_search` | `knowledge` | `read` | Federated search across code, decisions, knowledge, bugs, receipts, and related sources with semantic, exact, or regex modes — prefer this as the default discovery entry point. |
 | `praxis workflow authority-domain-forge` | `praxis_authority_domain_forge` | `operations` | `read` | Preview authority-domain ownership before creating a new authority boundary or attaching operations, tables, workflows, or MCP tools to it. Use this before register-operation when the owning authority is not already explicit. |
-| `praxis workflow client-operating-model` | `praxis_client_operating_model` | `operations` | `read` | Build one read-only Client Operating Model operator view from provided evidence: system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed-runtime accounting, next safe actions, or workflow-builder validation. |
+| `praxis workflow client-operating-model` | `praxis_client_operating_model` | `operations` | `read` | Build one read-only Client Operating Model operator view from provided evidence: system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed-runtime accounting, next safe actions, workflow-builder validation, or Workflow Context customer composite deployability. |
 | `praxis workflow client-system-discovery` | `praxis_client_system_discovery` | `operations` | `read` | Persist or query client-system discovery authority: system census records, connector surface evidence, credential-health references, and typed discovery gaps. Use this before designing integrations from guessed connector behavior. |
 | `praxis workflow evolve-operation-field` | `praxis_evolve_operation_field` | `operations` | `read` | Plan how to add one optional field to an existing CQRS operation's input model (checklist of files and edits). v1 is plan-only — you still apply diffs locally. |
 | `praxis workflow heartbeat` | `praxis_daily_heartbeat` | `operations` | `write` | Run the daily external-health probe across providers, connectors, credentials, and MCP servers. |
 | `praxis workflow integration-action-contract-read` | `praxis_integration_action_contract_read` | `operations` | `read` | Read stored integration action contracts, revisions, automation snapshots, linked actions, and typed gaps before Virtual Lab simulation or live sandbox promotion. |
 | `praxis workflow integration-action-contract-record` | `praxis_integration_action_contract_record` | `operations` | `write` | Persist receipt-backed integration action contracts and automation rule snapshots with deterministic hashes, validation gaps, linked actions, and a command event before simulation or sandbox promotion. |
+| `praxis workflow managed-runtime-read` | `praxis_authority_managed_runtime_read` | `operations` | `read` | Inspect persisted managed-runtime run receipts, metering, cost basis, heartbeat health, audit events, pricing schedules, and customer observability without reading raw tables. |
+| `praxis workflow managed-runtime-record` | `praxis_authority_managed_runtime_record` | `operations` | `write` | Record an optional managed/exported/hybrid runtime accounting snapshot with mode policy, metering, run receipt, pricing schedule reference, heartbeat health, audit context, and customer-safe observability through CQRS. |
 | `praxis workflow object-truth` | `praxis_object_truth` | `operations` | `read` | Build deterministic object-truth evidence for one inline external record: identity digest, field observations, value digests, source metadata, hierarchy signals, and redaction-safe previews. |
 | `praxis workflow object-truth-compare` | `praxis_object_truth_compare_versions` | `operations` | `read` | Compare two persisted object-truth object versions by digest to see matching, different, missing, and freshness signals. |
 | `praxis workflow object-truth-ingestion-sample-read` | `praxis_object_truth_ingestion_sample_read` | `operations` | `read` | Read stored Object Truth ingestion samples, payload references, object-version refs, and replay fixture evidence. |
 | `praxis workflow object-truth-ingestion-sample-record` | `praxis_object_truth_ingestion_sample_record` | `operations` | `write` | Persist a receipt-backed Object Truth ingestion sample: system snapshot, source query, sample capture, raw payload references, redacted previews, object versions, field observations, and replay fixture evidence. |
+| `praxis workflow object-truth-latest-version` | `praxis_object_truth_latest_version_read` | `operations` | `read` | Read the latest trusted Object Truth version for a system/object/identity/client filter when the caller should not know or manage exact version digests. |
 | `praxis workflow object-truth-mdm-resolution-read` | `praxis_object_truth_mdm_resolution_read` | `operations` | `read` | Read stored Object Truth MDM/source-authority resolution packets and their decomposed identity, field, authority, hierarchy, and gap evidence. |
 | `praxis workflow object-truth-mdm-resolution-record` | `praxis_object_truth_mdm_resolution_record` | `operations` | `write` | Persist a receipt-backed Object Truth MDM/source-authority resolution packet with identity clusters, field comparisons, normalization rules, authority evidence, hierarchy signals, and typed gaps. |
 | `praxis workflow object-truth-readiness` | `praxis_object_truth_readiness` | `operations` | `read` | Inspect whether Object Truth authority is ready for downstream client-system discovery, ingestion, and Virtual Lab planning. Returns explicit no-go conditions instead of treating a blocked state as a tool failure. |
@@ -68,6 +71,11 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow virtual-lab-simulation-run` | `praxis_virtual_lab_simulation_run` | `operations` | `write` | Run a deterministic Virtual Lab scenario and persist its trace, state transitions, automation firings, assertions, verifier results, typed gaps, and promotion blockers through CQRS. |
 | `praxis workflow virtual-lab-state-read` | `praxis_virtual_lab_state_read` | `operations` | `read` | Read stored Virtual Lab revisions, object state projections, event streams, command receipts, and replay gaps before sandbox promotion or drift readback. |
 | `praxis workflow virtual-lab-state-record` | `praxis_virtual_lab_state_record` | `operations` | `write` | Persist a receipt-backed Virtual Lab state packet after deterministic replay validation: environment revision, seeded object projections, event envelopes, command receipts, and typed gaps. |
+| `praxis workflow workflow-context-bind` | `praxis_workflow_context_bind` | `operations` | `write` | Bind an inferred or synthetic Workflow Context entity to Object Truth or another explicit authority ref while preserving risk, review, confidence, and reversibility. |
+| `praxis workflow workflow-context-compile` | `praxis_workflow_context_compile` | `operations` | `write` | Compile a Workflow Context pack from intent and optional graph so the LLM can infer systems, objects, fields, risks, blockers, and optional deterministic synthetic worlds before real integrations exist. |
+| `praxis workflow workflow-context-guardrails` | `praxis_workflow_context_guardrail_check` | `operations` | `read` | Ask backend policy what the LLM can safely do next with a Workflow Context pack, including no-go states and review requirements. |
+| `praxis workflow workflow-context-read` | `praxis_workflow_context_read` | `operations` | `read` | Read persisted Workflow Context packs, entities, bindings, transition history, blockers, guardrails, synthetic worlds, and review packets. |
+| `praxis workflow workflow-context-transition` | `praxis_workflow_context_transition` | `operations` | `write` | Move a Workflow Context pack between truth states through backend policy, for example inferred to schema_bound or verified to promoted. |
 | `praxis workflow orient` | `praxis_orient` | `operations` | `read` | Wake up against Praxis and get standing orders, authority envelope, tool guidance, and endpoints in one call. |
 | `praxis workflow circuits` | `praxis_circuits` | `operations` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
 | `praxis workflow dataset` | `praxis_dataset` | `operations` | `read`, `write` | Curate, score, and promote evidence-linked training/eval data per specialist; export reproducible JSONL with manifest hashes. |
@@ -79,7 +87,16 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow remediation-plan` | `praxis_remediation_plan` | `operations` | `read` | Explain the safe remediation tier, evidence requirements, approval gate, and retry delta for a typed workflow failure. |
 | `praxis workflow runtime-truth` | `praxis_runtime_truth_snapshot` | `operations` | `read` | Inspect observed workflow runtime truth across DB authority, queue state, worker heartbeats, provider slots, host-resource leases, Docker, manifest hydration audit, and recent typed failures. |
 | `praxis workflow query` | `praxis_query` | `query` | `read` | Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use. |
-| `praxis workflow moon` | `praxis_moon` | `workflow` | `launch`, `read`, `write` | Read, compose, suggest, mutate, or launch Moon workflow graphs through the same CQRS-backed build authority used by the in-app Moon surface. |
+| `praxis workflow model-eval` | `praxis_model_eval` | `workflow` | `read`, `write` | Use for consistent model selection: same Workflow spec, same fixtures, same verifier, varied model/prompt/provider configuration. |
+| `praxis workflow moon` | `praxis_moon` | `workflow` | `launch`, `read`, `write` | Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_moon tool name and moon alias remain compatibility entrypoints. |
+| `praxis workflow synthetic-data-generate` | `praxis_synthetic_data_generate` | `workflow` | `write` | Use when a workflow, Virtual Lab run, demo, test fixture, or model-eval fixture needs generated data with durable records and a quality-checked naming plan. |
+| `praxis workflow synthetic-data-read` | `praxis_synthetic_data_read` | `workflow` | `read` | Use to inspect generated datasets, naming plans, quality reports, and individual synthetic records. |
+| `praxis workflow synthetic-environment-clear` | `praxis_synthetic_environment_clear` | `workflow` | `write` | Use when an environment must be emptied without erasing audit history. |
+| `praxis workflow synthetic-environment-clock-advance` | `praxis_synthetic_environment_clock_advance` | `workflow` | `write` | Use to simulate time passing without mutating seed data. |
+| `praxis workflow synthetic-environment-create` | `praxis_synthetic_environment_create` | `workflow` | `write` | Use after generating Synthetic Data when you need a mutable, resettable world for outside events, demos, or simulation setup. |
+| `praxis workflow synthetic-environment-event-inject` | `praxis_synthetic_environment_event_inject` | `workflow` | `write` | Use to model external system changes such as owner changes, payment failures, escalations, webhook arrivals, or identity merges. |
+| `praxis workflow synthetic-environment-read` | `praxis_synthetic_environment_read` | `workflow` | `read` | Use to inspect what changed, list effects, or compare current environment state back to seed. |
+| `praxis workflow synthetic-environment-reset` | `praxis_synthetic_environment_reset` | `workflow` | `write` | Use to return a mutated or cleared world to its original synthetic seed. |
 | `praxis workflow approve-plan` | `praxis_approve_proposed_plan` | `workflow` | `read` | Approve a ProposedPlan so launch_approved can submit it. Wraps the proposal with approved_by + timestamp + hash; the hash binds the approval to the exact spec_dict so tampering between approve and launch fails closed. The proposed plan must already carry machine-checkable provider freshness evidence with fresh route truth. |
 | `praxis workflow bind-pills` | `praxis_bind_data_pills` | `workflow` | `read` | Suggest likely object.field data-pill candidates from loose prose and validate explicit references against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is either confirmed or surfaced as a candidate to confirm. |
 | `praxis workflow compose-plan` | `praxis_compose_plan` | `workflow` | `read` | Turn prose intent with explicit step markers into a ProposedPlan in one call — chains Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview). Compose with approve-plan + launch-plan(approved_plan=...) for the full approval-gated flow. |
@@ -116,6 +133,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
+| `praxis workflow tools call praxis_action_fingerprints` | `praxis_action_fingerprints` | `advanced` | action: record | `write` | - |
 | `praxis workflow tools call praxis_constraints` | `praxis_constraints` | `advanced` | action: list, for_scope | `read` | - |
 | `praxis workflow tools call praxis_friction` | `praxis_friction` | `advanced` | action: stats, list, patterns, record | `read` | - |
 | `praxis workflow tools call praxis_receipts` | `praxis_receipts` | `advanced` | action: search, token_burn | `read` | - |
@@ -170,16 +188,19 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
 | `praxis workflow authority-domain-forge` | `praxis_authority_domain_forge` | `advanced` | - | `read` | - |
-| `praxis workflow client-operating-model` | `praxis_client_operating_model` | `advanced` | view: system_census, object_truth, identity_authority, simulation_timeline, verifier_results, sandbox_drift, cartridge_status, managed_runtime, next_safe_actions, workflow_builder_validation | `read` | - |
+| `praxis workflow client-operating-model` | `praxis_client_operating_model` | `advanced` | view: system_census, object_truth, identity_authority, simulation_timeline, verifier_results, sandbox_drift, cartridge_status, managed_runtime, next_safe_actions, workflow_builder_validation, workflow_context_composite | `read` | - |
 | `praxis workflow client-system-discovery` | `praxis_client_system_discovery` | `advanced` | action: discover, list, search, describe, record_gap | `read` | - |
 | `praxis workflow evolve-operation-field` | `praxis_evolve_operation_field` | `advanced` | - | `read` | - |
 | `praxis workflow heartbeat` | `praxis_daily_heartbeat` | `advanced` | - | `write` | - |
 | `praxis workflow integration-action-contract-read` | `praxis_integration_action_contract_read` | `advanced` | action: list_contracts, describe_contract, list_automation_snapshots, describe_automation_snapshot | `read` | - |
 | `praxis workflow integration-action-contract-record` | `praxis_integration_action_contract_record` | `advanced` | - | `write` | - |
+| `praxis workflow managed-runtime-read` | `praxis_authority_managed_runtime_read` | `advanced` | action: list_records, describe_record, list_meter_events, list_heartbeats, list_pool_health, list_audit_events, list_pricing_schedules | `read` | - |
+| `praxis workflow managed-runtime-record` | `praxis_authority_managed_runtime_record` | `advanced` | - | `write` | - |
 | `praxis workflow object-truth` | `praxis_object_truth` | `advanced` | - | `read` | - |
 | `praxis workflow object-truth-compare` | `praxis_object_truth_compare_versions` | `advanced` | - | `read` | - |
 | `praxis workflow object-truth-ingestion-sample-read` | `praxis_object_truth_ingestion_sample_read` | `advanced` | action: list, describe | `read` | - |
 | `praxis workflow object-truth-ingestion-sample-record` | `praxis_object_truth_ingestion_sample_record` | `advanced` | - | `write` | - |
+| `praxis workflow object-truth-latest-version` | `praxis_object_truth_latest_version_read` | `advanced` | - | `read` | - |
 | `praxis workflow object-truth-mdm-resolution-read` | `praxis_object_truth_mdm_resolution_read` | `advanced` | action: list, describe | `read` | - |
 | `praxis workflow object-truth-mdm-resolution-record` | `praxis_object_truth_mdm_resolution_record` | `advanced` | - | `write` | - |
 | `praxis workflow object-truth-readiness` | `praxis_object_truth_readiness` | `advanced` | - | `read` | - |
@@ -200,7 +221,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow tools call praxis_authority_memory_refresh` | `praxis_authority_memory_refresh` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_bug_replay_provenance_backfill` | `praxis_bug_replay_provenance_backfill` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_client_operating_model_snapshot_store` | `praxis_client_operating_model_snapshot_store` | `advanced` | - | `write` | - |
-| `praxis workflow tools call praxis_client_operating_model_snapshots` | `praxis_client_operating_model_snapshots` | `advanced` | view: system_census, object_truth, identity_authority, simulation_timeline, verifier_results, sandbox_drift, cartridge_status, managed_runtime, next_safe_actions, workflow_builder_validation | `read` | - |
+| `praxis workflow tools call praxis_client_operating_model_snapshots` | `praxis_client_operating_model_snapshots` | `advanced` | view: system_census, object_truth, identity_authority, simulation_timeline, verifier_results, sandbox_drift, cartridge_status, managed_runtime, next_safe_actions, workflow_builder_validation, workflow_context_composite | `read` | - |
 | `praxis workflow tools call praxis_client_system_discovery_census_read` | `praxis_client_system_discovery_census_read` | `advanced` | action: list, search, describe | `read` | - |
 | `praxis workflow tools call praxis_client_system_discovery_census_record` | `praxis_client_system_discovery_census_record` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_client_system_discovery_gap_record` | `praxis_client_system_discovery_gap_record` | `advanced` | - | `write` | - |
@@ -217,6 +238,11 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow virtual-lab-simulation-run` | `praxis_virtual_lab_simulation_run` | `advanced` | - | `write` | - |
 | `praxis workflow virtual-lab-state-read` | `praxis_virtual_lab_state_read` | `advanced` | action: list_environments, list_revisions, describe_revision, list_events, list_receipts | `read` | - |
 | `praxis workflow virtual-lab-state-record` | `praxis_virtual_lab_state_record` | `advanced` | - | `write` | - |
+| `praxis workflow workflow-context-bind` | `praxis_workflow_context_bind` | `advanced` | - | `write` | - |
+| `praxis workflow workflow-context-compile` | `praxis_workflow_context_compile` | `advanced` | - | `write` | - |
+| `praxis workflow workflow-context-guardrails` | `praxis_workflow_context_guardrail_check` | `advanced` | - | `read` | - |
+| `praxis workflow workflow-context-read` | `praxis_workflow_context_read` | `advanced` | - | `read` | - |
+| `praxis workflow workflow-context-transition` | `praxis_workflow_context_transition` | `advanced` | - | `write` | - |
 | `praxis workflow orient` | `praxis_orient` | `curated` | - | `read` | - |
 | `praxis workflow circuits` | `praxis_circuits` | `stable` | action: list, history, open, close, reset | `read`, `write` | - |
 | `praxis workflow dataset` | `praxis_dataset` | `stable` | action: summary, candidates_scan, candidates_list, candidate_inspect, candidate_promote, candidate_reject, inbox, preference_suggest, preference_create, eval_add, promotion_supersede, promotions_list, policy_list, policy_show, policy_record, lineage, manifests_list, export, stale_reconcile, projection_refresh | `read`, `write` | - |
@@ -317,7 +343,16 @@ The operation catalog gateway is the CQRS write/read front door when you already
 
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
+| `praxis workflow model-eval` | `praxis_model_eval` | `advanced` | action: plan, run, inspect, compare, promote, export | `read`, `write` | - |
 | `praxis workflow moon` | `praxis_moon` | `advanced` | action: get_build, compose, suggest_next, mutate_field, launch | `launch`, `read`, `write` | - |
+| `praxis workflow synthetic-data-generate` | `praxis_synthetic_data_generate` | `advanced` | - | `write` | - |
+| `praxis workflow synthetic-data-read` | `praxis_synthetic_data_read` | `advanced` | action: list_datasets, describe_dataset, list_records | `read` | - |
+| `praxis workflow synthetic-environment-clear` | `praxis_synthetic_environment_clear` | `advanced` | - | `write` | - |
+| `praxis workflow synthetic-environment-clock-advance` | `praxis_synthetic_environment_clock_advance` | `advanced` | - | `write` | - |
+| `praxis workflow synthetic-environment-create` | `praxis_synthetic_environment_create` | `advanced` | - | `write` | - |
+| `praxis workflow synthetic-environment-event-inject` | `praxis_synthetic_environment_event_inject` | `advanced` | - | `write` | - |
+| `praxis workflow synthetic-environment-read` | `praxis_synthetic_environment_read` | `advanced` | action: list_environments, describe_environment, list_effects, diff | `read` | - |
+| `praxis workflow synthetic-environment-reset` | `praxis_synthetic_environment_reset` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_compose_experiment` | `praxis_compose_experiment` | `advanced` | - | `launch` | - |
 | `praxis workflow tools call praxis_compose_plan_via_llm` | `praxis_compose_plan_via_llm` | `advanced` | - | `launch` | - |
 | `praxis workflow tools call praxis_connector` | `praxis_connector` | `advanced` | action: build, list, get, register, verify | `launch`, `read`, `write` | - |

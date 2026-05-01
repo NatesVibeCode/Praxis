@@ -31,6 +31,36 @@ def _operator_view() -> dict:
     }
 
 
+def _workflow_context_composite_view() -> dict:
+    return {
+        "kind": "client_operating_model.operator_surface.workflow_context_composite.v1",
+        "schema_version": 1,
+        "view_id": "workflow_context_composite.demo",
+        "state": "partial",
+        "freshness": {"status": "unknown", "generated_at": "2026-04-30T12:00:00Z"},
+        "permission_scope": {"scope_ref": "workflow.demo", "visibility": "full"},
+        "evidence_refs": ["workflow_context.demo"],
+        "correlation_ids": ["corr.demo"],
+        "payload": {
+            "truth_state_classes": {
+                "none": 0,
+                "inferred": 0,
+                "synthetic": 1,
+                "documented": 0,
+                "anonymized_operational": 0,
+                "schema_bound": 0,
+                "observed": 0,
+                "verified": 0,
+                "promoted": 0,
+                "stale": 0,
+                "contradicted": 0,
+                "blocked": 0,
+            },
+            "deployability": {"state": "simulation_ready"},
+        },
+    }
+
+
 class _SnapshotConn:
     def __init__(self) -> None:
         self.fetchrow_args = None
@@ -146,3 +176,25 @@ def test_list_operator_view_snapshots_supports_latest_view_readback() -> None:
 
     assert rows[0]["snapshot_ref"] == "snapshot.1"
     assert conn.fetch_args[:5] == (None, None, "system_census", "tenant.acme", 1)
+
+
+def test_workflow_context_composite_snapshot_can_be_stored_and_read() -> None:
+    conn = _SnapshotConn()
+
+    stored = persist_operator_view_snapshot(
+        conn,
+        operator_view=_workflow_context_composite_view(),
+        observed_by_ref="operator:nate",
+        source_ref="lunchbox.12",
+    )
+    rows = list_operator_view_snapshots(
+        conn,
+        view="workflow_context_composite",
+        scope_ref="workflow.demo",
+        limit=1,
+    )
+
+    assert stored["view_name"] == "workflow_context_composite"
+    assert stored["scope_ref"] == "workflow.demo"
+    assert rows[0]["snapshot_ref"] == "snapshot.1"
+    assert conn.fetch_args[:5] == (None, None, "workflow_context_composite", "workflow.demo", 1)

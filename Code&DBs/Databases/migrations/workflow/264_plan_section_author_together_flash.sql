@@ -32,23 +32,82 @@ UPDATE task_type_routing
    AND route_source = 'explicit';
 
 -- 2. Promote Together V3.2 → rank 1 (Flash for fork-outs).
-INSERT INTO task_type_routing (
-    task_type,
-    rank,
-    provider_slug,
-    model_slug,
-    route_source,
-    permitted,
-    updated_at
-) VALUES
-    ('plan_section_author', 1, 'together', 'deepseek-ai/DeepSeek-V3.2',  'explicit', TRUE, now()),
-    ('plan_section_author', 2, 'together', 'deepseek-ai/DeepSeek-V4-Pro', 'explicit', TRUE, now())
-ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type)
-DO UPDATE SET
-    rank = EXCLUDED.rank,
-    route_source = EXCLUDED.route_source,
-    permitted = EXCLUDED.permitted,
-    updated_at = now();
+--
+-- This migration runs against multiple PK shapes during the bootstrap chain:
+--   * Fresh bootstrap, pre-333: PK is 5-col
+--     (task_type, sub_task_type, provider_slug, model_slug, transport_type).
+--     Original ON CONFLICT clause matches.
+--   * Selective re-apply, post-333: PK is 4-col
+--     (task_type, sub_task_type, provider_slug, model_slug). The 5-col
+--     ON CONFLICT no longer matches any constraint and Postgres raises
+--     "no unique or exclusion constraint matching the ON CONFLICT
+--     specification".
+--   * Selective re-apply, post-378: trigger
+--     task_type_routing_transport_admission_check rejects CLI inserts for
+--     HTTP-only providers (together is HTTP-only). The implicit
+--     transport_type='CLI' default would be blocked.
+--
+-- The DO $$ block below picks the right ON CONFLICT shape at runtime and
+-- swallows the trigger-block exception so re-apply against post-cleanup
+-- state is an idempotent no-op. Selecting transport_type='API' explicitly
+-- aligns with provider_transport_admissions for together; the original
+-- migration relied on the historical transport_type='CLI' default which
+-- was retroactively invalidated by migration 375 + trigger 378.
+DO $$
+DECLARE
+    pk_has_transport BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+          FROM pg_constraint c
+          JOIN pg_attribute a
+            ON a.attrelid = c.conrelid
+           AND a.attnum = ANY(c.conkey)
+         WHERE c.conrelid = 'public.task_type_routing'::regclass
+           AND c.contype = 'p'
+           AND a.attname = 'transport_type'
+    ) INTO pk_has_transport;
+
+    IF pk_has_transport THEN
+        -- Pre-333 PK shape (fresh bootstrap, 5-col PK).
+        INSERT INTO task_type_routing (
+            task_type, rank, provider_slug, model_slug, route_source, permitted, updated_at
+        ) VALUES
+            ('plan_section_author', 1, 'together', 'deepseek-ai/DeepSeek-V3.2',  'explicit', TRUE, now()),
+            ('plan_section_author', 2, 'together', 'deepseek-ai/DeepSeek-V4-Pro', 'explicit', TRUE, now())
+        ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type)
+        DO UPDATE SET
+            rank = EXCLUDED.rank,
+            route_source = EXCLUDED.route_source,
+            permitted = EXCLUDED.permitted,
+            updated_at = now();
+    ELSE
+        -- Post-333 PK shape (selective re-apply, 4-col PK). The trigger
+        -- added in migration 378 may block CLI inserts for HTTP-only
+        -- providers; in that case this migration is a true no-op and the
+        -- desired rows live in later migrations or in the routing-table
+        -- runtime authority.
+        BEGIN
+            INSERT INTO task_type_routing (
+                task_type, rank, provider_slug, model_slug, transport_type,
+                route_source, permitted, updated_at
+            ) VALUES
+                ('plan_section_author', 1, 'together', 'deepseek-ai/DeepSeek-V3.2',  'API', 'explicit', TRUE, now()),
+                ('plan_section_author', 2, 'together', 'deepseek-ai/DeepSeek-V4-Pro', 'API', 'explicit', TRUE, now())
+            ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug)
+            DO UPDATE SET
+                rank = EXCLUDED.rank,
+                route_source = EXCLUDED.route_source,
+                permitted = EXCLUDED.permitted,
+                updated_at = now();
+        EXCEPTION
+            WHEN check_violation OR raise_exception THEN
+                RAISE NOTICE
+                    '264_plan_section_author_together_flash: post-cleanup state — '
+                    'INSERT skipped (likely transport-admission trigger): %', SQLERRM;
+        END;
+    END IF;
+END $$;
 
 -- 3. Tag Together V3.2 candidate with fork-author capability tags so capability-
 --    based matching in the planner sees it as the appropriate Flash route.

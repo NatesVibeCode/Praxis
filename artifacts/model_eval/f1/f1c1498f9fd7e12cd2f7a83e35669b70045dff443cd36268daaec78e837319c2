@@ -1,0 +1,12 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "{\"artifacts\": [{\"path\": \"rollout_plan.csv\", \"media_type\": \"text/csv\", \"content\": \"week,workstream,owner,deliverable,done_definition\\n\"}]}"
+      }
+    }
+  ],
+  "usage": {
+    "cost": 0
+  }
+}

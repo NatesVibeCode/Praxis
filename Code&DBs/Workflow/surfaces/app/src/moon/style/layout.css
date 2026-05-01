@@ -8,7 +8,7 @@
     radial-gradient(circle at top left, var(--moon-accent-a08), transparent 40%),
     var(--bg);
   overflow: hidden;
-  font-family: var(--font-sans);
+  font-family: var(--moon-font-sans);
   color: var(--text);
   display: flex;
   flex-direction: column;

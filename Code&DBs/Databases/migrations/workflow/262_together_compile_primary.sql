@@ -389,23 +389,76 @@ ON CONFLICT (runtime_profile_ref, candidate_ref) DO UPDATE SET
     projection_ref = EXCLUDED.projection_ref;
 
 -- 3. Demote the OpenRouter compile primaries to fallback ranks.
-UPDATE task_type_routing
-   SET rank = 5,
-       rationale = 'Demoted by migration 262: private compile primary moved to Together direct API; OpenRouter remains fallback.',
-       updated_at = now()
- WHERE task_type = 'compile'
-   AND provider_slug = 'openrouter'
-   AND model_slug = 'deepseek/deepseek-v4-flash'
-   AND route_source = 'explicit';
+--
+-- Re-apply note:
+--   OpenRouter is HTTP/API-only. Historical routing rows were created before
+--   transport_type was explicit and later inherited the task_type_routing
+--   default transport_type='CLI'. Migration 378 correctly rejects
+--   openrouter+CLI on UPDATE as well as INSERT, so this migration must prune
+--   the impossible legacy rows before it touches OpenRouter fallback ranks.
+DO $$
+DECLARE
+    has_transport_type BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'task_type_routing'
+           AND column_name = 'transport_type'
+    ) INTO has_transport_type;
 
-UPDATE task_type_routing
-   SET rank = 6,
-       rationale = 'Demoted by migration 262: private compile primary moved to Together direct API; OpenRouter remains fallback.',
-       updated_at = now()
- WHERE task_type = 'compile'
-   AND provider_slug = 'openrouter'
-   AND model_slug = 'deepseek/deepseek-v4-pro'
-   AND route_source = 'explicit';
+    IF has_transport_type THEN
+        DELETE FROM task_type_routing AS route
+         WHERE route.provider_slug = 'openrouter'
+           AND route.transport_type = 'CLI'
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM provider_transport_admissions AS admission
+                WHERE admission.provider_slug = route.provider_slug
+                  AND admission.transport_kind = 'cli'
+                  AND admission.status = 'active'
+           );
+
+        UPDATE task_type_routing
+           SET rank = 5,
+               rationale = 'Demoted by migration 262: private compile primary moved to Together direct API; OpenRouter remains API fallback.',
+               updated_at = now()
+         WHERE task_type = 'compile'
+           AND provider_slug = 'openrouter'
+           AND model_slug = 'deepseek/deepseek-v4-flash'
+           AND route_source = 'explicit'
+           AND transport_type = 'API';
+
+        UPDATE task_type_routing
+           SET rank = 6,
+               rationale = 'Demoted by migration 262: private compile primary moved to Together direct API; OpenRouter remains API fallback.',
+               updated_at = now()
+         WHERE task_type = 'compile'
+           AND provider_slug = 'openrouter'
+           AND model_slug = 'deepseek/deepseek-v4-pro'
+           AND route_source = 'explicit'
+           AND transport_type = 'API';
+    ELSE
+        UPDATE task_type_routing
+           SET rank = 5,
+               rationale = 'Demoted by migration 262: private compile primary moved to Together direct API; OpenRouter remains fallback.',
+               updated_at = now()
+         WHERE task_type = 'compile'
+           AND provider_slug = 'openrouter'
+           AND model_slug = 'deepseek/deepseek-v4-flash'
+           AND route_source = 'explicit';
+
+        UPDATE task_type_routing
+           SET rank = 6,
+               rationale = 'Demoted by migration 262: private compile primary moved to Together direct API; OpenRouter remains fallback.',
+               updated_at = now()
+         WHERE task_type = 'compile'
+           AND provider_slug = 'openrouter'
+           AND model_slug = 'deepseek/deepseek-v4-pro'
+           AND route_source = 'explicit';
+    END IF;
+END $$;
 
 -- 4. Insert Together as the new rank 1 + 2 compile routes.
 --

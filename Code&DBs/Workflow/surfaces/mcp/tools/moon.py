@@ -1,9 +1,9 @@
-"""Tool: praxis_moon — graph-authoring co-pilot for the Moon canvas.
+"""Tool: praxis_moon — legacy alias for Workflow graph authoring.
 
 Single MCP tool that routes to five graph-authoring CQRS operations:
 ``get_build``, ``compose``, ``suggest_next``, ``mutate_field``, ``launch``.
 
-Mirrors the chat-side ``moon_*`` registry in ``runtime.chat_tools`` so
+Mirrors the chat-side legacy ``moon_*`` registry in ``runtime.chat_tools`` so
 Codex/Gemini get parity with the in-app chat. All five actions dispatch
 through ``execute_operation_from_subsystems`` — same gateway path,
 same receipts + events the chat tools produce.
@@ -35,7 +35,7 @@ def _string_arg(params: dict[str, Any], key: str) -> str:
 
 
 def tool_praxis_moon(params: dict) -> dict:
-    """Dispatch a Moon graph-authoring action through the CQRS gateway."""
+    """Dispatch a Workflow graph-authoring action through the CQRS gateway."""
     action = _string_arg(params, "action")
     if action not in _ACTIONS:
         return _err(
@@ -158,12 +158,13 @@ TOOLS: dict[str, tuple[Any, dict[str, Any]]] = {
         tool_praxis_moon,
         {
             "description": (
-                "Graph-authoring co-pilot for the Moon canvas. Five actions over the "
-                "same workflow build authority, all CQRS-gateway dispatched (each call "
-                "leaves a receipt + the command actions emit authority events).\n\n"
-                "USE WHEN: an agent needs to read, compose, edit, or launch a Moon "
-                "workflow graph. This is the same surface the in-app chat uses, "
-                "exposed to Codex/Gemini for parity.\n\n"
+                "Workflow graph-authoring co-pilot exposed through the legacy "
+                "praxis_moon tool name. Five actions over the same workflow build "
+                "authority, all CQRS-gateway dispatched (each call leaves a receipt + "
+                "the command actions emit authority events).\n\n"
+                "USE WHEN: an agent needs to read, compose, edit, or launch a "
+                "Workflow graph. This is the same surface the in-app chat uses, "
+                "exposed to Codex/Gemini for parity while old routes remain compatible.\n\n"
                 "ACTIONS:\n"
                 "  get_build       Load BuildPayload (nodes, edges, gates, contracts, issues).\n"
                 "                  ALWAYS read before proposing edits so you reason about real state.\n"

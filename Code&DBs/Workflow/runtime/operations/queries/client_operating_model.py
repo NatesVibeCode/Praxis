@@ -17,6 +17,7 @@ from runtime.operator_surfaces.client_operating_model import (
     build_simulation_timeline_view,
     build_system_census_view,
     build_verifier_results_view,
+    build_workflow_context_composite_view,
     validate_workflow_builder_graph,
 )
 from storage.postgres.client_operating_model_repository import (
@@ -35,6 +36,7 @@ ClientOperatingModelView = Literal[
     "managed_runtime",
     "next_safe_actions",
     "workflow_builder_validation",
+    "workflow_context_composite",
 ]
 
 
@@ -49,6 +51,7 @@ _VIEW_BUILDERS = {
     "managed_runtime": build_managed_runtime_accounting_summary,
     "next_safe_actions": build_next_safe_actions_view,
     "workflow_builder_validation": validate_workflow_builder_graph,
+    "workflow_context_composite": build_workflow_context_composite_view,
 }
 
 

@@ -1,0 +1,14 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "{\"artifacts\": [{\"path\": \"rollout_plan.csv\", \"media_type\": \"text/csv\", \"content\": \"week,workstream,owner,deliverable,done_definition\\n\"}]}"
+      }
+    }
+  ],
+  "model": "openai/gpt-5.4-nano",
+  "provider": "azure",
+  "usage": {
+    "cost": 0
+  }
+}

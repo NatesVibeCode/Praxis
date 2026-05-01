@@ -15,6 +15,8 @@ import hashlib
 import json
 from typing import Any
 
+from runtime.workflow_context import EVIDENCE_STATES, TRUTH_STATES
+
 
 READ_MODEL_SCHEMA_VERSION = 1
 READ_MODEL_KIND_PREFIX = "client_operating_model.operator_surface"
@@ -737,6 +739,147 @@ def build_next_safe_actions_view(
     )
 
 
+def build_workflow_context_composite_view(
+    *,
+    workflow_ref: str | None = None,
+    context_pack: Mapping[str, Any] | None = None,
+    builder_validation_view: Mapping[str, Any] | None = None,
+    object_truth_versions: Sequence[Any] = (),
+    binding_records: Sequence[Any] = (),
+    simulation_runs: Sequence[Any] = (),
+    cost_summary: Mapping[str, Any] | None = None,
+    generated_at: Any | None = None,
+    permission_scope: Mapping[str, Any] | None = None,
+    correlation_ids: Sequence[str] = (),
+    evidence_refs: Sequence[str] = (),
+    source_updated_at: Any | None = None,
+    max_age_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Build the customer-facing Workflow Context composite read model."""
+
+    generated = _timestamp(generated_at)
+    permission = _permission_scope(permission_scope)
+    freshness = _freshness(generated, source_updated_at=source_updated_at, max_age_seconds=max_age_seconds)
+    context = dict(context_pack or {})
+    if permission["visibility"] == "not_authorized":
+        context = {}
+    context_ref = str(context.get("context_ref") or workflow_ref or "workflow_context.unspecified")
+    entities = [_object_payload(item) for item in _list(context.get("entities"))]
+    blockers = [_object_payload(item) for item in _list(context.get("blockers"))]
+    guardrail = _object_payload(context.get("guardrail"))
+    review_packet = _object_payload(context.get("review_packet"))
+    confidence = _object_payload(context.get("confidence"))
+    synthetic_world = _object_payload(context.get("synthetic_world"))
+    latest_simulation = _object_payload(context.get("latest_virtual_lab_simulation"))
+    bindings = [_object_payload(item) for item in _list(context.get("bindings"))]
+    bindings.extend(_object_payload(item) for item in binding_records)
+    object_truth_rows = [_object_payload(item) for item in object_truth_versions]
+    simulation_rows = [_object_payload(item) for item in simulation_runs]
+    if latest_simulation:
+        simulation_rows.insert(0, latest_simulation)
+
+    evidence_entries = [_object_payload(item) for item in _list(context.get("evidence_refs"))]
+    provided_evidence_refs = _merge_refs(evidence_refs, (entry.get("evidence_ref") or entry.get("ref") for entry in evidence_entries))
+    hard_blockers = [
+        item for item in blockers
+        if str(item.get("severity") or "").lower() in {"hard", "blocker", "critical", "error"}
+    ]
+    no_go_conditions = [_object_payload(item) for item in _list(guardrail.get("no_go_conditions"))]
+    queued_decisions = [_object_payload(item) for item in _list(review_packet.get("queued_decisions"))]
+    builder = _builder_validation_summary(builder_validation_view)
+    truth_counts = _workflow_truth_state_counts(context, entities, evidence_entries)
+    evidence_tier_counts = _workflow_evidence_tier_counts(evidence_entries)
+    synthetic_proof = _synthetic_proof_summary(
+        synthetic_world=synthetic_world,
+        latest_simulation=latest_simulation,
+        simulation_runs=simulation_rows,
+        verifier_expectations=_list(context.get("verifier_expectations")),
+    )
+    binding_coverage = _binding_coverage_summary(entities=entities, bindings=bindings)
+    real_evidence = _real_evidence_summary(
+        evidence_entries=evidence_entries,
+        object_truth_versions=object_truth_rows,
+        confidence=confidence,
+    )
+    blocker_summary = {
+        "hard_count": len(hard_blockers) + len(no_go_conditions),
+        "soft_count": max(0, len(blockers) - len(hard_blockers)),
+        "review_decision_count": len(queued_decisions),
+        "blockers": blockers,
+        "no_go_conditions": no_go_conditions,
+        "queued_decisions": queued_decisions,
+    }
+    deployability = _workflow_deployability_summary(
+        context=context,
+        builder=builder,
+        synthetic_proof=synthetic_proof,
+        binding_coverage=binding_coverage,
+        real_evidence=real_evidence,
+        blocker_summary=blocker_summary,
+    )
+    cost_payload = dict(cost_summary or {})
+    if not cost_payload:
+        record_count = len(_list(synthetic_world.get("records")))
+        cost_payload = {
+            "amount": "0.000000",
+            "basis": "read_model_only",
+            "synthetic_record_count": record_count,
+            "processing_note": "simulation and context generation cost must be supplied by managed runtime receipts",
+        }
+    contradiction = any(
+        tier in evidence_tier_counts and evidence_tier_counts[tier] > 0
+        for tier in ("contradicted",)
+    )
+    stale = evidence_tier_counts.get("stale", 0) > 0 or freshness.get("status") == "stale"
+    state, reasons = _surface_state(
+        permission=permission,
+        freshness=freshness,
+        missing=not context,
+        blocked=deployability["state"] == "blocked",
+        conflict=contradiction,
+        stale=stale,
+        partial=deployability["state"] in {"not_ready", "buildable", "simulation_ready", "review_required"},
+    )
+    payload = {
+        "state": state,
+        "state_reasons": reasons,
+        "workflow_ref": workflow_ref or context.get("workflow_ref"),
+        "context_ref": context.get("context_ref"),
+        "context_mode": context.get("context_mode") or "unknown",
+        "truth_state": context.get("truth_state") or "none",
+        "truth_state_classes": truth_counts,
+        "evidence_tiers": evidence_tier_counts,
+        "buildability": builder,
+        "synthetic_proof": synthetic_proof,
+        "binding_coverage": binding_coverage,
+        "real_evidence": real_evidence,
+        "blockers": blocker_summary,
+        "confidence": {
+            "score": context.get("confidence_score") or confidence.get("score"),
+            "state": context.get("confidence_state") or confidence.get("state") or "unknown",
+            "inputs": confidence.get("inputs") or {},
+        },
+        "cost": cost_payload,
+        "deployability": deployability,
+    }
+    return _envelope(
+        "workflow_context_composite",
+        generated_at=generated,
+        permission_scope=permission,
+        freshness=freshness,
+        correlation_ids=correlation_ids,
+        evidence_refs=provided_evidence_refs,
+        state=state,
+        payload=payload,
+        stable_basis={
+            "context_ref": context_ref,
+            "truth_state": payload["truth_state"],
+            "scope": permission["scope_ref"],
+            "deployability": deployability["state"],
+        },
+    )
+
+
 def validate_workflow_builder_graph(
     *,
     graph: Mapping[str, Any],
@@ -1109,6 +1252,251 @@ def _max_drift_severity(left: str, right: str) -> str:
     return right if order.get(right, 0) > order.get(left, 0) else left
 
 
+def _builder_validation_summary(builder_validation_view: Mapping[str, Any] | None) -> dict[str, Any]:
+    view = _object_payload(builder_validation_view)
+    result = _object_payload(view.get("operator_view") or view.get("view") or view)
+    payload = _object_payload(result.get("payload"))
+    validation = _object_payload(payload.get("validation"))
+    errors = [_object_payload(item) for item in _list(validation.get("errors"))]
+    warnings = [_object_payload(item) for item in _list(validation.get("warnings"))]
+    if not view:
+        return {
+            "state": "missing",
+            "ok": None,
+            "error_count": 0,
+            "warning_count": 0,
+            "safe_action_count": 0,
+            "reason_codes": ["buildability.not_checked"],
+        }
+    ok = validation.get("ok")
+    state = str(result.get("state") or payload.get("state") or ("healthy" if ok is True else "blocked"))
+    return {
+        "state": _surface_state_member(state),
+        "ok": ok if isinstance(ok, bool) else None,
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "safe_action_count": len(_list(payload.get("safe_action_summary"))),
+        "reason_codes": _merge_refs(
+            (item.get("reason_code") for item in errors),
+            (item.get("reason_code") for item in warnings),
+        ),
+    }
+
+
+def _workflow_truth_state_counts(
+    context: Mapping[str, Any],
+    entities: Sequence[Mapping[str, Any]],
+    evidence_entries: Sequence[Mapping[str, Any]],
+) -> dict[str, int]:
+    counts = {state: 0 for state in sorted(TRUTH_STATES)}
+    context_state = str(context.get("truth_state") or "none")
+    if context_state in counts:
+        counts[context_state] += 1
+    for entity in entities:
+        state = str(entity.get("truth_state") or entity.get("context_pill") or "none")
+        if state in counts:
+            counts[state] += 1
+    for evidence in evidence_entries:
+        state = str(evidence.get("truth_state") or evidence.get("evidence_tier") or "")
+        if state in counts:
+            counts[state] += 1
+    return counts
+
+
+def _workflow_evidence_tier_counts(evidence_entries: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    counts = {state: 0 for state in sorted(EVIDENCE_STATES)}
+    for evidence in evidence_entries:
+        tier = str(evidence.get("evidence_tier") or evidence.get("truth_state") or "documented")
+        if tier not in counts:
+            tier = "documented"
+        counts[tier] += 1
+    return counts
+
+
+def _synthetic_proof_summary(
+    *,
+    synthetic_world: Mapping[str, Any],
+    latest_simulation: Mapping[str, Any],
+    simulation_runs: Sequence[Mapping[str, Any]],
+    verifier_expectations: Sequence[Any],
+) -> dict[str, Any]:
+    records = _list(synthetic_world.get("records"))
+    expected_verifiers = len(verifier_expectations)
+    verifier_statuses = _clean_refs(latest_simulation.get("verifier_statuses"))
+    if not verifier_statuses:
+        for run in simulation_runs:
+            verifier_statuses.extend(_clean_refs(run.get("verifier_statuses")))
+    passed_verifiers = sum(1 for status in verifier_statuses if status in {"passed", "success", "ok"})
+    failed_verifiers = sum(1 for status in verifier_statuses if status in {"failed", "error", "blocked"})
+    simulation_status = str(latest_simulation.get("status") or "")
+    state = "missing"
+    if synthetic_world:
+        state = "ready"
+    if simulation_status in {"passed", "success", "completed"} and failed_verifiers == 0:
+        state = "passed"
+    elif simulation_status in {"failed", "blocked"} or failed_verifiers > 0:
+        state = "blocked"
+    return {
+        "state": state,
+        "synthetic": bool(synthetic_world.get("synthetic")),
+        "world_ref": synthetic_world.get("world_ref"),
+        "seed": synthetic_world.get("seed"),
+        "record_count": len(records),
+        "simulation_status": simulation_status or None,
+        "simulation_run_count": len(simulation_runs),
+        "transition_count": latest_simulation.get("transition_count"),
+        "verifier_pass_count": passed_verifiers,
+        "verifier_fail_count": failed_verifiers,
+        "verifier_expected_count": expected_verifiers,
+        "live_promotion_allowed": False if synthetic_world else None,
+    }
+
+
+def _binding_coverage_summary(
+    *,
+    entities: Sequence[Mapping[str, Any]],
+    bindings: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    bindable_entities = [
+        item for item in entities
+        if str(item.get("entity_kind") or "") in {"object", "system", "field", "action", "event"}
+    ]
+    bound_targets = _merge_refs(
+        (item.get("source_entity_ref") for item in bindings),
+        (item.get("source_ref") for item in bindings),
+    )
+    high_risk = [
+        item for item in bindings
+        if str(item.get("risk_level") or item.get("review_risk") or "").lower() in {"high", "critical"}
+        or bool(item.get("review_required"))
+    ]
+    coverage = 0.0
+    if bindable_entities:
+        coverage = min(1.0, len(bindings) / len(bindable_entities))
+    state = "missing"
+    if bindings and coverage >= 1.0 and not high_risk:
+        state = "complete"
+    elif bindings:
+        state = "partial"
+    return {
+        "state": state,
+        "coverage": coverage,
+        "bindable_count": len(bindable_entities),
+        "bound_count": len(bindings),
+        "bound_target_count": len(bound_targets),
+        "high_risk_review_count": len(high_risk),
+        "bindings": list(bindings),
+    }
+
+
+def _real_evidence_summary(
+    *,
+    evidence_entries: Sequence[Mapping[str, Any]],
+    object_truth_versions: Sequence[Mapping[str, Any]],
+    confidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    inputs = _object_payload(confidence.get("inputs"))
+    promotion_count = _int(inputs.get("promotion_evidence_count"), 0)
+    verified_count = 0
+    stale_count = 0
+    conflict_count = 0
+    for item in evidence_entries:
+        tier = str(item.get("evidence_tier") or item.get("truth_state") or "")
+        if tier in {"verified", "promoted", "observed", "schema_bound"}:
+            verified_count += 1
+        if tier == "stale" or str(item.get("freshness_state") or "") == "stale":
+            stale_count += 1
+        if tier == "contradicted" or bool(item.get("contradicted")):
+            conflict_count += 1
+    for item in object_truth_versions:
+        state = str(item.get("state") or item.get("freshness") or item.get("status") or "")
+        if state in {"verified", "trusted", "fresh", "promoted"}:
+            verified_count += 1
+        if state == "stale":
+            stale_count += 1
+        if state in {"conflict", "conflicted", "contradicted"} or item.get("conflicts"):
+            conflict_count += 1
+    state = "missing"
+    if conflict_count:
+        state = "conflict"
+    elif stale_count:
+        state = "stale"
+    elif promotion_count > 0:
+        state = "promotion_ready"
+    elif verified_count > 0:
+        state = "partial"
+    return {
+        "state": state,
+        "evidence_count": len(evidence_entries),
+        "object_truth_version_count": len(object_truth_versions),
+        "verified_or_schema_bound_count": verified_count,
+        "promotion_evidence_count": promotion_count,
+        "stale_count": stale_count,
+        "conflict_count": conflict_count,
+        "latest_versions": list(object_truth_versions),
+    }
+
+
+def _workflow_deployability_summary(
+    *,
+    context: Mapping[str, Any],
+    builder: Mapping[str, Any],
+    synthetic_proof: Mapping[str, Any],
+    binding_coverage: Mapping[str, Any],
+    real_evidence: Mapping[str, Any],
+    blocker_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    hard_blockers = _int(blocker_summary.get("hard_count"), 0)
+    review_count = _int(blocker_summary.get("review_decision_count"), 0)
+    builder_ok = builder.get("ok") is True or builder.get("state") == "healthy"
+    confidence_score = context.get("confidence_score")
+    try:
+        confidence_ok = float(confidence_score) >= 0.72
+    except (TypeError, ValueError):
+        confidence_ok = False
+    promotion_ready = (
+        str(context.get("truth_state")) in {"verified", "promoted"}
+        and _int(real_evidence.get("promotion_evidence_count"), 0) > 0
+        and hard_blockers == 0
+    )
+    state = "not_ready"
+    can_build = bool(context) and builder.get("ok") is not False
+    can_simulate = synthetic_proof.get("state") in {"ready", "passed"}
+    can_promote = False
+    if hard_blockers:
+        state = "blocked"
+    elif promotion_ready and confidence_ok and binding_coverage.get("state") in {"complete", "partial"}:
+        state = "promotable_candidate"
+        can_promote = True
+    elif review_count:
+        state = "review_required"
+    elif can_simulate:
+        state = "simulation_ready"
+    elif can_build or builder_ok:
+        state = "buildable"
+    blocked_actions: list[str] = []
+    if not can_promote:
+        blocked_actions.append("promote_live")
+    if hard_blockers:
+        blocked_actions.extend(["live_write", "accept_risk_without_review"])
+    if real_evidence.get("state") in {"missing", "stale", "conflict"}:
+        blocked_actions.append("claim_live_proof")
+    return {
+        "state": state,
+        "can_build": can_build or builder_ok,
+        "can_simulate": can_simulate,
+        "can_bind": bool(context),
+        "can_promote": can_promote,
+        "requires_review": review_count > 0 or hard_blockers > 0,
+        "blocked_actions": sorted(dict.fromkeys(blocked_actions)),
+        "reason_codes": _merge_refs(
+            builder.get("reason_codes"),
+            (item.get("reason_code") for item in _list(blocker_summary.get("blockers")) if isinstance(item, Mapping)),
+            (item.get("reason_code") for item in _list(blocker_summary.get("no_go_conditions")) if isinstance(item, Mapping)),
+        ),
+    }
+
+
 def _drift_action(row: Mapping[str, Any], classifications: Sequence[Mapping[str, Any]], severity: str) -> dict[str, Any] | None:
     if severity == "informational":
         return None
@@ -1297,5 +1685,6 @@ __all__ = [
     "build_simulation_timeline_view",
     "build_system_census_view",
     "build_verifier_results_view",
+    "build_workflow_context_composite_view",
     "validate_workflow_builder_graph",
 ]

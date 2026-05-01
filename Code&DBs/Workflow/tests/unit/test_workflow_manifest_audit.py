@@ -121,3 +121,38 @@ def test_write_job_receipt_persists_workspace_manifest_audit() -> None:
     assert outputs["workspace_manifest_audit"]["observed_file_read_refs"] == [
         "runtime/context.py"
     ]
+
+
+def test_write_job_receipt_persists_artifact_scope_drift() -> None:
+    conn = _ReceiptConn()
+    receipt_writer.write_job_receipt(
+        conn,
+        "run.audit",
+        7,
+        "build_a",
+        "openai/gpt-5.4-mini",
+        {
+            "status": "failed",
+            "exit_code": 0,
+            "error_code": "workflow_scope.out_of_scope_write",
+            "artifact_scope_drift": [
+                {
+                    "artifact_ref": "submit.py",
+                    "declared_write_scope": ["runtime/example.py"],
+                    "reason": "outside_write_scope",
+                    "submission_required": True,
+                }
+            ],
+        },
+        100,
+        repo_root="/repo",
+    )
+
+    receipt_insert = next(
+        args
+        for query, args in conn.queries
+        if "INSERT INTO receipts" in " ".join(query.split())
+    )
+    outputs = json.loads(receipt_insert[16])
+    assert outputs["artifact_scope_drift_count"] == 1
+    assert outputs["artifact_scope_drift"][0]["artifact_ref"] == "submit.py"

@@ -25,6 +25,9 @@ import {
   buildPrimitiveContractSuggestions,
   type PrimitiveContractExtras,
 } from './moonContractSuggestions';
+import type { ClientOperatingModelBuilderStatus, ClientOperatingModelCompositeStatus } from './clientOperatingModel';
+import type { WorkflowContextAuthorityPayload } from '../shared/types';
+import { workflowContextNodeSummary, type WorkflowContextInspectorSummary } from './workflowContext';
 import {
   buildHttpRequestIntegrationArgs,
   buildNotificationIntegrationArgs,
@@ -68,6 +71,7 @@ export interface WorkflowInspectorSummary {
   dataPills: string[];
   receipt: string | null;
   disconnected: number;
+  contextAuthority?: WorkflowContextInspectorSummary | null;
 }
 
 interface Props {
@@ -101,6 +105,10 @@ interface Props {
   /** Compiled plan + issues for richer primitive field suggestions */
   contractSuggestionExtras?: PrimitiveContractExtras | null;
   workflowSummary?: WorkflowInspectorSummary | null;
+  workflowContext?: WorkflowContextAuthorityPayload | null;
+  operatingModelStatus?: ClientOperatingModelBuilderStatus | null;
+  operatingModelCompositeStatus?: ClientOperatingModelCompositeStatus | null;
+  onCheckOperatingModel?: () => void;
 }
 
 const TRIGGER_MANUAL_ROUTE = 'trigger';
@@ -227,11 +235,53 @@ function formatTriggerFilterValueText(value: unknown, valueType: TriggerFilterVa
   return formatJsonValue(value);
 }
 
-function WorkflowInspector({ summary }: { summary: WorkflowInspectorSummary | null | undefined }) {
+function modelTone(status: ClientOperatingModelBuilderStatus | null | undefined): string {
+  if (!status || status.state === 'unchecked') return 'warning';
+  if (status.state === 'healthy') return 'ready';
+  if (status.state === 'blocked' || status.state === 'unavailable' || status.errorCount > 0) return 'blocked';
+  if (status.state === 'partial' || status.state === 'checking' || status.warningCount > 0) return 'warning';
+  return status.state;
+}
+
+function modelValidationCopy(status: ClientOperatingModelBuilderStatus | null | undefined): string {
+  if (!status) return 'unchecked';
+  if (status.checking) return 'checking...';
+  if (status.ok === true) return status.warningCount > 0 ? `valid · ${status.warningCount} warnings` : 'valid';
+  if (status.errorCount > 0) return `${status.errorCount} blockers`;
+  return status.state;
+}
+
+function compositeTone(status: ClientOperatingModelCompositeStatus | null | undefined): string {
+  if (!status) return 'warning';
+  if (status.canPromote || status.deployabilityState === 'promotable_candidate') return 'ready';
+  if (status.state === 'blocked' || status.deployabilityState === 'blocked' || status.state === 'unavailable') return 'blocked';
+  if (status.canSimulate || status.deployabilityState === 'simulation_ready') return 'ready';
+  return 'warning';
+}
+
+function contextTone(context: WorkflowContextInspectorSummary): string {
+  if (context.hardBlockerCount > 0 || ['blocked', 'contradicted', 'stale'].includes(context.pill)) return 'blocked';
+  if (['verified', 'promoted', 'observed', 'schema_bound', 'bound'].includes(context.pill)) return 'ready';
+  return 'warning';
+}
+
+function WorkflowInspector({
+  summary,
+  operatingModelStatus,
+  operatingModelCompositeStatus,
+  onCheckOperatingModel,
+}: {
+  summary: WorkflowInspectorSummary | null | undefined;
+  operatingModelStatus?: ClientOperatingModelBuilderStatus | null;
+  operatingModelCompositeStatus?: ClientOperatingModelCompositeStatus | null;
+  onCheckOperatingModel?: () => void;
+}) {
   if (!summary) {
     return <div className="moon-dock__empty">Select a node or gate.</div>;
   }
   const mapTone = summary.disconnected > 0 ? 'warning' : summary.readiness === 'ready' ? 'ready' : summary.readiness;
+  const operatingModelTone = modelTone(operatingModelStatus);
+  const compositeModelTone = compositeTone(operatingModelCompositeStatus);
   return (
     <div className="moon-dock-workflow" aria-label="Workflow inspector summary">
       <div className="moon-dock-section-card moon-dock-section-card--dense">
@@ -275,6 +325,136 @@ function WorkflowInspector({ summary }: { summary: WorkflowInspectorSummary | nu
             : <span className="moon-dock-workflow__pill-empty">none declared</span>}
         </div>
       </div>
+
+      {summary.contextAuthority ? (
+        <div className="moon-dock-section-card moon-dock-section-card--dense" aria-label="Workflow context authority">
+          <div className="moon-dock-section-card__header">
+            <div className="moon-dock__section-label">Context</div>
+            <span className={`moon-dock-workflow__tone moon-dock-workflow__tone--${contextTone(summary.contextAuthority)}`}>
+              {summary.contextAuthority.pill}
+            </span>
+          </div>
+          <div className="moon-dock-workflow__grid">
+            <div className="moon-dock-workflow__row">
+              <span>Mode</span>
+              <strong>{summary.contextAuthority.mode}</strong>
+            </div>
+            <div className="moon-dock-workflow__row">
+              <span>Confidence</span>
+              <strong>{summary.contextAuthority.confidence}</strong>
+            </div>
+            <div className={`moon-dock-workflow__row${summary.contextAuthority.blockerCount > 0 ? ' moon-dock-workflow__row--warn' : ''}`}>
+              <span>Blockers</span>
+              <strong>{summary.contextAuthority.blockerCount}</strong>
+            </div>
+            <div className="moon-dock-workflow__row">
+              <span>Virtual Lab</span>
+              <strong>{summary.contextAuthority.simulationStatus || 'pending'}</strong>
+            </div>
+            <div className="moon-dock-workflow__row">
+              <span>Revision</span>
+              <strong>{summary.contextAuthority.virtualLabRevision || 'pending'}</strong>
+            </div>
+            <div className="moon-dock-workflow__row">
+              <span>Context ref</span>
+              <strong>{summary.contextAuthority.contextRef}</strong>
+            </div>
+          </div>
+          <div className="moon-dock-workflow__pills">
+            {summary.contextAuthority.objectLabels.length > 0
+              ? summary.contextAuthority.objectLabels.map((label) => <span key={label}>{label}</span>)
+              : <span className="moon-dock-workflow__pill-empty">no objects</span>}
+          </div>
+          <div className="moon-dock-workflow__pills">
+            {summary.contextAuthority.ioModes.length > 0
+              ? summary.contextAuthority.ioModes.map((label) => <span key={label}>{label}</span>)
+              : <span className="moon-dock-workflow__pill-empty">no io mode</span>}
+          </div>
+          <div className="moon-dock-workflow__row">
+            <span>Verifiers</span>
+            <strong>{summary.contextAuthority.verifierCount}</strong>
+          </div>
+          {summary.contextAuthority.nextActions.length > 0 ? (
+            <div className="moon-dock-workflow__message">
+              {summary.contextAuthority.nextActions.join(' / ')}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="moon-dock-section-card moon-dock-section-card--dense">
+        <div className="moon-dock-section-card__header">
+          <div className="moon-dock__section-label">Operating model</div>
+          <span className={`moon-dock-workflow__tone moon-dock-workflow__tone--${operatingModelTone}`}>
+            {operatingModelStatus?.state || 'unchecked'}
+          </span>
+        </div>
+        <div className="moon-dock-workflow__grid">
+          <div className={`moon-dock-workflow__row${operatingModelStatus?.errorCount ? ' moon-dock-workflow__row--warn' : ''}`}>
+            <span>Builder</span>
+            <strong>{modelValidationCopy(operatingModelStatus)}</strong>
+          </div>
+          <div className="moon-dock-workflow__row">
+            <span>Safe</span>
+            <strong>{operatingModelStatus ? `${operatingModelStatus.safeActionCount} actions` : 'pending'}</strong>
+          </div>
+          <div className="moon-dock-workflow__row">
+            <span>Receipt</span>
+            <strong>{operatingModelStatus?.receiptId || 'pending'}</strong>
+          </div>
+        </div>
+        {operatingModelStatus?.message ? (
+          <div className="moon-dock-workflow__message">{operatingModelStatus.message}</div>
+        ) : null}
+        {onCheckOperatingModel ? (
+          <button
+            type="button"
+            className="moon-dock-workflow__action"
+            onClick={onCheckOperatingModel}
+            disabled={operatingModelStatus?.checking}
+          >
+          {operatingModelStatus?.checking ? 'Checking...' : 'Check builder'}
+          </button>
+        ) : null}
+      </div>
+
+      {operatingModelCompositeStatus ? (
+        <div className="moon-dock-section-card moon-dock-section-card--dense">
+          <div className="moon-dock-section-card__header">
+            <div className="moon-dock__section-label">Deployability</div>
+            <span className={`moon-dock-workflow__tone moon-dock-workflow__tone--${compositeModelTone}`}>
+              {operatingModelCompositeStatus.deployabilityState}
+            </span>
+          </div>
+          <div className="moon-dock-workflow__grid">
+            <div className="moon-dock-workflow__row">
+              <span>Build</span>
+              <strong>{operatingModelCompositeStatus.buildabilityState}</strong>
+            </div>
+            <div className="moon-dock-workflow__row">
+              <span>Synthetic</span>
+              <strong>{operatingModelCompositeStatus.syntheticProofState}</strong>
+            </div>
+            <div className="moon-dock-workflow__row">
+              <span>Binding</span>
+              <strong>{operatingModelCompositeStatus.bindingCoverageState}</strong>
+            </div>
+            <div className="moon-dock-workflow__row">
+              <span>Evidence</span>
+              <strong>{operatingModelCompositeStatus.realEvidenceState}</strong>
+            </div>
+            <div className={`moon-dock-workflow__row${operatingModelCompositeStatus.blockerCount ? ' moon-dock-workflow__row--warn' : ''}`}>
+              <span>Blockers</span>
+              <strong>{operatingModelCompositeStatus.blockerCount}</strong>
+            </div>
+            <div className="moon-dock-workflow__row">
+              <span>Confidence</span>
+              <strong>{operatingModelCompositeStatus.confidence}</strong>
+            </div>
+          </div>
+          <div className="moon-dock-workflow__message">{operatingModelCompositeStatus.message}</div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -487,7 +667,7 @@ function buildSimpleBranchCondition(
   return condition;
 }
 
-export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAuthorityAction, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [], buildGraph, onUpdateBuildGraph, onCommitGraphAction, contractSuggestionExtras = null, workflowSummary = null }: Props) {
+export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAuthorityAction, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [], buildGraph, onUpdateBuildGraph, onCommitGraphAction, contractSuggestionExtras = null, workflowSummary = null, workflowContext = null, operatingModelStatus = null, operatingModelCompositeStatus = null, onCheckOperatingModel }: Props) {
   const { objectTypes, loading: objectTypesLoading } = useObjectTypes();
   const [objectSearch, setObjectSearch] = useState('');
   const [attachKind, setAttachKind] = useState('reference');
@@ -691,6 +871,10 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     if (upstream.length === 0 && downstream.length === 0) return null;
     return { upstream, downstream };
   }, [buildGraph, node]);
+  const nodeContext = useMemo(
+    () => workflowContextNodeSummary(workflowContext, node?.id),
+    [node?.id, workflowContext],
+  );
 
   const triggerFilterFingerprint = useMemo(() => {
     try {
@@ -1676,7 +1860,12 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
       )}
 
       {!node && !selectedEdge ? (
-        <WorkflowInspector summary={workflowSummary} />
+        <WorkflowInspector
+          summary={workflowSummary}
+          operatingModelStatus={operatingModelStatus}
+          operatingModelCompositeStatus={operatingModelCompositeStatus}
+          onCheckOperatingModel={onCheckOperatingModel}
+        />
       ) : node ? (
         <>
           {/* Context ribbon — upstream producers and downstream consumers.
@@ -1716,6 +1905,42 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   ))
                 )}
               </div>
+            </div>
+          )}
+          {nodeContext && (
+            <div className="moon-dock-section-card moon-dock-section-card--dense" aria-label="Selected node workflow context">
+              <div className="moon-dock-section-card__header">
+                <div className="moon-dock__section-label">Context</div>
+                <span className={`moon-dock-workflow__tone moon-dock-workflow__tone--${nodeContext.blockerCount > 0 ? 'blocked' : 'warning'}`}>
+                  {nodeContext.pill}
+                </span>
+              </div>
+              <div className="moon-dock-workflow__grid">
+                <div className="moon-dock-workflow__row">
+                  <span>IO</span>
+                  <strong>{nodeContext.ioMode}</strong>
+                </div>
+                <div className={`moon-dock-workflow__row${nodeContext.blockerCount > 0 ? ' moon-dock-workflow__row--warn' : ''}`}>
+                  <span>Blockers</span>
+                  <strong>{nodeContext.blockerCount}</strong>
+                </div>
+                <div className="moon-dock-workflow__row">
+                  <span>Verifiers</span>
+                  <strong>{nodeContext.verifierCount}</strong>
+                </div>
+                <div className="moon-dock-workflow__row">
+                  <span>Context ref</span>
+                  <strong>{nodeContext.contextRef}</strong>
+                </div>
+              </div>
+              <div className="moon-dock-workflow__pills">
+                {nodeContext.objectLabels.length > 0
+                  ? nodeContext.objectLabels.map((label) => <span key={label}>{label}</span>)
+                  : <span className="moon-dock-workflow__pill-empty">no objects</span>}
+              </div>
+              {nodeContext.nextAction ? (
+                <div className="moon-dock-workflow__message">{nodeContext.nextAction}</div>
+              ) : null}
             </div>
           )}
           {hasAgentPacket && (
@@ -1838,10 +2063,10 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                 <div className="moon-dock__section-label">Trigger config</div>
                 <div className="moon-dock__item-desc" style={{ marginTop: 0, fontWeight: 600 }}>
                   {triggerRoute === TRIGGER_SCHEDULE_ROUTE
-                    ? 'Schedule trigger'
+                    ? 'Schedule configuration'
                     : triggerRoute === TRIGGER_WEBHOOK_ROUTE
-                      ? 'Webhook trigger'
-                      : 'Manual trigger'}
+                      ? 'Endpoint configuration'
+                      : 'Manual configuration'}
                 </div>
               </div>
               {triggerRoute === TRIGGER_SCHEDULE_ROUTE ? (

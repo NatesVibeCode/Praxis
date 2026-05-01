@@ -102,16 +102,13 @@ vi.mock('./MoonActionDock', () => ({
 }));
 
 vi.mock('./MoonNodeDetail', () => ({
-  MoonNodeDetail: ({ workflowSummary }: { workflowSummary?: {
-    title: string;
-    stepCount: number;
-    linkCount: number;
-    reviewCount: number;
-    toolLane: string;
-    branches: string;
-    dataPills: string[];
-    disconnected: number;
-  } | null }) => workflowSummary ? (
+  MoonNodeDetail: ({
+    workflowSummary,
+    operatingModelCompositeStatus,
+  }: {
+    workflowSummary?: any | null;
+    operatingModelCompositeStatus?: any | null;
+  }) => workflowSummary ? (
     <div aria-label="Workflow inspector summary">
       <span>{workflowSummary.title}</span>
       <span>{workflowSummary.stepCount} steps · {workflowSummary.linkCount} links</span>
@@ -120,6 +117,20 @@ vi.mock('./MoonNodeDetail', () => ({
       <span>{workflowSummary.branches}</span>
       <span>{workflowSummary.dataPills.join(' ')}</span>
       <span>{workflowSummary.disconnected} disconnected</span>
+      {workflowSummary.contextAuthority ? (
+        <span>
+          {workflowSummary.contextAuthority.contextRef}
+          {' '}
+          {workflowSummary.contextAuthority.objectLabels.join(' ')}
+        </span>
+      ) : null}
+      {operatingModelCompositeStatus ? (
+        <span>
+          {operatingModelCompositeStatus.deployabilityState}
+          {' '}
+          {operatingModelCompositeStatus.syntheticProofState}
+        </span>
+      ) : null}
     </div>
   ) : null,
 }));
@@ -348,6 +359,99 @@ describe('MoonBuildPage', () => {
     expect(reviewSummary).toHaveTextContent('moon_mutate_field x4');
     expect(reviewSummary).toHaveTextContent('app domain');
     expect(reviewSummary).toHaveTextContent('1 disconnected');
+  });
+
+  test('hydrates Workflow Context authority through the operate gateway', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (String(url) === '/api/operate') {
+        const body = JSON.parse(String((init as RequestInit | undefined)?.body || '{}'));
+        if (body.operation === 'workflow_context_read') {
+          return new Response(JSON.stringify({
+            ok: true,
+            result: {
+              context_packs: [
+                {
+                  context_ref: 'workflow_context:live:abc123',
+                  context_mode: 'synthetic',
+                  truth_state: 'synthetic',
+                  entities: [{ entity_kind: 'object', label: 'Account', io_mode: 'synthetic' }],
+                },
+              ],
+            },
+          }), { status: 200 });
+        }
+        if (
+          body.operation === 'client_operating_model_operator_view'
+          && body.input?.view === 'workflow_context_composite'
+        ) {
+          return new Response(JSON.stringify({
+            ok: true,
+            result: {
+              operator_view: {
+                state: 'partial',
+                view_id: 'workflow_context_composite.test',
+                payload: {
+                  deployability: {
+                    state: 'simulation_ready',
+                    can_build: true,
+                    can_simulate: true,
+                    can_promote: false,
+                  },
+                  buildability: { state: 'missing' },
+                  synthetic_proof: { state: 'ready' },
+                  binding_coverage: { state: 'missing' },
+                  real_evidence: { state: 'missing' },
+                  confidence: { state: 'low', score: 0.41 },
+                  blockers: { hard_count: 0, soft_count: 0, review_decision_count: 0 },
+                  truth_state_classes: { synthetic: 2 },
+                },
+              },
+            },
+            operation_receipt: { receipt_id: 'receipt.composite.test' },
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ ok: true, result: { payload: {} } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ metadata: {} }), { status: 200 });
+    });
+    moonBuildPageMocks.payload = {
+      workflow: { id: 'workflow.context.live', name: 'Context-backed workflow' },
+      definition: {},
+      build_graph: {
+        nodes: [{ node_id: 'node-1', kind: 'step', title: 'Score account' }],
+        edges: [],
+      },
+    };
+
+    try {
+      render(<MoonBuildPage workflowId="workflow.context.live" />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open Inspector dock' }));
+
+      await waitFor(() => {
+        const workflowContextCall = fetchMock.mock.calls.find(([, init]) => {
+          const body = JSON.parse(String((init as RequestInit | undefined)?.body || '{}'));
+          return body.operation === 'workflow_context_read';
+        });
+        expect(workflowContextCall).toBeTruthy();
+      });
+      await waitFor(() => {
+        const reviewSummary = screen.getByLabelText('Workflow inspector summary');
+        expect(reviewSummary).toHaveTextContent('workflow_context:live:abc123');
+        expect(reviewSummary).toHaveTextContent('Account');
+        expect(reviewSummary).toHaveTextContent('simulation_ready ready');
+      });
+      await waitFor(() => {
+        const compositeCall = fetchMock.mock.calls.find(([, init]) => {
+          const body = JSON.parse(String((init as RequestInit | undefined)?.body || '{}'));
+          return body.operation === 'client_operating_model_operator_view'
+            && body.input?.view === 'workflow_context_composite';
+        });
+        expect(compositeCall).toBeTruthy();
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   test('summarizes branch points without flattening them into the review route', async () => {

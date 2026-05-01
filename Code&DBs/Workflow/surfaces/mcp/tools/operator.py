@@ -1144,7 +1144,7 @@ def tool_praxis_evolve_operation_field(params: dict) -> dict:
 
 
 def tool_praxis_operator_closeout(params: dict) -> dict:
-    """Preview or commit proof-backed bug and roadmap closeout through the shared gate."""
+    """Preview or commit proof-backed bug, roadmap, and initiative closeout."""
 
     return execute_operation_from_subsystems(
         _subs,
@@ -3265,8 +3265,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Preview or commit proof-backed bug and roadmap closeout through the shared reconciliation gate.\n\n"
                 "USE WHEN: you want to safely close bugs and linked roadmap items from explicit validates_fix evidence "
-                "without mutating truth from inference alone. Preview returns candidates and skips; commit applies only "
-                "the proof-backed subset.\n\n"
+                "or close a parent initiative whose direct children are already completed. Preview returns candidates "
+                "and skips; commit applies only the proof-backed subset.\n\n"
                 "EXAMPLE: praxis_operator_closeout(action='preview', bug_ids=['bug.operator.fix.123'])"
             ),
             "inputSchema": {

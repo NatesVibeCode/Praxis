@@ -182,6 +182,23 @@ _ROADMAP_BUG_CLOSEOUT_RELATION_KINDS = frozenset(
 _CAPABILITY_DELIVERED_BY_DECISION_FILING = "capability_delivered_by_decision_filing"
 
 
+def _roadmap_row_is_completed(row: Mapping[str, Any]) -> bool:
+    if row.get("completed_at") is not None:
+        return True
+    return (
+        str(row.get("status") or "").strip() in {"completed", "done"}
+        and str(row.get("lifecycle") or "").strip() == _ROADMAP_COMPLETED_LIFECYCLE
+    )
+
+
+def _optional_isoformat(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
+
+
 def _roadmap_acceptance_proof_kind(value: object) -> str | None:
     """Return acceptance_criteria.proof_kind when the roadmap row opts into
     capability-delivered-by-decision-filing closeout. Returns None otherwise.
@@ -4583,6 +4600,37 @@ class OperatorControlFrontdoor:
             )
         )
 
+    async def _fetch_roadmap_child_rows_for_closeout(
+        self,
+        conn: _Connection,
+        *,
+        parent_roadmap_item_ids: tuple[str, ...],
+    ) -> tuple[Mapping[str, Any], ...]:
+        if not parent_roadmap_item_ids:
+            return ()
+        return tuple(
+            await conn.fetch(
+                """
+                SELECT
+                    roadmap_item_id,
+                    parent_roadmap_item_id,
+                    title,
+                    status,
+                    lifecycle,
+                    item_kind,
+                    source_bug_id,
+                    decision_ref,
+                    acceptance_criteria,
+                    completed_at,
+                    updated_at
+                FROM roadmap_items
+                WHERE parent_roadmap_item_id = ANY($1::text[])
+                ORDER BY parent_roadmap_item_id, roadmap_item_id
+                """,
+                list(parent_roadmap_item_ids),
+            )
+        )
+
     async def _fetch_decision_proof_for_closeout(
         self,
         conn: _Connection,
@@ -4703,10 +4751,13 @@ class OperatorControlFrontdoor:
             scoped_bug_ids = tuple(
                 dict.fromkeys((*bug_ids, *supplemental_bug_ids, *supplemental_relation_bug_ids))
             )
-            bug_rows = await self._fetch_bug_rows_for_closeout(
-                conn,
-                bug_ids=scoped_bug_ids,
-            )
+            if scoped_bug_ids or not roadmap_item_ids:
+                bug_rows = await self._fetch_bug_rows_for_closeout(
+                    conn,
+                    bug_ids=scoped_bug_ids,
+                )
+            else:
+                bug_rows = ()
             if not roadmap_item_ids:
                 proof_bug_ids = tuple(str(row["bug_id"]) for row in bug_rows)
                 scoped_roadmap_rows = await self._fetch_roadmap_rows_for_closeout(
@@ -4778,6 +4829,28 @@ class OperatorControlFrontdoor:
                 conn,
                 decision_refs=capability_decision_refs,
             )
+            initiative_without_bug_parent_ids = tuple(
+                str(row["roadmap_item_id"])
+                for row in scoped_roadmap_rows
+                if row.get("item_kind") == "initiative"
+                and row.get("source_bug_id") is None
+            )
+            child_rows_by_parent_id: dict[str, tuple[Mapping[str, Any], ...]] = {}
+            if initiative_without_bug_parent_ids:
+                child_rows = await self._fetch_roadmap_child_rows_for_closeout(
+                    conn,
+                    parent_roadmap_item_ids=initiative_without_bug_parent_ids,
+                )
+                mutable_child_rows_by_parent_id: dict[str, list[Mapping[str, Any]]] = {}
+                for child_row in child_rows:
+                    mutable_child_rows_by_parent_id.setdefault(
+                        str(child_row["parent_roadmap_item_id"]),
+                        [],
+                    ).append(dict(child_row))
+                child_rows_by_parent_id = {
+                    parent_id: tuple(rows)
+                    for parent_id, rows in mutable_child_rows_by_parent_id.items()
+                }
             now = _now()
 
             bug_candidates: list[dict[str, Any]] = []
@@ -4855,7 +4928,8 @@ class OperatorControlFrontdoor:
                     source_bug_id = str(relation_row["bug_id"])
                     source_bug_link_source = "operator_object_relations"
                     source_bug_relation_id = str(relation_row["operator_object_relation_id"])
-                if row.get("completed_at") is None and source_bug_id in proof_bug_ids:
+                row_completed = _roadmap_row_is_completed(row)
+                if not row_completed and source_bug_id in proof_bug_ids:
                     roadmap_candidates.append(
                         {
                             "roadmap_item_id": roadmap_item_id,
@@ -4914,7 +4988,7 @@ class OperatorControlFrontdoor:
                     else None
                 )
                 if (
-                    row.get("completed_at") is None
+                    not row_completed
                     and source_bug_id is None
                     and decision_proof is not None
                 ):
@@ -4948,8 +5022,60 @@ class OperatorControlFrontdoor:
                         }
                     )
                     continue
+                child_rows = child_rows_by_parent_id.get(roadmap_item_id, ())
+                completed_child_rows = tuple(
+                    child_row
+                    for child_row in child_rows
+                    if _roadmap_row_is_completed(child_row)
+                )
+                incomplete_child_rows = tuple(
+                    child_row
+                    for child_row in child_rows
+                    if not _roadmap_row_is_completed(child_row)
+                )
+                if (
+                    not row_completed
+                    and source_bug_id is None
+                    and item_kind == "initiative"
+                    and child_rows
+                    and not incomplete_child_rows
+                ):
+                    roadmap_candidates.append(
+                        {
+                            "roadmap_item_id": roadmap_item_id,
+                            "source_bug_id": None,
+                            "source_bug_link_source": None,
+                            "source_bug_relation_id": None,
+                            "current_status": str(row["status"]),
+                            "current_lifecycle": str(row["lifecycle"]),
+                            "next_status": _ROADMAP_COMPLETED_STATUS,
+                            "next_lifecycle": _ROADMAP_COMPLETED_LIFECYCLE,
+                            "reason_codes": [
+                                "initiative_direct_children_completed",
+                            ],
+                            "child_completion": {
+                                "completed": len(completed_child_rows),
+                                "incomplete": 0,
+                                "total": len(child_rows),
+                            },
+                            "evidence_refs": [
+                                {
+                                    "kind": "roadmap_item",
+                                    "ref": str(child_row["roadmap_item_id"]),
+                                    "role": "completed_child_roadmap_item",
+                                    "status": str(child_row["status"]),
+                                    "lifecycle": str(child_row["lifecycle"]),
+                                    "completed_at": _optional_isoformat(
+                                        child_row.get("completed_at")
+                                    ),
+                                }
+                                for child_row in completed_child_rows
+                            ],
+                        }
+                    )
+                    continue
                 reason_codes = []
-                if row.get("completed_at") is not None:
+                if row_completed:
                     reason_codes.append("already_completed")
                 if source_bug_id is None:
                     if (
@@ -4964,6 +5090,11 @@ class OperatorControlFrontdoor:
                                     else "capability_decision_ref_not_decided"
                                 )
                             )
+                    elif item_kind == "initiative":
+                        if not child_rows:
+                            reason_codes.append("initiative_has_no_child_items")
+                        elif incomplete_child_rows:
+                            reason_codes.append("initiative_child_items_incomplete")
                     else:
                         reason_codes.append("missing_source_bug")
                 elif source_bug_id not in proof_bug_ids:
@@ -4984,6 +5115,19 @@ class OperatorControlFrontdoor:
                             "item_kind": item_kind or None,
                             "decision_ref": decision_ref_value,
                             "proof_kind": proof_kind_value,
+                            "child_completion": (
+                                {
+                                    "completed": len(completed_child_rows),
+                                    "incomplete": len(incomplete_child_rows),
+                                    "total": len(child_rows),
+                                    "incomplete_roadmap_item_ids": [
+                                        str(child_row["roadmap_item_id"])
+                                        for child_row in incomplete_child_rows
+                                    ],
+                                }
+                                if item_kind == "initiative"
+                                else None
+                            ),
                             "reason_codes": reason_codes,
                         }
                     )
@@ -4996,9 +5140,11 @@ class OperatorControlFrontdoor:
                     "roadmap_requires_source_bug_fix_proof": True,
                     "roadmap_requires_bug_fix_proof": True,
                     "roadmap_capability_without_bug_accepts_decided_decision_ref": True,
+                    "roadmap_initiative_without_bug_accepts_completed_children": True,
                     "roadmap_bug_link_authorities": [
                         "roadmap_items.source_bug_id",
                         "operator_object_relations.active_roadmap_item_to_bug",
+                        "roadmap_items.parent_roadmap_item_id",
                     ],
                 },
                 "evaluated": {

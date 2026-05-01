@@ -45,6 +45,7 @@ export interface BuildGraphPayload {
   schema_version?: number;
   nodes?: BuildNode[];
   edges?: BuildEdge[];
+  context_authority?: WorkflowContextAuthorityPayload | null;
 }
 
 export interface BuildNode {
@@ -340,9 +341,71 @@ export interface BuildPayload {
   undo_receipt?: BuildUndoReceipt | null;
   progressive_build?: ProgressiveBuildState | null;
   compile_preview?: CompilePreviewPayload | null;
+  workflow_context?: WorkflowContextAuthorityPayload | null;
   mutation_event_id?: number | null;
   operation_receipt?: Record<string, unknown> | null;
   graph_summary?: Record<string, unknown> | null;
+}
+
+export interface WorkflowContextAuthorityPayload {
+  context_ref?: string;
+  workflow_ref?: string | null;
+  context_mode?: 'standalone' | 'inferred' | 'synthetic' | 'bound' | 'hybrid' | string;
+  truth_state?: string;
+  context_pill?: string;
+  confidence_score?: number;
+  confidence_state?: string;
+  confidence?: {
+    score?: number;
+    state?: string;
+    inputs?: Record<string, unknown>;
+  };
+  entities?: Array<{
+    entity_ref?: string;
+    entity_kind?: string;
+    label?: string;
+    truth_state?: string;
+    io_mode?: string;
+    context_pill?: string;
+    confidence_score?: number;
+    payload?: Record<string, unknown>;
+  }>;
+  blockers?: Array<{
+    blocker_ref?: string;
+    severity?: string;
+    reason_code?: string;
+    message?: string;
+  }>;
+  verifier_expectations?: Array<{
+    verifier_ref?: string;
+    expectation?: string;
+    scenario_pack_ref?: string;
+    required_before?: string;
+  }>;
+  guardrail?: {
+    allowed?: boolean;
+    review_required?: boolean;
+    allowed_next_actions?: string[];
+    safe_next_llm_actions?: string[];
+    no_go_conditions?: Array<Record<string, unknown>>;
+  };
+  synthetic_world?: {
+    world_ref?: string;
+    synthetic?: boolean;
+    records?: Array<Record<string, unknown>>;
+    virtual_lab?: {
+      environment_revision?: Record<string, unknown>;
+      simulation_run_payload?: Record<string, unknown>;
+      simulation_scenario?: Record<string, unknown>;
+    };
+  };
+  latest_virtual_lab_simulation?: {
+    run_id?: string;
+    status?: string;
+    stop_reason?: string;
+    transition_count?: number;
+    verifier_statuses?: string[];
+  };
 }
 
 // Service bus event types

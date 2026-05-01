@@ -556,7 +556,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
                   <strong>{selectedRoute.model_slug}</strong>
                   <em>{selectedRoute.provider_slug}</em>
                   {selectedRoute.transport_type && (
-                    <span className="strategy-console__transport-chip">{selectedRoute.transport_type}</span>
+                    <span className="strategy-console__transport-chip" data-transport={selectedRoute.transport_type ?? undefined}>{selectedRoute.transport_type}</span>
                   )}
                 </>
               ) : routeCandidates.length > 0 ? (
@@ -564,7 +564,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
                   <strong>{routeCandidates[0].model_slug}</strong>
                   <em>{routeCandidates[0].provider_slug}</em>
                   {routeCandidates[0].transport_type && (
-                    <span className="strategy-console__transport-chip">{routeCandidates[0].transport_type}</span>
+                    <span className="strategy-console__transport-chip" data-transport={routeCandidates[0].transport_type ?? undefined}>{routeCandidates[0].transport_type}</span>
                   )}
                 </>
               ) : routesError ? (
@@ -598,7 +598,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
                       <strong>{route.model_slug}</strong>
                       <em>{route.provider_slug}</em>
                       {route.transport_type && (
-                        <span className="strategy-console__transport-chip">{route.transport_type}</span>
+                        <span className="strategy-console__transport-chip" data-transport={route.transport_type ?? undefined}>{route.transport_type}</span>
                       )}
                       {typeof route.rank === 'number' && (
                         <span className="strategy-console__model-rank">#{route.rank}</span>

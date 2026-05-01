@@ -1,0 +1,17 @@
+{
+  "name": "Workflow Run Audit",
+  "outcome_goal": "Inspect recent workflow failures and identify unresolved gates or connections",
+  "jobs": [
+    {
+      "label": "inspect_history",
+      "agent": "auto/chat",
+      "prompt": "Call praxis_status_snapshot for the last 48 hours to gather recent workflow run data."
+    },
+    {
+      "label": "summarize_failures",
+      "agent": "auto/chat",
+      "depends_on": ["inspect_history"],
+      "prompt": "Based on the praxis_status_snapshot from 'inspect_history', summarize the failures. Specifically, identify which gates (e.g., verification, submission) or connections did not resolve based on the top failure codes and failure breakdown."
+    }
+  ]
+}

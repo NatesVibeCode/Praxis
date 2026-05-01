@@ -52,7 +52,7 @@ def _extract_moon_context(selection_context: list[dict[str, Any]] | None) -> dic
 
     The frontend's ``moonChatSelectionContext()`` packs a single
     ``{kind: 'moon_context', workflow_id, selected_node_id, ...}`` entry.
-    Returning ``None`` here means there is no active Moon workflow context
+    Returning ``None`` here means there is no active Workflow authoring context
     and tools must require explicit ``workflow_id`` arguments.
     """
     if not selection_context:
@@ -190,25 +190,25 @@ CHAT_TOOLS: list[dict[str, Any]] = [
         },
     },
     # ------------------------------------------------------------------
-    # Moon graph authoring tools — let the LLM read/edit the workflow
-    # graph the user is composing in the Moon canvas. All four dispatch
+    # Workflow graph authoring tools — let the LLM read/edit the workflow
+    # graph the user is composing in the authoring canvas. All four dispatch
     # through the CQRS gateway so each call leaves a receipt + (for
     # commands) authority_event row.
     # ------------------------------------------------------------------
     {
         "name": "moon_get_build",
-        "description": "Load the current Moon BuildPayload for a workflow — every node, edge, gate, contract, outcome, and any compile/binding issues. Use this BEFORE proposing edits. If the Moon canvas is open, omit workflow_id and the active context will target it; the result may also include a read-only visible_ui_snapshot witness when saved state lags the UI.",
+        "description": "Load the current Workflow BuildPayload for a workflow — every node, edge, gate, contract, outcome, and any compile/binding issues. Use this BEFORE proposing edits. If the Workflow canvas is open, omit workflow_id and the active context will target it; the result may also include a read-only visible_ui_snapshot witness when saved state lags the UI. The tool name is the legacy moon_get_build alias.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "workflow_id": {"type": "string", "description": "Optional workflow id to load; omit to use the active Moon canvas context"},
+                "workflow_id": {"type": "string", "description": "Optional workflow id to load; omit to use the active Workflow canvas context"},
             },
             "required": [],
         },
     },
     {
         "name": "moon_compose_from_prose",
-        "description": "Generate a complete Moon workflow graph from a natural-language description. One LLM synthesis pass + N parallel author calls produces nodes, edges, contracts, and gates. Use when the user describes what they want from scratch. Returns the composed plan; pair with moon_get_build to inspect what was created.",
+        "description": "Generate a complete Workflow graph from a natural-language description. One LLM synthesis pass + N parallel author calls produces nodes, edges, contracts, and gates. Use when the user describes what they want from scratch. Returns the composed plan; pair with moon_get_build, the legacy read alias, to inspect what was created.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -222,7 +222,7 @@ CHAT_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "moon_mutate_field",
-        "description": "Edit one field on one Moon node at a time. Prefer repeated focused calls such as nodes/{node_id}/prompt, nodes/{node_id}/outputs, nodes/{node_id}/agent_tool_plan, nodes/{node_id}/completion_contract. Body shape is {\"value\": ...}. Use after moon_get_build so you target real ids. Whole-graph edits are reserved for structural changes.",
+        "description": "Edit one field on one Workflow node at a time. Prefer repeated focused calls such as nodes/{node_id}/prompt, nodes/{node_id}/outputs, nodes/{node_id}/agent_tool_plan, nodes/{node_id}/completion_contract. Body shape is {\"value\": ...}. Use after moon_get_build, the legacy read alias, so you target real ids. Whole-graph edits are reserved for structural changes.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -458,7 +458,7 @@ def execute_tool(
     - summary: str — short text summary for the LLM
 
     ``selection_context`` is forwarded by the chat orchestrator. When the
-    frontend has an active Moon workflow open, an entry of the form
+    frontend has an active Workflow authoring surface open, an entry of the form
     ``{kind: 'moon_context', workflow_id, selected_node_id, ...}`` is in the
     list. The moon_* tools read it to default-target the active workflow
     when the LLM omits ``workflow_id``.
@@ -495,7 +495,7 @@ def execute_tool(
 
 
 # ---------------------------------------------------------------------------
-# Moon graph authoring tool implementations — gateway-dispatched
+# Workflow graph authoring tool implementations — gateway-dispatched under legacy moon_* names
 # ---------------------------------------------------------------------------
 
 def _moon_error(message: str, *, action: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -751,7 +751,7 @@ def _moon_get_build(
     workflow_id, from_context = _resolve_workflow_id(args, selection_context)
     if not workflow_id:
         return _moon_error(
-            "workflow_id is required (no active Moon workflow in selection context)",
+            "workflow_id is required (no active Workflow authoring context in selection context)",
             action="moon_get_build",
         )
     try:
@@ -776,7 +776,7 @@ def _moon_compose_from_prose(
     pg_conn: Any,
     selection_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Materialize prose into a real, editable Moon workflow."""
+    """Materialize prose into a real, editable Workflow."""
     intent = str(args.get("intent") or "").strip()
     if not intent:
         return _moon_error("intent is required", action="moon_compose_from_prose")
@@ -786,7 +786,7 @@ def _moon_compose_from_prose(
     if isinstance(raw_plan_name, str) and raw_plan_name.strip():
         plan_name = raw_plan_name.strip()
 
-    # Reuse the active Moon workflow if the user is on the canvas.
+    # Reuse the active Workflow if the user is on the canvas.
     workflow_id, from_context = _resolve_workflow_id(args, selection_context)
     created_new = not bool(workflow_id)
 
@@ -873,7 +873,7 @@ def _moon_mutate_field(
     body = args.get("body")
     if not workflow_id:
         return _moon_error(
-            "workflow_id is required (no active Moon workflow in selection context)",
+            "workflow_id is required (no active Workflow authoring context in selection context)",
             action="moon_mutate_field",
         )
     if not subpath:
@@ -909,7 +909,7 @@ def _moon_suggest_next(
     workflow_id, from_context = _resolve_workflow_id(args, selection_context)
     if not workflow_id:
         return _moon_error(
-            "workflow_id is required (no active Moon workflow in selection context)",
+            "workflow_id is required (no active Workflow authoring context in selection context)",
             action="moon_suggest_next",
         )
     try:
@@ -965,7 +965,7 @@ def _moon_launch(
     workflow_id, from_context = _resolve_workflow_id(args, selection_context)
     if not workflow_id:
         return _moon_error(
-            "workflow_id is required (no active Moon workflow in selection context)",
+            "workflow_id is required (no active Workflow authoring context in selection context)",
             action="moon_launch",
         )
     payload: dict[str, Any] = {"workflow_id": workflow_id}

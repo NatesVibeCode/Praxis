@@ -3,6 +3,18 @@
  * Depends on tokens.css. Aesthetic: warm-paper-on-near-black,
  * monospace cage, ASCII glyphs, single amber authority accent,
  * hairline structure, restrained glow.
+ *
+ * COLOR LAW (the only color semantic in this file):
+ *   white  · inert     — default, static, no state to convey
+ *   amber  · in-process — pending, held, in-flight, "look at me"
+ *   green  · success    — completed, ok, allowed, verified
+ *   red    · error      — refused, failed, broken, attend now
+ *
+ * Anything that isn't one of those four is a bug. No source-color
+ * axes, no decorative tints, no per-domain palettes — extra
+ * meaning rides on glyphs (▣ ◫ ▨ ▢ ↻ ↗ etc.) or layout, never
+ * on a 5th color. If a 5th distinction matters, escalate to a
+ * hover tooltip backed by data — not paint.
  * ============================================================= */
 
 /* ── Section strip ───────────────────────────────────────────
@@ -595,6 +607,7 @@
 .prx-table .body { max-height: 480px; overflow: auto; }
 .prx-table table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
@@ -1070,6 +1083,13 @@ html.prx-drawer-open { overflow: hidden; }
   box-shadow: 0 0 0 3px rgba(243,238,228,0.10);
 }
 .prx-field-input::placeholder { color: var(--text-muted, #9b9488); }
+.prx-field-textarea {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 80px;
+}
 .prx-field-hint {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 10px;
@@ -1098,4 +1118,2458 @@ html.prx-drawer-open { overflow: hidden; }
   background: var(--surface-accent-soft, rgba(243,238,228,0.08));
   border-color: var(--border-accent, rgba(243,238,228,0.24));
   color: var(--accent, #f3eee4);
+}
+
+/* ── Schema-driven form ──────────────────────────────────────
+ * Renders a JSON Schema (typically derived from a Pydantic
+ * input_model_ref). Nested objects collapse into bordered
+ * groups; enums become radio pills; bool becomes a toggle.
+ *
+ *   <div class="prx-form" data-schema='{…}' data-tones='{…}'>
+ *     <div class="prx-form-body"></div>
+ *   </div>
+ *
+ * Tones map field paths → 'read'|'write'|'locked' (looked up
+ * against data_dictionary_objects in real use).
+ */
+.prx-form { font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; color: var(--text, #f5f1e8); }
+.prx-form-group {
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  background: var(--surface-subtle, rgba(255,255,255,0.025));
+}
+.prx-form-group-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  margin-bottom: 12px;
+}
+.prx-form-group-title .path { color: var(--text-muted, #9b9488); font-size: 10px; }
+.prx-form .prx-field[data-tone="locked"] .prx-field-input {
+  background: rgba(210,153,34,0.06);
+  border-color: rgba(210,153,34,0.30);
+  color: var(--warning, #d29922);
+}
+.prx-form .prx-field[data-tone="locked"] .prx-field-label::before { content: "▢ "; color: var(--warning, #d29922); margin-right: 3px; letter-spacing: 0; }
+.prx-form .prx-field[data-tone="read"] .prx-field-label::before    { content: "· "; color: var(--text-muted, #9b9488); }
+.prx-form .prx-field[data-tone="write"] .prx-field-label::before   { content: "› "; color: var(--text-muted, #9b9488); }
+
+/* ── Dispatch bar ────────────────────────────────────────────
+ * "Run through gateway" widget. Idempotency hash, replay-cache
+ * indicator, dry-run toggle, run button. Universal across ops.
+ */
+.prx-dispatch {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+.prx-dispatch .op {
+  color: var(--text, #f5f1e8);
+  letter-spacing: 0.04em;
+}
+.prx-dispatch .hash {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.prx-dispatch .hash .h { color: var(--accent, #f3eee4); }
+.prx-dispatch .replay {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-dispatch .replay[data-state="hit"] {
+  border-color: rgba(63,185,80,0.30);
+  color: var(--success-bright, #7ee787);
+}
+.prx-dispatch .replay[data-state="hit"]::before  { content: "↻"; }
+.prx-dispatch .replay[data-state="miss"]::before { content: "○"; }
+.prx-dispatch .dry {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488); cursor: pointer; user-select: none;
+}
+.prx-dispatch .dry input { accent-color: var(--accent, #f3eee4); }
+.prx-dispatch .run {
+  background: var(--accent, #f3eee4);
+  color: var(--text-inverse, #090909);
+  border: 1px solid var(--accent, #f3eee4);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-family: inherit; font-size: 11px; letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.prx-dispatch .run.dry { background: transparent; color: var(--text, #f5f1e8); }
+
+/* ── Receipt diff ────────────────────────────────────────────
+ * Two receipts side-by-side (replay vs original, or A vs B).
+ * Reuses prx-receipt; adds the side-by-side grid + delta cap.
+ */
+.prx-receipt-diff {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0;
+  align-items: stretch;
+}
+@media (max-width: 720px) {
+  .prx-receipt-diff { grid-template-columns: 1fr; }
+}
+.prx-receipt-diff .col-a, .prx-receipt-diff .col-b { padding: 0; }
+.prx-receipt-diff .arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-muted, #9b9488);
+  font-size: 14px;
+}
+.prx-receipt-diff .delta {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-top: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+  letter-spacing: 0.04em;
+}
+.prx-receipt-diff .delta[data-state="same"] { color: var(--success-bright, #7ee787); }
+.prx-receipt-diff .delta[data-state="same"]::before { content: "▣ identical · idempotent · "; }
+.prx-receipt-diff .delta[data-state="diff"] { color: var(--warning, #d29922); }
+.prx-receipt-diff .delta[data-state="diff"]::before { content: "◫ diverged · "; }
+
+/* ── Event chain ─────────────────────────────────────────────
+ * Vertical thread of authority_events linked by event_id.
+ * Hairline connector + mini receipt cards.
+ */
+.prx-chain {
+  position: relative;
+  padding-left: 22px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-chain::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 6px; bottom: 6px;
+  width: 1px;
+  background: var(--border, #2a2a2a);
+}
+.prx-chain .ev {
+  position: relative;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 6px;
+  background: var(--bg-card, #141414);
+  font-size: 12px;
+  color: var(--text, #f5f1e8);
+}
+.prx-chain .ev::before {
+  content: "▣";
+  position: absolute;
+  left: -22px;
+  top: 8px;
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg, #080808);
+  color: var(--accent, #f3eee4);
+  font-size: 11px;
+}
+.prx-chain .ev[data-tone="warn"]::before { color: var(--warning, #d29922); content: "◫"; }
+.prx-chain .ev[data-tone="err"]::before  { color: var(--danger, #f85149); content: "▨"; }
+.prx-chain .ev .hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  margin-bottom: 6px;
+}
+.prx-chain .ev .what { color: var(--text, #f5f1e8); }
+.prx-chain .ev .what em { color: var(--text-muted, #9b9488); font-style: normal; }
+.prx-chain .ev .ft {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-muted, #9b9488);
+  letter-spacing: 0.04em;
+}
+
+/* ── Type-flow strip ─────────────────────────────────────────
+ * Horizontal arrow chain: type → operation → next_type → …
+ * Selected step glows; legal-next options glow on hover.
+ */
+.prx-typeflow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 12px 14px;
+  background: var(--bg-card, #141414);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+.prx-typeflow .node {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  color: var(--text, #f5f1e8);
+  letter-spacing: 0.04em;
+}
+.prx-typeflow .node.type {
+  border-color: rgba(243,238,228,0.18);
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+  color: var(--accent, #f3eee4);
+}
+.prx-typeflow .node.op { color: var(--text, #f5f1e8); }
+.prx-typeflow .node.op .kind {
+  margin-left: 6px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-typeflow .node.cur {
+  border-color: var(--warning, #d29922);
+  background: rgba(210,153,34,0.10);
+  color: var(--warning, #d29922);
+  box-shadow: 0 0 12px rgba(210,153,34,0.20);
+}
+.prx-typeflow .arrow {
+  color: var(--text-muted, #9b9488);
+  margin: 0 6px;
+  font-size: 13px;
+}
+
+/* ── Idempotency inspector ───────────────────────────────────
+ * Input → SHA256 hash + prior receipts that hashed the same.
+ */
+.prx-idem {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+}
+.prx-idem .hash-card {
+  padding: 14px 16px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+}
+.prx-idem .hash-card .label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  margin-bottom: 6px;
+}
+.prx-idem .hash-card .hash {
+  font-size: 13px;
+  color: var(--accent, #f3eee4);
+  word-break: break-all;
+}
+.prx-idem .hash-card .hits {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-idem .hash-card .hits b { color: var(--success-bright, #7ee787); }
+.prx-idem .matches {
+  font-size: 12px;
+}
+.prx-idem .matches .row {
+  display: grid;
+  grid-template-columns: 96px 1fr 90px 70px;
+  gap: 14px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  align-items: baseline;
+}
+.prx-idem .matches .row:last-child { border-bottom: none; }
+.prx-idem .matches .ts { color: var(--text-muted, #9b9488); }
+.prx-idem .matches .rid { color: var(--text, #f5f1e8); }
+.prx-idem .matches .stat { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted, #9b9488); }
+.prx-idem .matches .dur { color: var(--text-muted, #9b9488); text-align: right; }
+
+/* ── Operation ROI card ──────────────────────────────────────
+ * Per-op metrics tile: dispatches, replay rate, P50/P95,
+ * error rate, last failure. Composes existing primitives.
+ */
+.prx-roi {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+}
+.prx-roi .hd {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+}
+.prx-roi .hd .op { color: var(--text, #f5f1e8); font-size: 13px; letter-spacing: 0.04em; }
+.prx-roi .hd .kind {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  padding: 2px 8px; border-radius: 3px;
+}
+.prx-roi .stat {
+  padding: 12px 16px;
+  border-right: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+}
+.prx-roi .stat:nth-child(odd) { border-right: 1px solid var(--border-faint, rgba(255,255,255,0.04)); }
+.prx-roi .stat:nth-child(even) { border-right: none; }
+.prx-roi .stat .label {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  margin-bottom: 4px;
+}
+.prx-roi .stat .v {
+  font-size: 18px; color: var(--text, #f5f1e8); letter-spacing: -0.01em;
+}
+.prx-roi .stat .v small {
+  font-size: 11px; color: var(--text-muted, #9b9488); margin-left: 6px; letter-spacing: 0.04em;
+}
+.prx-roi .ft {
+  grid-column: 1 / -1;
+  padding: 10px 16px;
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+}
+
+/* ── Catalog command bar ─────────────────────────────────────
+ * Single-line surface that fuses palette + form + dispatch.
+ * Type a tool → form auto-renders inline → submit.
+ */
+.prx-cmd-bar {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-cmd-bar input.q {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  padding: 14px 16px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text, #f5f1e8);
+  box-sizing: border-box;
+}
+.prx-cmd-bar input.q:focus { outline: none; }
+.prx-cmd-bar input.q::placeholder { color: var(--text-muted, #9b9488); }
+.prx-cmd-bar .results .prx-palette-row { padding: 8px 16px; }
+.prx-cmd-bar .selected-form { padding: 16px; border-top: 1px solid var(--border-faint, rgba(255,255,255,0.04)); }
+.prx-cmd-bar .selected-form .op-cap {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488); margin-bottom: 12px;
+}
+.prx-cmd-bar .selected-form .op-cap .op { color: var(--accent, #f3eee4); }
+
+/* ── Friction signal panel ───────────────────────────────────
+ * Right-side dock list of friction_signals rows, live tail.
+ */
+.prx-friction {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  overflow: hidden;
+}
+.prx-friction .hd {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  display: flex; justify-content: space-between;
+}
+.prx-friction .hd::before { content: "◫ "; color: var(--warning, #d29922); margin-right: 4px; letter-spacing: 0; }
+.prx-friction .row {
+  display: grid;
+  grid-template-columns: 70px 1fr 24px;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  align-items: baseline;
+}
+.prx-friction .row:last-child { border-bottom: none; }
+.prx-friction .row .ts { color: var(--text-muted, #9b9488); font-size: 10px; }
+.prx-friction .row .what { color: var(--text, #f5f1e8); line-height: 1.4; }
+.prx-friction .row .what em { color: var(--text-muted, #9b9488); font-style: normal; }
+.prx-friction .row .count { color: var(--warning, #d29922); text-align: right; font-size: 12px; }
+
+/* ── Verification gap card ───────────────────────────────────
+ * file/path with no admitted verifier. One-click file gap.
+ */
+.prx-vgap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid rgba(210,153,34,0.30);
+  background: rgba(210,153,34,0.06);
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text, #f5f1e8);
+}
+.prx-vgap::before {
+  content: "◫";
+  color: var(--warning, #d29922);
+  font-size: 14px;
+}
+.prx-vgap .path { flex: 1; color: var(--text, #f5f1e8); }
+.prx-vgap .reason { color: var(--text-muted, #9b9488); font-size: 11px; }
+.prx-vgap button {
+  background: transparent;
+  border: 1px solid rgba(210,153,34,0.30);
+  color: var(--warning, #d29922);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-family: inherit; font-size: 10px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  cursor: pointer;
+}
+.prx-vgap button:hover { background: rgba(210,153,34,0.10); }
+
+/* ── Subscriber list ─────────────────────────────────────────
+ * Operations subscribed to an event_type.
+ */
+.prx-subscribers {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+}
+.prx-subscribers .hd {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.prx-subscribers .hd .event {
+  color: var(--accent, #f3eee4);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 12px;
+}
+.prx-subscribers .row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  align-items: baseline;
+  font-size: 12px;
+}
+.prx-subscribers .row:last-child { border-bottom: none; }
+.prx-subscribers .row .glyph { color: var(--accent, #f3eee4); }
+.prx-subscribers .row .name  { color: var(--text, #f5f1e8); }
+.prx-subscribers .row .desc  { color: var(--text-muted, #9b9488); font-size: 11px; text-align: right; }
+
+/* ── Data pill source provenance ─────────────────────────────
+ * Adds a leading glyph + border treatment to prx-chip via
+ * data-source attribute. Stays in the warm-paper palette —
+ * source signal is carried by glyph + pattern, not hue.
+ *
+ *   <span class="prx-chip" data-source="ledger">customer.balance</span>
+ */
+.prx-chip[data-source]::before { letter-spacing: 0; margin-right: 4px; }
+.prx-chip[data-source="ledger"]::before     { content: "▣"; color: var(--text, #f5f1e8); }
+.prx-chip[data-source="user-input"]::before { content: "◫"; color: var(--text, #f5f1e8); }
+.prx-chip[data-source="decision"]::before   { content: "▦"; color: var(--text, #f5f1e8); }
+.prx-chip[data-source="external"]::before   { content: "▨"; color: var(--text, #f5f1e8); }
+.prx-chip[data-source="derived"]::before    { content: "▮"; color: var(--text, #f5f1e8); }
+.prx-chip[data-source="redacted"]::before   { content: "▢"; color: var(--warning, #d29922); }
+.prx-chip[data-source="external"]   { border-style: dotted; }
+.prx-chip[data-source="derived"]    { border-style: dashed; }
+.prx-chip[data-source="redacted"]   { border-color: rgba(210,153,34,0.30); color: var(--warning, #d29922); }
+.prx-chip[data-source="redacted"] .v { text-decoration: line-through; text-decoration-color: var(--warning, #d29922); }
+
+/* ── Workflow bar ────────────────────────────────────────────
+ * Top dock for a workflow run/draft. Name, status pill, progress
+ * gauge, run controls (start/pause/replay/approve), scrub strip
+ * showing receipts as ticks across the timeline.
+ */
+.prx-workflow-bar {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) auto auto;
+  gap: 18px;
+  align-items: center;
+  padding: 12px 18px;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-workflow-bar .id {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.prx-workflow-bar .id .name {
+  color: var(--text, #f5f1e8);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+.prx-workflow-bar .id .meta {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.prx-workflow-bar .progress {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 11px; color: var(--text-muted, #9b9488);
+}
+.prx-workflow-bar .progress .ticks {
+  display: inline-flex; gap: 2px;
+}
+.prx-workflow-bar .progress .ticks .t {
+  width: 6px; height: 12px; background: var(--border-faint, rgba(255,255,255,0.06));
+}
+.prx-workflow-bar .progress .ticks .t.on { background: var(--accent, #f3eee4); }
+.prx-workflow-bar .progress .ticks .t.cur {
+  background: var(--warning, #d29922);
+  box-shadow: 0 0 6px rgba(210,153,34,0.5);
+}
+.prx-workflow-bar .progress .pct { color: var(--text, #f5f1e8); letter-spacing: 0.04em; }
+.prx-workflow-bar .controls {
+  display: inline-flex; gap: 6px;
+}
+.prx-workflow-bar .controls button {
+  background: transparent;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text, #f5f1e8);
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.prx-workflow-bar .controls button:hover { border-color: rgba(243,238,228,0.24); }
+.prx-workflow-bar .controls button.primary {
+  background: var(--accent, #f3eee4);
+  color: var(--text-inverse, #090909);
+  border-color: var(--accent, #f3eee4);
+}
+.prx-workflow-bar .controls button.warn {
+  border-color: rgba(210,153,34,0.30);
+  color: var(--warning, #d29922);
+}
+.prx-workflow-bar .controls button.danger {
+  border-color: rgba(248,81,73,0.30);
+  color: var(--danger, #f85149);
+}
+
+/* ── Flow canvas ─────────────────────────────────────────────
+ * Workflow render surface. Two layout modes:
+ *   data-layout="linear"  — flex row, edges drawn as glyph arrows
+ *   data-layout="dag"     — absolute-positioned nodes, SVG edges
+ * Hairline grid backdrop. Scrollable.
+ */
+.prx-flow {
+  position: relative;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  background-image:
+    linear-gradient(to right,  rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 24px 24px;
+  overflow: auto;
+  padding: 24px;
+  min-height: 280px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-flow[data-layout="linear"] {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+  row-gap: 18px;
+}
+.prx-flow[data-layout="linear"] .prx-flow-edge.glyph {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-flow[data-layout="linear"] .prx-flow-edge.glyph::before {
+  content: "›";
+  font-size: 16px;
+  margin-right: 8px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-flow[data-layout="dag"] {
+  position: relative;
+  min-height: 360px;
+}
+.prx-flow[data-layout="dag"] .canvas-svg {
+  position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+  pointer-events: none;
+}
+.prx-flow[data-layout="dag"] .prx-flow-node {
+  position: absolute;
+}
+.prx-flow .canvas-svg path { fill: none; stroke: var(--border, #2a2a2a); stroke-width: 1; }
+.prx-flow .canvas-svg path.live   { stroke: var(--accent, #f3eee4); }
+.prx-flow .canvas-svg path.warn   { stroke: var(--warning, #d29922); }
+.prx-flow .canvas-svg path.err    { stroke: var(--danger, #f85149); stroke-dasharray: 3 3; }
+.prx-flow .canvas-svg .edge-label {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  fill: var(--text-muted, #9b9488);
+}
+
+/* ── Flow node ───────────────────────────────────────────────
+ * Op card on canvas. Mono header (kind glyph + name + LED),
+ * body (mini receipt or schema preview), footer (last receipt
+ * id + duration). Click → 'prx:flow-node-select'.
+ */
+.prx-flow-node {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 168px;
+  max-width: 200px;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  user-select: none;
+}
+.prx-flow-node:hover { border-color: rgba(243,238,228,0.24); }
+.prx-flow-node[data-state="cur"] {
+  border-color: var(--warning, #d29922);
+  box-shadow: 0 0 14px rgba(210,153,34,0.20);
+}
+.prx-flow-node[data-state="ok"]      { border-color: rgba(63,185,80,0.30); }
+.prx-flow-node[data-state="err"]     { border-color: rgba(248,81,73,0.30); }
+.prx-flow-node[data-state="held"]    { border-color: rgba(210,153,34,0.30); }
+.prx-flow-node[data-state="pending"] { opacity: 0.65; }
+.prx-flow-node .hd {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+}
+.prx-flow-node .hd .glyph {
+  color: var(--accent, #f3eee4);
+  font-size: 12px;
+}
+.prx-flow-node .hd .name {
+  flex: 1;
+  color: var(--text, #f5f1e8);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-flow-node .body {
+  padding: 8px 10px;
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  line-height: 1.55;
+}
+.prx-flow-node .body .kind {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-flow-node .ft {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  font-size: 10px;
+  color: var(--text-muted, #9b9488);
+  letter-spacing: 0.04em;
+}
+.prx-flow-node .ft .stat-cap { font-size: 9px; }
+.prx-flow-node .ft .dur { color: var(--text, #f5f1e8); }
+
+/* ── Flow cursor ─────────────────────────────────────────────
+ * Amber-lit position marker showing current execution point.
+ * Sits adjacent to a node when execution is mid-flight.
+ */
+.prx-flow-cursor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid rgba(210,153,34,0.30);
+  background: rgba(210,153,34,0.10);
+  border-radius: 999px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warning, #d29922);
+  box-shadow: 0 0 12px rgba(210,153,34,0.20);
+}
+.prx-flow-cursor::before {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: var(--warning, #d29922);
+  box-shadow: 0 0 6px rgba(210,153,34,0.6);
+  animation: prx-led-pulse 2.4s ease-in-out infinite;
+}
+
+/* ── Step builder ────────────────────────────────────────────
+ * Composes accumulator-display + narrowed-cmd-bar + form +
+ * dispatch into a single composer surface.
+ */
+.prx-step-builder {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+}
+.prx-step-builder .accum {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+}
+.prx-step-builder .accum .label {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-step-builder .narrow-bar {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+}
+.prx-step-builder .narrow-bar .cap {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  margin-bottom: 8px;
+  display: flex; justify-content: space-between;
+}
+.prx-step-builder .narrow-bar .cap .count { color: var(--accent, #f3eee4); letter-spacing: 0.04em; text-transform: none; }
+.prx-step-builder .narrow-bar .ops {
+  display: grid; gap: 6px;
+}
+.prx-step-builder .narrow-bar .op-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 7px 10px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.prx-step-builder .narrow-bar .op-row:hover { border-color: rgba(243,238,228,0.24); }
+.prx-step-builder .narrow-bar .op-row.sel { border-color: var(--border-accent, rgba(243,238,228,0.24)); background: var(--surface-accent-soft, rgba(243,238,228,0.08)); }
+.prx-step-builder .narrow-bar .op-row .glyph { color: var(--accent, #f3eee4); }
+.prx-step-builder .narrow-bar .op-row .name  { color: var(--text, #f5f1e8); }
+.prx-step-builder .narrow-bar .op-row .desc  { color: var(--text-muted, #9b9488); font-size: 11px; text-align: right; }
+.prx-step-builder .narrow-bar .op-row .kind  {
+  color: var(--text-muted, #9b9488);
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  padding: 1px 6px; border-radius: 3px;
+}
+.prx-step-builder .compose {
+  padding: 14px 16px;
+}
+.prx-step-builder .compose .empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted, #9b9488);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+/* ── Run timeline ────────────────────────────────────────────
+ * Horizontal swimlanes per actor. x-axis = time. Blocks colored
+ * by status. Hover to highlight; click fires 'prx:block-select'.
+ *
+ *   <div class="prx-timeline" data-ticks="10">
+ *     <div class="prx-timeline-head">
+ *       <span class="axis-label">actor</span>
+ *       <div class="ticks">…tick labels…</div>
+ *     </div>
+ *     <div class="prx-timeline-row">
+ *       <div class="actor"><span class="prx-led" data-tone="ok"></span>refund.agent</div>
+ *       <div class="lane">
+ *         <div class="prx-timeline-block" data-tone="ok"
+ *              style="left:5%;width:18%">read</div>
+ *         …
+ *       </div>
+ *     </div>
+ *   </div>
+ */
+.prx-timeline {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-timeline-head {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-timeline-head .axis-label {
+  padding: 10px 16px;
+  border-right: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+}
+.prx-timeline-head .ticks {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  align-items: center;
+  font-size: 9px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-timeline-head .ticks span {
+  border-left: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+  padding: 10px 6px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.prx-timeline-head .ticks span:first-child { border-left: none; }
+.prx-timeline-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  align-items: stretch;
+}
+.prx-timeline-row:last-child { border-bottom: none; }
+.prx-timeline-row .actor {
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text, #f5f1e8);
+  letter-spacing: 0.04em;
+  border-right: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-subtle, rgba(255,255,255,0.025));
+}
+.prx-timeline-row .actor .prx-led { margin-right: 6px; }
+.prx-timeline-row .lane {
+  position: relative;
+  height: 40px;
+  background-image:
+    linear-gradient(90deg, var(--border-faint, rgba(255,255,255,0.04)) 1px, transparent 1px);
+  background-size: 10% 100%;
+  background-position: 10% 0;
+}
+.prx-timeline-block {
+  position: absolute;
+  top: 7px;
+  height: 26px;
+  border-radius: 3px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 8px;
+  transition: filter 100ms ease, transform 100ms ease;
+  box-sizing: border-box;
+}
+.prx-timeline-block:hover { filter: brightness(1.25); transform: translateY(-1px); }
+.prx-timeline-block[data-tone="ok"]   { background: rgba(63,185,80,0.18);  border: 1px solid rgba(63,185,80,0.45);  color: var(--success-bright, #7ee787); }
+.prx-timeline-block[data-tone="warn"] { background: rgba(210,153,34,0.20); border: 1px solid rgba(210,153,34,0.45); color: var(--warning, #d29922); }
+.prx-timeline-block[data-tone="err"]  { background: rgba(248,81,73,0.18);  border: 1px solid rgba(248,81,73,0.45);  color: var(--danger, #f85149); }
+.prx-timeline-block[data-tone="dim"]  { background: var(--surface-muted, rgba(255,255,255,0.03)); border: 1px solid var(--border-faint, rgba(255,255,255,0.04)); color: var(--text-muted, #9b9488); }
+.prx-timeline-block::before {
+  display: inline-block;
+  margin-right: 5px;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+.prx-timeline-block[data-tone="ok"]::before   { content: "▣"; }
+.prx-timeline-block[data-tone="warn"]::before { content: "◫"; }
+.prx-timeline-block[data-tone="err"]::before  { content: "▨"; }
+.prx-timeline-block[data-tone="dim"]::before  { content: "▫"; }
+
+/* ── CRT scanline overlay ────────────────────────────────────
+ * Opt-in via data-scanlines on any element. Subtle 1px lines
+ * every 2px. data-scanlines="sweep" adds a slow downward sweep.
+ */
+[data-scanlines] {
+  position: relative;
+  overflow: hidden;
+}
+[data-scanlines]::after {
+  content: "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.025) 0px,
+    rgba(255, 255, 255, 0.025) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  z-index: 1;
+}
+[data-scanlines="sweep"]::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  height: 32px;
+  background: linear-gradient(to bottom, transparent, rgba(243, 238, 228, 0.06), transparent);
+  pointer-events: none;
+  z-index: 2;
+  animation: prx-crt-sweep 12s linear infinite;
+}
+@keyframes prx-crt-sweep {
+  0%   { top: -32px; }
+  100% { top: 100%; }
+}
+
+/* ── Glyph spinner ───────────────────────────────────────────
+ * Braille / quadrant rotation. JS swaps textContent one frame
+ * at a time so it reads as firmware. Active defaults to ~80ms;
+ * dim idle spinners should use slower data-interval-ms values.
+ */
+.prx-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--accent, #f3eee4);
+  text-align: center;
+  line-height: 1;
+  vertical-align: -0.05em;
+  font-feature-settings: "tnum";
+}
+.prx-spinner[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-spinner[data-tone="dim"]  { color: var(--text-muted, #9b9488); }
+
+/* ── Sweep radar ─────────────────────────────────────────────
+ * Inline SVG widget — one rotating beam group, hairline ticks
+ * at cardinal points, faint trail locked behind the sweep.
+ */
+.prx-radar {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #9b9488);
+}
+.prx-radar svg {
+  display: block;
+  width: 56px;
+  height: 56px;
+  overflow: visible;
+}
+.prx-radar svg .ring,
+.prx-radar svg .tick,
+.prx-radar svg .sweep {
+  vector-effect: non-scaling-stroke;
+}
+.prx-radar svg .ring  { fill: none; stroke: var(--border, #2a2a2a); stroke-width: 1; }
+.prx-radar svg .tick  { stroke: var(--text-muted, #9b9488); stroke-width: 1; opacity: 0.55; }
+.prx-radar svg .beam {
+  transform-box: view-box;
+  transform-origin: center;
+  animation: prx-radar-sweep 4.8s linear infinite;
+}
+.prx-radar svg .sweep {
+  stroke: var(--accent, #f3eee4);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+.prx-radar svg .trail {
+  fill: var(--accent, #f3eee4);
+  opacity: 0.08;
+}
+.prx-radar svg .hub {
+  fill: var(--accent, #f3eee4);
+  opacity: 0.7;
+}
+@keyframes prx-radar-sweep {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.prx-radar[data-tone="warn"] svg .sweep,
+.prx-radar[data-tone="warn"] svg .trail,
+.prx-radar[data-tone="warn"] svg .hub { stroke: var(--warning, #d29922); fill: var(--warning, #d29922); }
+.prx-radar[data-tone="warn"] { color: var(--warning, #d29922); }
+
+/* ── Live numeral counter ────────────────────────────────────
+ * Mechanical-odometer-style counter. Each digit flips
+ * independently with a brief flash on change.
+ */
+.prx-numeral {
+  display: inline-flex;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-feature-settings: "tnum";
+  color: var(--text, #f5f1e8);
+  letter-spacing: -0.01em;
+}
+.prx-numeral .digit {
+  display: inline-block;
+  min-width: 0.6em;
+  text-align: center;
+  transition: color 80ms ease, transform 80ms ease;
+}
+.prx-numeral .digit.flip {
+  color: var(--accent, #f3eee4);
+  transform: translateY(-1px);
+}
+.prx-numeral[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-numeral[data-tone="bad"]  { color: var(--danger, #f85149); }
+.prx-numeral .sep { color: var(--text-muted, #9b9488); margin: 0 1px; }
+
+/* ── Diagnostic readout ──────────────────────────────────────
+ * Multi-line BIOS-style status panel. Live values flash on
+ * change.
+ */
+.prx-diag {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  padding: 14px 16px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.prx-diag .hd {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  border-bottom: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+.prx-diag .row {
+  display: grid;
+  grid-template-columns: 110px auto 1fr;
+  gap: 10px;
+  padding: 3px 0;
+  align-items: baseline;
+}
+.prx-diag .row .k {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-diag .row .sep::before { content: "·"; color: var(--text-muted, #9b9488); }
+.prx-diag .row .v {
+  color: var(--text, #f5f1e8);
+  letter-spacing: 0.04em;
+  transition: color 200ms ease, background 200ms ease;
+}
+.prx-diag .row .v.flash {
+  color: var(--accent, #f3eee4);
+  background: rgba(243, 238, 228, 0.08);
+}
+.prx-diag .row .v[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-diag .row .v[data-tone="ok"]   { color: var(--success-bright, #7ee787); }
+.prx-diag .row .v[data-tone="err"]  { color: var(--danger, #f85149); }
+.prx-diag .row .v[data-tone="dim"]  { color: var(--text-muted, #9b9488); }
+
+/* ── Tape-deck transport ─────────────────────────────────────
+ * Mechanical-feel transport controls.
+ */
+.prx-transport {
+  display: inline-flex;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-editor, #151515);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  align-items: center;
+}
+.prx-transport button {
+  width: 34px;
+  height: 28px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  color: var(--text, #f5f1e8);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 80ms ease, background 80ms ease;
+  padding: 0;
+}
+.prx-transport button:hover { border-color: rgba(243,238,228,0.24); }
+.prx-transport button:active,
+.prx-transport button.active {
+  background: var(--bg-editor, #151515);
+  border-bottom-width: 1px;
+  border-top-width: 2px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.4);
+  color: var(--accent, #f3eee4);
+}
+.prx-transport button[data-action="record"] { color: var(--danger, #f85149); }
+.prx-transport button[data-action="play"]:hover  { border-color: rgba(63,185,80,0.40); color: var(--success-bright, #7ee787); }
+.prx-transport button[data-action="pause"]:hover { border-color: rgba(210,153,34,0.40); color: var(--warning, #d29922); }
+.prx-transport .display {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted, #9b9488);
+  border-left: 1px solid var(--border, #2a2a2a);
+  margin-left: 4px;
+}
+.prx-transport .display .pos { color: var(--accent, #f3eee4); margin-right: 6px; }
+
+/* ── Outcome goal panel ──────────────────────────────────────
+ * LLM-proposed predicates with operator approval; live-evaluated
+ * against gateway state.
+ */
+.prx-goal-panel {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+}
+.prx-goal-panel .head {
+  display: grid;
+  grid-template-columns: 28px 150px 1fr 180px 130px;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-goal-row {
+  display: grid;
+  grid-template-columns: 28px 150px 1fr 180px 130px;
+  gap: 14px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  font-size: 12px;
+  align-items: baseline;
+  transition: background 120ms ease;
+}
+.prx-goal-row:last-child { border-bottom: none; }
+.prx-goal-row .glyph     { letter-spacing: 0; font-size: 13px; }
+.prx-goal-row .target    { color: var(--accent, #f3eee4); }
+.prx-goal-row .predicate { color: var(--text, #f5f1e8); }
+.prx-goal-row .value     { color: var(--text-muted, #9b9488); font-size: 11px; letter-spacing: 0.04em; text-align: right; }
+.prx-goal-row .state     { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted, #9b9488); text-align: right; }
+.prx-goal-row[data-pass="true"]    .glyph         { color: var(--success-bright, #7ee787); }
+.prx-goal-row[data-pass="true"]    .glyph::before { content: "▣"; }
+.prx-goal-row[data-pass="true"]    .value         { color: var(--success-bright, #7ee787); }
+.prx-goal-row[data-pass="false"]   .glyph         { color: var(--danger, #f85149); }
+.prx-goal-row[data-pass="false"]   .glyph::before { content: "▨"; }
+.prx-goal-row[data-pass="false"]   .value         { color: var(--danger-soft, #ff8a6a); }
+.prx-goal-row[data-pass="pending"] .glyph         { color: var(--text-muted, #9b9488); }
+.prx-goal-row[data-pass="pending"] .glyph::before { content: "▫"; }
+.prx-goal-row[data-status="proposed"] { background: rgba(210,153,34,0.06); }
+.prx-goal-row[data-status="proposed"] .state { color: var(--warning, #d29922); }
+.prx-goal-row[data-status="refused"]  { opacity: 0.55; }
+.prx-goal-row[data-status="refused"]  .state { color: var(--danger, #f85149); }
+.prx-goal-row .actions { text-align: right; display: inline-flex; gap: 4px; justify-content: flex-end; }
+.prx-goal-row .approve {
+  background: var(--accent, #f3eee4);
+  color: var(--text-inverse, #090909);
+  border: 1px solid var(--accent, #f3eee4);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.prx-goal-row .refuse {
+  background: transparent;
+  color: var(--text-muted, #9b9488);
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.prx-goal-row .approve:hover { filter: brightness(1.05); }
+.prx-goal-row .refuse:hover  { color: var(--text, #f5f1e8); border-color: var(--border-accent, rgba(243,238,228,0.24)); }
+
+/* ── Authority breadcrumb ───────────────────────────────────
+ * Visible truth path. Each crumb names an authority hop:
+ * database -> table -> row -> surface. State is carried by
+ * border/glyph, not by adding a new color axis.
+ */
+.prx-authority-breadcrumb {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-authority-breadcrumb .crumb {
+  display: inline-grid;
+  gap: 2px;
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 6px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+}
+.prx-authority-breadcrumb .crumb::before {
+  content: "▢";
+  color: var(--text-muted, #9b9488);
+  line-height: 1;
+}
+.prx-authority-breadcrumb .crumb[data-kind="db"]::before       { content: "▣"; }
+.prx-authority-breadcrumb .crumb[data-kind="decision"]::before { content: "▦"; }
+.prx-authority-breadcrumb .crumb[data-kind="route"]::before    { content: "↗"; }
+.prx-authority-breadcrumb .crumb[data-kind="component"]::before { content: "▮"; }
+.prx-authority-breadcrumb .crumb[data-state="live"] {
+  border-color: rgba(63,185,80,0.30);
+}
+.prx-authority-breadcrumb .crumb[data-state="live"]::before {
+  color: var(--success-bright, #7ee787);
+}
+.prx-authority-breadcrumb .crumb[data-state="held"] {
+  border-color: rgba(210,153,34,0.35);
+  background: rgba(210,153,34,0.06);
+}
+.prx-authority-breadcrumb .crumb[data-state="held"]::before {
+  color: var(--warning, #d29922);
+}
+.prx-authority-breadcrumb .cap {
+  order: -1;
+  color: var(--text-muted, #9b9488);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.prx-authority-breadcrumb strong {
+  color: var(--text, #f5f1e8);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.prx-authority-breadcrumb .join {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted, #9b9488);
+  font-size: 16px;
+  opacity: 0.7;
+}
+
+/* ── Scope fence ─────────────────────────────────────────────
+ * A visible read/write boundary. Inside and outside zones share
+ * one grid so the operator sees the fence before acting.
+ */
+.prx-scope-fence {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-scope-fence .fence-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  color: var(--text, #f5f1e8);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.prx-scope-fence .fence-zone {
+  padding: 12px 14px 14px;
+}
+.prx-scope-fence .fence-zone + .fence-zone {
+  border-top: 1px dashed rgba(210,153,34,0.35);
+}
+.prx-scope-fence .zone-title {
+  margin-bottom: 8px;
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.prx-scope-fence .fence-zone[data-zone="outside"] .zone-title {
+  color: var(--warning, #d29922);
+}
+.prx-scope-fence .scope-row {
+  display: grid;
+  grid-template-columns: 18px 52px minmax(160px, 0.7fr) 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  font-size: 12px;
+}
+.prx-scope-fence .scope-row:last-child { border-bottom: none; }
+.prx-scope-fence .scope-row .glyph::before { content: "·"; color: var(--text-muted, #9b9488); }
+.prx-scope-fence .scope-row[data-scope="read"] .glyph::before { content: "·"; }
+.prx-scope-fence .scope-row[data-scope="write"] .glyph::before { content: "›"; color: var(--accent, #f3eee4); }
+.prx-scope-fence .scope-row[data-scope="locked"] .glyph::before,
+.prx-scope-fence .scope-row[data-scope="held"] .glyph::before { content: "◫"; color: var(--warning, #d29922); }
+.prx-scope-fence .scope-row[data-scope="denied"] .glyph::before { content: "▨"; color: var(--danger, #f85149); }
+.prx-scope-fence .scope-row > span:nth-child(2) {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
+.prx-scope-fence .scope-row strong {
+  color: var(--text, #f5f1e8);
+  font-weight: 500;
+}
+.prx-scope-fence .scope-row em {
+  color: var(--text-muted, #9b9488);
+  font-style: normal;
+  font-size: 11px;
+}
+.prx-scope-fence .scope-row[data-scope="locked"] strong,
+.prx-scope-fence .scope-row[data-scope="held"] strong { color: var(--warning, #d29922); }
+.prx-scope-fence .scope-row[data-scope="denied"] strong { color: var(--danger, #f85149); }
+
+/* ── Evidence stack ──────────────────────────────────────────
+ * Typed proof bundle. Button rows emit prx:evidence-select.
+ */
+.prx-evidence-stack {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-evidence-stack .item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: transparent;
+  color: var(--text, #f5f1e8);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.prx-evidence-stack .item:last-child { border-bottom: none; }
+.prx-evidence-stack .item:hover,
+.prx-evidence-stack .item.selected {
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+}
+.prx-evidence-stack .item.selected {
+  box-shadow: inset 2px 0 0 var(--accent, #f3eee4);
+}
+.prx-evidence-stack .glyph::before { content: "▢"; color: var(--text-muted, #9b9488); }
+.prx-evidence-stack .item[data-kind="receipt"] .glyph::before  { content: "▦"; color: var(--warning, #d29922); }
+.prx-evidence-stack .item[data-kind="test"] .glyph::before     { content: "▣"; color: var(--success-bright, #7ee787); }
+.prx-evidence-stack .item[data-kind="bug"] .glyph::before      { content: "◫"; color: var(--warning, #d29922); }
+.prx-evidence-stack .item[data-kind="decision"] .glyph::before { content: "▦"; color: var(--accent, #f3eee4); }
+.prx-evidence-stack .item[data-kind="run"] .glyph::before      { content: "↻"; color: var(--text-muted, #9b9488); }
+.prx-evidence-stack .main { color: var(--text, #f5f1e8); }
+.prx-evidence-stack .meta {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
+.prx-evidence-reader,
+.prx-legal-reader {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  padding: 16px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-evidence-reader .cap,
+.prx-legal-reader .cap {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.prx-evidence-reader h3,
+.prx-legal-reader h3 {
+  margin: 0 0 8px;
+  color: var(--text, #f5f1e8);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  font-weight: 500;
+}
+.prx-evidence-reader p,
+.prx-legal-reader p {
+  margin: 0;
+  color: var(--text-muted, #9b9488);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.prx-legal-reader .hint {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.prx-legal-reader .hint span { color: var(--accent, #f3eee4); text-transform: none; }
+
+/* ── Verifier slot ───────────────────────────────────────────
+ * Proof socket for claims. Empty or blocked states are visible.
+ */
+.prx-verifier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.prx-verifier-slot {
+  min-height: 120px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 8px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  padding: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-verifier-slot .slot-head {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.prx-verifier-slot .glyph::before { content: "▫"; color: var(--text-muted, #9b9488); }
+.prx-verifier-slot[data-state="available"] .glyph::before { content: "▢"; color: var(--text, #f5f1e8); }
+.prx-verifier-slot[data-state="running"] .glyph::before,
+.prx-verifier-slot[data-state="blocked"] .glyph::before { content: "◫"; color: var(--warning, #d29922); }
+.prx-verifier-slot[data-state="passed"] .glyph::before { content: "▣"; color: var(--success-bright, #7ee787); }
+.prx-verifier-slot[data-state="failed"] .glyph::before { content: "▨"; color: var(--danger, #f85149); }
+.prx-verifier-slot[data-state="running"] { border-color: rgba(210,153,34,0.35); box-shadow: 0 0 16px rgba(210,153,34,0.10); }
+.prx-verifier-slot[data-state="passed"] { border-color: rgba(63,185,80,0.30); }
+.prx-verifier-slot[data-state="failed"] { border-color: rgba(248,81,73,0.30); }
+.prx-verifier-slot[data-state="blocked"] { border-color: rgba(210,153,34,0.35); background: rgba(210,153,34,0.06); }
+.prx-verifier-slot strong {
+  color: var(--text, #f5f1e8);
+  font-weight: 500;
+  font-size: 12px;
+}
+.prx-verifier-slot p {
+  margin: 0;
+  color: var(--text-muted, #9b9488);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ── Next legal moves rail ───────────────────────────────────
+ * Context-aware affordance rail. Button rows emit prx:legal-move.
+ */
+.prx-legal-rail {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-legal-rail .rail-head {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+}
+.prx-legal-rail .rail-head span {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.prx-legal-rail .rail-head strong {
+  color: var(--text, #f5f1e8);
+  font-size: 12px;
+  font-weight: 500;
+}
+.prx-legal-rail .move {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  grid-template-areas:
+    "glyph label"
+    "glyph why";
+  gap: 2px 10px;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: transparent;
+  color: var(--text, #f5f1e8);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.prx-legal-rail .move:last-child { border-bottom: none; }
+.prx-legal-rail .move:hover,
+.prx-legal-rail .move.selected {
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+}
+.prx-legal-rail .move.selected { box-shadow: inset 2px 0 0 var(--accent, #f3eee4); }
+.prx-legal-rail .move.denied {
+  opacity: 0.58;
+}
+.prx-legal-rail .move.denied .glyph,
+.prx-legal-rail .move.denied .label { color: var(--danger, #f85149); }
+.prx-legal-rail .glyph {
+  grid-area: glyph;
+  color: var(--accent, #f3eee4);
+  padding-top: 2px;
+}
+.prx-legal-rail .label {
+  grid-area: label;
+  color: var(--text, #f5f1e8);
+  font-size: 12px;
+}
+.prx-legal-rail .why {
+  grid-area: why;
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 820px) {
+  .prx-scope-fence .scope-row {
+    grid-template-columns: 18px 48px 1fr;
+  }
+  .prx-scope-fence .scope-row em {
+    grid-column: 3;
+  }
+  .prx-verifier-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Node Band ───────────────────────────────────────────────
+ * Receives/nucleus/produces inspector layout.
+ */
+.prx-node-band {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 6px;
+  padding: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.prx-node-band > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.prx-node-band .receives, .prx-node-band .produces {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+}
+.prx-node-band .nucleus {
+  flex: 2;
+  text-align: center;
+  border-left: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-right: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  padding: 0 16px;
+  color: var(--text, #f5f1e8);
+  font-weight: 500;
+}
+
+/* ── Flow Node Placeholder ───────────────────────────────────
+ * Dashed border + numeral for empty nodes.
+ */
+.prx-flow-node[data-state="placeholder"] {
+  border: 1px dashed var(--text-muted, #9b9488);
+  background: transparent;
+  color: var(--text-muted, #9b9488);
+  opacity: 0.8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+}
+
+/* ── Tab Strip ───────────────────────────────────────────────
+ * kbd-prefix tabs.
+ */
+.prx-tabstrip {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  padding-bottom: 8px;
+}
+.prx-tabstrip .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  color: var(--text-muted, #9b9488);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.prx-tabstrip .tab:hover {
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+}
+.prx-tabstrip .tab.active {
+  color: var(--text, #f5f1e8);
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+  box-shadow: inset 0 -2px 0 var(--accent, #f3eee4);
+}
+.prx-tabstrip .tab .kbd {
+  font-size: 10px;
+  color: var(--accent, #f3eee4);
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  padding: 0 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.02);
+}
+
+/* ── Icon Tile ───────────────────────────────────────────────
+ * Soft-rounded brand iconography slot.
+ */
+.prx-icon-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--accent, #f3eee4);
+  font-size: 16px;
+}
+
+/* ── Prompt Input ────────────────────────────────────────────
+ * Textarea with autocomplete.
+ */
+.prx-prompt-input {
+  width: 100%;
+  min-height: 80px;
+  background: var(--bg-card, #141414);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  padding: 10px;
+  color: var(--text, #f5f1e8);
+  font-family: var(--font-sans, 'Space Grotesk', sans-serif);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.prx-prompt-input:focus {
+  outline: none;
+  border-color: var(--accent, #f3eee4);
+  box-shadow: 0 0 0 1px var(--accent, #f3eee4);
+}
+
+/* ── Status Rail ─────────────────────────────────────────────
+ * Compressed one-row status.
+ */
+.prx-status-rail {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-status-rail .item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.prx-status-rail .val {
+  color: var(--text, #f5f1e8);
+  font-weight: 500;
+}
+
+/* ── Tooltip ─────────────────────────────────────────────────
+ * For genuinely-needed cases only.
+ */
+.prx-tooltip-wrapper {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+}
+.prx-tooltip-wrapper .prx-tooltip {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 6px 10px;
+  background: var(--bg-card, #141414);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 4px;
+  color: var(--text, #f5f1e8);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 100;
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.prx-tooltip-wrapper:hover .prx-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translateX(-50%) translateY(-8px);
+}
+
+/* ── SELECTED STATE SEMANTICS POLICY ─────────────────────────
+ * Amber fill / glow = active authority (currently live, gating, executing)
+ * Accent border + faint fill = list selection (operator pointer, no behavioral meaning)
+ * DO NOT mix these in the same list.
+ */
+
+/* ── Claim Capsule ───────────────────────────────────────────
+ * Wraps any statement the UI makes and labels its trust state.
+ */
+.prx-claim-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.prx-claim-capsule {
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 6px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  padding: 12px 14px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #9b9488);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100%;
+}
+.prx-claim-capsule .claim-head {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text, #f5f1e8);
+  font-weight: 500;
+  font-size: 13px;
+}
+.prx-claim-capsule .claim-head .glyph {
+  width: 14px;
+  text-align: center;
+}
+.prx-claim-capsule .trust {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.prx-claim-capsule .claim {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prx-claim-capsule[data-trust="verified"] .claim-head .glyph { color: var(--success, #3fb950); }
+.prx-claim-capsule[data-trust="verified"] .claim-head .glyph::before { content: "▣"; }
+.prx-claim-capsule[data-trust="observed"] .claim-head .glyph { color: var(--text-muted, #9b9488); }
+.prx-claim-capsule[data-trust="observed"] .claim-head .glyph::before { content: "▢"; }
+.prx-claim-capsule[data-trust="inferred"] .claim-head .glyph { color: var(--warning, #d29922); }
+.prx-claim-capsule[data-trust="inferred"] .claim-head .glyph::before { content: "◫"; }
+.prx-claim-capsule[data-trust="claimed"]  .claim-head .glyph { color: var(--text-muted, #9b9488); }
+.prx-claim-capsule[data-trust="claimed"]  .claim-head .glyph::before { content: "△"; }
+.prx-claim-capsule[data-trust="stale"]    .claim-head .glyph { color: var(--warning, #d29922); opacity: 0.6; }
+.prx-claim-capsule[data-trust="stale"]    .claim-head .glyph::before { content: "▫"; }
+.prx-claim-capsule[data-trust="blocked"]  .claim-head .glyph { color: var(--danger, #f85149); }
+.prx-claim-capsule[data-trust="blocked"]  .claim-head .glyph::before { content: "▨"; }
+
+.prx-claim-capsule .claim-row {
+  display: grid;
+  grid-template-columns: minmax(52px, 0.34fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.prx-claim-capsule .claim-row:last-child { margin-bottom: 0; }
+.prx-claim-capsule .k { color: var(--text-muted, #9b9488); letter-spacing: 0.04em; }
+.prx-claim-capsule .v { color: var(--text, #f5f1e8); }
+
+/* ── State Triplet ───────────────────────────────────────────
+ * Shows current → desired → blocker.
+ */
+.prx-state-triplet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-left: 2px solid var(--warning, #d29922);
+  border-radius: 6px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+}
+.prx-state-triplet .cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  background: rgba(0,0,0,0.18);
+}
+.prx-state-triplet .arrow {
+  align-self: center;
+  color: var(--text-muted, #9b9488);
+  padding: 0 2px;
+}
+.prx-state-triplet .next {
+  grid-column: 1 / -1;
+  color: var(--warning, #d29922);
+  padding-top: 2px;
+}
+.prx-state-triplet .k { color: var(--text-muted, #9b9488); }
+.prx-state-triplet .v {
+  color: var(--text, #f5f1e8);
+  overflow-wrap: anywhere;
+}
+.prx-state-triplet .current .v { color: var(--warning, #d29922); }
+.prx-state-triplet .desired .v { color: var(--success, #3fb950); }
+.prx-state-triplet .blocked .v { color: var(--danger, #f85149); }
+
+/* ── Freshness Stamp ─────────────────────────────────────────
+ * Detailed freshness readout.
+ */
+.prx-freshness-stamp {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  min-width: 210px;
+}
+.prx-freshness-stamp .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.prx-freshness-stamp .k { color: var(--text-muted, #9b9488); }
+.prx-freshness-stamp .v { color: var(--text, #f5f1e8); }
+.prx-freshness-stamp[data-state="fresh"] .state { color: var(--success, #3fb950); }
+.prx-freshness-stamp[data-state="lagging"] .state,
+.prx-freshness-stamp[data-state="stale"] .state { color: var(--warning, #d29922); }
+.prx-freshness-stamp[data-state="failed"] .state { color: var(--danger, #f85149); }
+.prx-freshness-stamp[data-state="unknown"] .state { color: var(--text-muted, #9b9488); }
+
+/* ── Action Consequence Preview ──────────────────────────────
+ * Before a button runs preview.
+ */
+.prx-action-preview {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #9b9488);
+  padding: 12px;
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-left: 2px solid var(--warning, #d29922);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 520px;
+}
+.prx-action-preview .preview-head,
+.prx-action-preview .preview-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.prx-action-preview .preview-head {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text, #f5f1e8);
+}
+.prx-action-preview .row {
+  display: grid;
+  grid-template-columns: minmax(76px, 0.3fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.prx-action-preview .k { color: var(--text-muted, #9b9488); }
+.prx-action-preview .v {
+  color: var(--text, #f5f1e8);
+  overflow-wrap: anywhere;
+}
+.prx-action-preview .preview-foot {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+}
+.prx-action-preview .preview-foot button,
+.prx-empty-explainer .move {
+  appearance: none;
+  font: inherit;
+  line-height: 1.2;
+}
+.prx-action-preview .preview-foot button {
+  padding: 5px 10px;
+  border: 1px solid rgba(210,153,34,0.42);
+  border-radius: 4px;
+  background: rgba(210,153,34,0.08);
+  color: var(--warning, #d29922);
+  cursor: pointer;
+}
+.prx-action-preview .preview-foot button:hover,
+.prx-action-preview .preview-foot button:focus-visible {
+  border-color: var(--warning, #d29922);
+  outline: none;
+}
+.prx-action-preview-output,
+.prx-empty-output {
+  margin-top: 10px;
+  color: var(--text-muted, #9b9488);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+/* ── Empty-State Explainer ───────────────────────────────────
+ * When there is no data, say why.
+ */
+.prx-empty-explainer {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #9b9488);
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+  border-left: 2px solid var(--warning, #d29922);
+  border-radius: 8px;
+  background: rgba(0,0,0,0.12);
+}
+.prx-empty-explainer .title {
+  color: var(--text, #f5f1e8);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.prx-empty-explainer .why {
+  margin-bottom: 12px;
+}
+.prx-empty-explainer .move {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid rgba(210,153,34,0.42);
+  border-radius: 4px;
+  background: rgba(210,153,34,0.08);
+  color: var(--warning, #d29922);
+  cursor: pointer;
+}
+.prx-empty-explainer .move:hover,
+.prx-empty-explainer .move:focus-visible {
+  border-color: var(--warning, #d29922);
+  outline: none;
+}
+.prx-empty-explainer .kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 3px;
+  color: var(--text, #f5f1e8);
+}
+
+@media (max-width: 820px) {
+  .prx-claim-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .prx-state-triplet {
+    grid-template-columns: 1fr;
+  }
+
+  .prx-state-triplet .arrow {
+    display: none;
+  }
+
+  .prx-state-triplet .next {
+    grid-column: auto;
+  }
+
+  .prx-action-preview .preview-head,
+  .prx-action-preview .preview-foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* =============================================================
+ * Round-2 primitives — review-feedback adoption
+ * ============================================================= */
+
+/* ── Selected-state semantics (POLICY) ───────────────────────
+ *   AMBER FILL / GLOW = active authority (live, gating, executing now)
+ *   ACCENT BORDER + FAINT FILL = list selection (operator pointer)
+ *   Never mixed in the same surface.
+ * ============================================================= */
+
+/* ── Node band ──────────────────────────────────────────────── */
+.prx-node-band {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 20px;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 10px;
+  background: var(--bg-card, #141414);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-node-band .receives,
+.prx-node-band .produces {
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: 11px;
+}
+.prx-node-band .receives { align-items: flex-end; text-align: right; }
+.prx-node-band .produces { align-items: flex-start; }
+.prx-node-band .receives .label,
+.prx-node-band .produces .label {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-node-band .nucleus {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 14px 22px;
+  border: 1px solid var(--border-accent, rgba(243,238,228,0.24));
+  border-radius: 999px;
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+  min-width: 140px;
+}
+.prx-node-band .nucleus .name {
+  font-size: 13px; letter-spacing: 0.04em;
+  color: var(--text, #f5f1e8);
+}
+.prx-node-band .nucleus .kind {
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-node-band .arrow {
+  font-size: 16px; color: var(--text-muted, #9b9488); margin: 0 -6px;
+}
+@media (max-width: 720px) {
+  .prx-node-band { grid-template-columns: 1fr; }
+  .prx-node-band .receives, .prx-node-band .produces {
+    align-items: flex-start; text-align: left;
+  }
+}
+
+/* ── Flow node placeholder state ─────────────────────────────── */
+.prx-flow-node[data-state="placeholder"] {
+  border: 1px dashed var(--border, #2a2a2a);
+  background: transparent;
+  opacity: 0.7;
+  position: relative;
+}
+.prx-flow-node[data-state="placeholder"] .hd {
+  background: transparent;
+  border-bottom: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+}
+.prx-flow-node[data-state="placeholder"] .hd .glyph,
+.prx-flow-node[data-state="placeholder"] .hd .name {
+  color: var(--text-muted, #9b9488);
+}
+.prx-flow-node[data-state="placeholder"]::before {
+  content: attr(data-num);
+  position: absolute;
+  top: 6px; right: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  color: var(--text-muted, #9b9488);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ── Flow edge halo ──────────────────────────────────────────── */
+.prx-flow .canvas-svg path.halo { stroke: url(#prx-edge-halo); }
+
+/* ── Tab strip (kbd-prefix) ──────────────────────────────────── */
+.prx-tabstrip {
+  display: inline-flex;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  background: var(--bg-card, #141414);
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.prx-tabstrip .tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px;
+  color: var(--text-muted, #9b9488);
+  cursor: pointer;
+  border-right: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  transition: color 120ms ease, background 120ms ease;
+  user-select: none;
+  letter-spacing: 0.04em;
+}
+.prx-tabstrip .tab:last-child { border-right: none; }
+.prx-tabstrip .tab:hover {
+  color: var(--text, #f5f1e8);
+  background: var(--surface-hover, rgba(255,255,255,0.04));
+}
+.prx-tabstrip .tab.active {
+  color: var(--text, #f5f1e8);
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+}
+.prx-tabstrip .tab .kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--accent, #f3eee4);
+}
+.prx-tabstrip .tab.active .kbd {
+  background: var(--accent, #f3eee4);
+  color: var(--text-inverse, #090909);
+  border-color: var(--accent, #f3eee4);
+}
+
+/* ── Icon tile ───────────────────────────────────────────────── */
+.prx-icon-tile {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text, #f5f1e8);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.prx-icon-tile[data-size="sm"] { width: 24px; height: 24px; border-radius: 6px; font-size: 12px; }
+.prx-icon-tile[data-size="lg"] { width: 44px; height: 44px; border-radius: 10px; font-size: 18px; }
+.prx-icon-tile[data-tone="warn"] {
+  background: var(--surface-warning-soft, rgba(210,153,34,0.15));
+  border-color: var(--border-warning-soft, rgba(210,153,34,0.30));
+  color: var(--warning, #d29922);
+}
+.prx-icon-tile[data-tone="ok"] {
+  background: var(--surface-success-soft, rgba(63,185,80,0.15));
+  border-color: var(--border-success-soft, rgba(63,185,80,0.30));
+  color: var(--success-bright, #7ee787);
+}
+.prx-icon-tile[data-tone="err"] {
+  background: var(--surface-danger-soft, rgba(248,81,73,0.15));
+  border-color: var(--border-danger-soft, rgba(248,81,73,0.30));
+  color: var(--danger, #f85149);
+}
+.prx-icon-tile svg {
+  width: 60%; height: 60%;
+  stroke: currentColor; fill: none; stroke-width: 1.5;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* ── Prompt input (autocomplete + live classification) ──────── */
+.prx-prompt-input {
+  position: relative;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-prompt-input textarea {
+  width: 100%;
+  background: var(--bg-input, rgba(10,10,10,0.94));
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text, #f5f1e8);
+  line-height: 1.5;
+  min-height: 80px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.prx-prompt-input textarea::placeholder { color: var(--text-muted, #9b9488); }
+.prx-prompt-input textarea:focus {
+  outline: none;
+  border-color: var(--border-accent, rgba(243,238,228,0.24));
+  box-shadow: 0 0 0 3px rgba(243,238,228,0.10);
+}
+.prx-prompt-input .refs {
+  position: absolute;
+  background: var(--bg-card, #141414);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  box-shadow: var(--shadow-popover, 0 14px 36px rgba(0,0,0,0.44));
+  z-index: 10;
+  max-height: 200px;
+  overflow: auto;
+  min-width: 240px;
+  display: none;
+}
+.prx-prompt-input .refs.open { display: block; }
+.prx-prompt-input .refs .row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 10px; align-items: baseline;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+}
+.prx-prompt-input .refs .row:last-child { border-bottom: none; }
+.prx-prompt-input .refs .row:hover,
+.prx-prompt-input .refs .row.sel {
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+  box-shadow: inset 2px 0 0 var(--accent, #f3eee4);
+}
+.prx-prompt-input .refs .row .glyph { color: var(--accent, #f3eee4); }
+.prx-prompt-input .refs .row .name  { color: var(--text, #f5f1e8); }
+.prx-prompt-input .refs .row .type  {
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-prompt-input .summary {
+  padding: 8px 12px; margin-top: 8px;
+  border: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+  background: var(--surface-subtle, rgba(255,255,255,0.025));
+  letter-spacing: 0.04em;
+  min-height: 28px;
+}
+.prx-prompt-input .summary strong { color: var(--accent, #f3eee4); font-weight: 500; }
+.prx-prompt-input .summary em     { color: var(--text-muted, #9b9488); font-style: italic; }
+
+/* ── Status rail ─────────────────────────────────────────────── */
+.prx-status-rail {
+  display: flex; align-items: center;
+  gap: 18px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.prx-status-rail .item { display: inline-flex; align-items: center; gap: 6px; }
+.prx-status-rail .item .label {
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-status-rail .item .v { color: var(--text, #f5f1e8); }
+.prx-status-rail .item .v[data-tone="ok"]   { color: var(--success-bright, #7ee787); }
+.prx-status-rail .item .v[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-status-rail .item .v[data-tone="err"]  { color: var(--danger, #f85149); }
+.prx-status-rail .sep { color: var(--border, #2a2a2a); }
+
+/* ── Tooltip ─────────────────────────────────────────────────── */
+[data-tip] { position: relative; }
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px); left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card, #141414);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--text, #f5f1e8);
+  white-space: nowrap;
+  z-index: 100;
+  box-shadow: var(--shadow-popover, 0 14px 36px rgba(0,0,0,0.44));
+  pointer-events: none;
+}
+[data-tip]:hover::before,
+[data-tip]:focus-visible::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 4px); left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: var(--border, #2a2a2a);
+  z-index: 101;
+  pointer-events: none;
+}
+
+/* =============================================================
+ * A11y · prefers-reduced-motion
+ * Suppress every animation when the user has set OS-level reduced
+ * motion. Photosensitivity-safe. Applies to all four modes.
+ * ============================================================= */
+@media (prefers-reduced-motion: reduce) {
+  .prx-cursor,
+  .prx-led[data-tone="live"],
+  .prx-radar svg .sweep,
+  .prx-radar svg .trail,
+  .prx-flow-cursor::before,
+  [data-scanlines="sweep"]::before {
+    animation: none !important;
+  }
+  .prx-led[data-tone="live"] {
+    box-shadow: 0 0 0 2px rgba(210, 153, 34, 0.30);
+  }
+  .prx-cursor {
+    opacity: 0.6;
+  }
+  .prx-numeral .digit.flip {
+    transition: none !important;
+  }
+}
+
+/* =============================================================
+ * A11y · focus-visible
+ * Keyboard focus rings on all interactive primitives.
+ * ============================================================= */
+.prx-table tbody tr:focus-visible,
+.prx-flow-node:focus-visible,
+.prx-tabstrip .tab:focus-visible,
+.prx-palette-row:focus-visible,
+.prx-step-builder .narrow-bar .op-row:focus-visible,
+.prx-vgap button:focus-visible,
+.prx-transport button:focus-visible {
+  outline: 2px solid var(--accent, #f3eee4);
+  outline-offset: 2px;
+}
+
+/* =============================================================
+ * A11y · scrollable regions need keyboard access
+ * Add a baseline focus style for tabindex=0 scrollables.
+ * ============================================================= */
+.prx-table .body[tabindex],
+.prx-diff[tabindex],
+.prx-wizard-preview[tabindex],
+.prx-drawer-panel > .body[tabindex],
+.prx-flow[tabindex] {
+  outline: none;
+}
+.prx-table .body[tabindex]:focus-visible,
+.prx-diff[tabindex]:focus-visible,
+.prx-wizard-preview[tabindex]:focus-visible,
+.prx-drawer-panel > .body[tabindex]:focus-visible,
+.prx-flow[tabindex]:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent, #f3eee4);
+}
+
+/* =============================================================
+ * A11y · contrast fix for .denied empty-state
+ * Bump muted text to AA+ contrast on near-black background.
+ * ============================================================= */
+.denied > .label,
+.denied > .why {
+  color: var(--text, #f5f1e8) !important;
 }

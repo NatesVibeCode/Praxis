@@ -1,0 +1,83 @@
+{
+  "max_tokens": 3000,
+  "messages": [
+    {
+      "content": "You are running Praxis Model Eval. Consistency matters more than style. Use the supplied fixture exactly. Return only machine-checkable output. Do not use Markdown fences. Do not claim that production routing changed.",
+      "role": "system"
+    },
+    {
+      "content": "create guide",
+      "role": "user"
+    }
+  ],
+  "model": "moonshotai/kimi-k2.6",
+  "provider": {
+    "allow_fallbacks": false,
+    "data_collection": "deny",
+    "ignore": [
+      "moonshot",
+      "moonshotai",
+      "kimi",
+      "deepseek",
+      "deepseek-ai",
+      "baidu",
+      "alibaba",
+      "tencent",
+      "zhipu",
+      "z-ai"
+    ],
+    "order": [
+      "parasail"
+    ],
+    "require_parameters": true,
+    "zdr": true
+  },
+  "response_format": {
+    "json_schema": {
+      "name": "model_eval_response",
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "artifacts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "media_type": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "media_type",
+                "content"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "answer",
+          "artifacts"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    "type": "json_schema"
+  },
+  "seed": 756252838
+}

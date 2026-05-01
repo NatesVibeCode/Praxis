@@ -1,0 +1,9 @@
+{
+  "artifacts": [
+    {
+      "content": "week,workstream,owner,deliverable,done_definition\n",
+      "media_type": "text/csv",
+      "path": "rollout_plan.csv"
+    }
+  ]
+}

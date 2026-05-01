@@ -12,6 +12,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from memory.engine import MemoryEngine
 
+from core.file_formats import (
+    ReadLimits,
+    ReadResult,
+    read_csv,
+    read_docx,
+    read_html,
+    read_md,
+    read_pdf,
+    read_pptx,
+    read_txt,
+    read_xlsx,
+)
 from memory.types import Entity, EntityType
 
 
@@ -28,7 +40,10 @@ class ExtractedDocument:
 class DocumentExtractor:
     """Dispatches file extraction by extension."""
 
-    _FORMATS = (".md", ".json", ".csv", ".txt", ".py")
+    _FORMATS = (
+        ".md", ".json", ".csv", ".txt", ".py",
+        ".pdf", ".docx", ".xlsx", ".pptx", ".html", ".htm",
+    )
 
     def extract(self, file_path: str) -> ExtractedDocument:
         ext = os.path.splitext(file_path)[1].lower()
@@ -40,6 +55,12 @@ class DocumentExtractor:
             ".csv": self._extract_csv,
             ".txt": self._extract_txt,
             ".py": self._extract_py,
+            ".pdf": self._extract_pdf,
+            ".docx": self._extract_docx,
+            ".xlsx": self._extract_xlsx,
+            ".pptx": self._extract_pptx,
+            ".html": self._extract_html,
+            ".htm": self._extract_html,
         }[ext]
         return handler(file_path)
 
@@ -58,26 +79,8 @@ class DocumentExtractor:
     # ---- private handlers ----
 
     def _extract_md(self, file_path: str) -> ExtractedDocument:
-        text = self._read(file_path)
-        title = os.path.basename(file_path)
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("# ") and not stripped.startswith("## "):
-                title = stripped[2:].strip()
-                break
-        sections: list[str] = []
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("## "):
-                sections.append(stripped[3:].strip())
-        return ExtractedDocument(
-            file_path=file_path,
-            format=".md",
-            title=title,
-            content=text,
-            sections=tuple(sections),
-            metadata={"line_count": len(text.splitlines())},
-        )
+        result = read_md(file_path)
+        return self._from_read_result(result, file_path)
 
     def _extract_json(self, file_path: str) -> ExtractedDocument:
         raw = self._read(file_path)
@@ -97,21 +100,8 @@ class DocumentExtractor:
         )
 
     def _extract_csv(self, file_path: str) -> ExtractedDocument:
-        raw = self._read(file_path)
-        lines = raw.splitlines()
-        title = os.path.basename(file_path)
-        headers: tuple[str, ...] = ()
-        if lines:
-            headers = tuple(h.strip() for h in lines[0].split(","))
-        content = "\n".join(lines[:51])  # header + 50 rows
-        return ExtractedDocument(
-            file_path=file_path,
-            format=".csv",
-            title=title,
-            content=content,
-            sections=headers,
-            metadata={"row_count": max(0, len(lines) - 1)},
-        )
+        result = read_csv(file_path, ReadLimits(max_rows=50))
+        return self._from_read_result(result, file_path)
 
     def _extract_txt(self, file_path: str) -> ExtractedDocument:
         text = self._read(file_path)
@@ -123,6 +113,29 @@ class DocumentExtractor:
             content=text,
             sections=(),
             metadata={"char_count": len(text)},
+        )
+
+    def _extract_pdf(self, file_path: str) -> ExtractedDocument:
+        result = read_pdf(file_path)
+        return self._from_read_result(result, file_path)
+
+    def _extract_docx(self, file_path: str) -> ExtractedDocument:
+        result = read_docx(file_path)
+        return self._from_read_result(result, file_path)
+
+    def _from_read_result(self, result: ReadResult, file_path: str) -> ExtractedDocument:
+        return ExtractedDocument(
+            file_path=file_path,
+            format=f".{result.format}",
+            title=os.path.basename(file_path),
+            content=result.content,
+            sections=result.sections,
+            metadata={
+                **result.metadata,
+                "format": result.format,
+                "warnings": list(result.warnings),
+                "truncated": result.truncated,
+            },
         )
 
     def _extract_py(self, file_path: str) -> ExtractedDocument:
@@ -153,6 +166,18 @@ class DocumentExtractor:
             sections=tuple(names),
             metadata={"line_count": len(text.splitlines())},
         )
+
+    def _extract_xlsx(self, file_path: str) -> ExtractedDocument:
+        result = read_xlsx(file_path)
+        return self._from_read_result(result, file_path)
+
+    def _extract_pptx(self, file_path: str) -> ExtractedDocument:
+        result = read_pptx(file_path)
+        return self._from_read_result(result, file_path)
+
+    def _extract_html(self, file_path: str) -> ExtractedDocument:
+        result = read_html(file_path)
+        return self._from_read_result(result, file_path)
 
     @staticmethod
     def _read(file_path: str) -> str:

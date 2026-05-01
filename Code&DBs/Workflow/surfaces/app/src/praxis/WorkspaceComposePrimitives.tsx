@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ScopeFence, StatusRail, VerifierSlot } from '../primitives';
 
 export interface WorkspaceVerifierRef {
   verifier_ref: string;
@@ -559,6 +560,62 @@ interface WorkspaceContractListProps {
   derived?: boolean;
 }
 
+interface WorkspaceBoundaryFenceProps {
+  readScope: string[];
+  writeScope: string[];
+}
+
+export function WorkspaceBoundaryFence({ readScope, writeScope }: WorkspaceBoundaryFenceProps) {
+  const hasBoundary = readScope.length > 0 || writeScope.length > 0;
+  const insideRows = [
+    ...readScope.map((path) => ({
+      scope: 'read' as const,
+      label: 'read',
+      target: path,
+      note: 'allowed input',
+    })),
+    ...writeScope.map((path) => ({
+      scope: 'write' as const,
+      label: 'write',
+      target: path,
+      note: 'allowed edit',
+    })),
+  ];
+
+  return (
+    <ScopeFence
+      className="workspace-compose__boundary"
+      title="boundary"
+      tone={hasBoundary ? 'ok' : 'warn'}
+      toneLabel={hasBoundary ? 'selected' : 'missing'}
+      zones={[
+        {
+          zone: 'inside',
+          title: 'inside declared scope',
+          rows: insideRows.length
+            ? insideRows
+            : [{
+              scope: 'held',
+              label: 'hold',
+              target: 'no explicit read/write paths',
+              note: 'drafting allowed; dispatch is weak without this',
+            }],
+        },
+        {
+          zone: 'outside',
+          title: 'outside fence',
+          rows: [{
+            scope: 'denied',
+            label: 'deny',
+            target: 'anything not selected above',
+            note: 'requires a contract update',
+          }],
+        },
+      ]}
+    />
+  );
+}
+
 export function WorkspaceContractList({
   title,
   items,
@@ -604,25 +661,42 @@ export function WorkspaceVerifierCard({
   operationReceiptId,
   description,
 }: WorkspaceVerifierCardProps) {
+  const verifierState = operationReceiptId
+    ? 'passed'
+    : verifierMissing
+      ? 'blocked'
+      : verifierCount
+        ? 'available'
+        : 'none';
+  const dispatchLabel = verifierMissing ? 'select required' : verifierCount ? 'allowed' : 'blocked';
   return (
     <div className="workspace-compose__verifier-card">
-      <div className="workspace-compose__verifier-row">
-        <span>proof</span>
-        <b>{verifierLabel}</b>
-      </div>
-      <div className="workspace-compose__verifier-row">
-        <span>available</span>
-        <b>{verifierCount ? lineCountLabel(verifierCount, 'proof gate') : 'empty'}</b>
-      </div>
-      <div className="workspace-compose__verifier-row">
-        <span>dispatch</span>
-        <b>{verifierMissing ? 'select required' : 'allowed'}</b>
-      </div>
-      <div className="workspace-compose__verifier-row">
-        <span>seal</span>
-        <b>{operationReceiptId ? compactId(operationReceiptId) : 'on success'}</b>
-      </div>
-      {description ? <p>{description}</p> : null}
+      <VerifierSlot
+        state={verifierState}
+        name={verifierLabel}
+        label={dispatchLabel}
+        detail={description || 'Choose how done gets proven before dispatch.'}
+      />
+      <StatusRail
+        className="workspace-compose__verifier-status"
+        items={[
+          {
+            label: 'available',
+            value: verifierCount ? lineCountLabel(verifierCount, 'proof gate') : 'empty',
+            tone: verifierCount ? 'ok' : 'warn',
+          },
+          {
+            label: 'dispatch',
+            value: dispatchLabel,
+            tone: verifierMissing || !verifierCount ? 'warn' : 'ok',
+          },
+          {
+            label: 'seal',
+            value: operationReceiptId ? compactId(operationReceiptId) : 'on success',
+            tone: operationReceiptId ? 'ok' : 'dim',
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -525,13 +525,23 @@
 
 .strategy-console__transport-chip {
   font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 0.1em;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--text-muted);
-  border: 1px solid rgba(243, 238, 228, 0.18);
   border-radius: 3px;
-  padding: 1px 5px;
+  padding: 2px 7px;
+  border: 1px solid currentColor;
+}
+
+.strategy-console__transport-chip[data-transport="API"] {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.strategy-console__transport-chip[data-transport="CLI"] {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
 }
 
 .strategy-console__model-list {

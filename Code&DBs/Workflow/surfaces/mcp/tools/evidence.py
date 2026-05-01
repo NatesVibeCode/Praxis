@@ -1,4 +1,4 @@
-"""Tools: praxis_receipts, praxis_constraints, praxis_friction."""
+"""Tools: praxis_receipts, praxis_constraints, praxis_friction, praxis_action_fingerprints."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -239,6 +239,29 @@ def tool_praxis_friction(params: dict) -> dict:
     return {"error": f"Unknown friction action: {action}"}
 
 
+def tool_praxis_action_fingerprints(params: dict) -> dict:
+    """Record raw shell/edit/write/read action shapes through the gateway."""
+    action = params.get("action", "record")
+
+    if action != "record":
+        return {"error": f"Unknown action fingerprint action: {action}"}
+
+    from runtime.operation_catalog_gateway import (
+        execute_operation_from_subsystems,
+    )
+
+    payload = {
+        key: value
+        for key, value in dict(params or {}).items()
+        if key != "action" and value is not None
+    }
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="action_fingerprint_record",
+        payload=payload,
+    )
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_receipts": (
         tool_praxis_receipts,
@@ -350,6 +373,50 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "x-action-requirements": {
                     "record": {"required": ["event_type", "source"]}
                 },
+            },
+        },
+    ),
+    "praxis_action_fingerprints": (
+        tool_praxis_action_fingerprints,
+        {
+            "description": (
+                "Record raw shell/edit/write/read action shapes into the action fingerprint ledger.\n\n"
+                "USE WHEN: a harness hook needs to persist one raw tool invocation so recurrent"
+                " shell or file actions can surface as tool opportunities.\n\n"
+                "EXAMPLES:\n"
+                "  Record shell action: praxis_action_fingerprints(action='record', tool_name='local_shell', source_surface='codex:host', tool_input={'command':['pytest','tests/test_x.py','-q']})\n"
+                "  Record file read:    praxis_action_fingerprints(action='record', tool_name='read_file', source_surface='gemini:host', tool_input={'file_path':'Code&DBs/Workflow/runtime/foo.py'})"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "Operation: 'record'.",
+                        "enum": ["record"],
+                    },
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Raw harness tool name, e.g. local_shell, Bash, apply_patch, read_file.",
+                    },
+                    "tool_input": {
+                        "type": "object",
+                        "description": "Raw tool payload from the harness hook.",
+                    },
+                    "source_surface": {
+                        "type": "string",
+                        "description": "Origin tag, e.g. codex:host, claude-code:host, gemini:host.",
+                    },
+                    "session_ref": {
+                        "type": "string",
+                        "description": "Optional harness session identifier.",
+                    },
+                    "payload_meta": {
+                        "type": "object",
+                        "description": "Additional bounded metadata to store alongside the shape row.",
+                    },
+                },
+                "required": ["action", "tool_name", "tool_input", "source_surface"],
             },
         },
     ),

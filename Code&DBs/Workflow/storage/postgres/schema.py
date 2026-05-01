@@ -14,9 +14,9 @@ from typing import Any
 import asyncpg
 
 from storage._generated_workflow_migration_authority import (
+    WORKFLOW_BOOTSTRAP_PREREQUISITES as _GENERATED_WORKFLOW_BOOTSTRAP_PREREQUISITES,
     WORKFLOW_FULL_BOOTSTRAP_SEQUENCE as _GENERATED_WORKFLOW_FULL_BOOTSTRAP_SEQUENCE,
     WORKFLOW_MIGRATION_POLICIES as _GENERATED_WORKFLOW_MIGRATION_POLICIES,
-    WORKFLOW_MIGRATIONS_ALWAYS_REAPPLY as _GENERATED_WORKFLOW_MIGRATIONS_ALWAYS_REAPPLY,
     WORKFLOW_SCHEMA_READINESS_SEQUENCE as _GENERATED_WORKFLOW_SCHEMA_READINESS_SEQUENCE,
 )
 from storage.migrations import (
@@ -422,6 +422,14 @@ def _workflow_schema_manifest_filenames() -> tuple[str, ...]:
     return tuple(filename for filename, _objects in _workflow_schema_readiness_by_migration())
 
 
+@lru_cache(maxsize=1)
+def _workflow_bootstrap_prerequisites() -> dict[str, tuple[str, ...]]:
+    return {
+        str(filename): tuple(str(prerequisite) for prerequisite in prerequisites)
+        for filename, prerequisites in _GENERATED_WORKFLOW_BOOTSTRAP_PREREQUISITES.items()
+    }
+
+
 def _absence_base_object_type(object_type: str) -> str | None:
     if not object_type.startswith(_ABSENCE_EXPECTED_OBJECT_TYPE_PREFIX):
         return None
@@ -429,6 +437,121 @@ def _absence_base_object_type(object_type: str) -> str | None:
     if base_type in _STRUCTURAL_EXPECTED_OBJECT_TYPES or base_type == "row":
         return base_type
     return None
+
+
+def _is_schema_bootstrap_object(expected: WorkflowMigrationExpectedObject) -> bool:
+    """Return true for expected objects bootstrap may repair automatically.
+
+    Rows are authority data. Missing rows should be inspectable drift, not a
+    startup-time license to replay old migrations that also mutate provider
+    routing, catalogs, or policy rows. Bootstrap owns schema shape only.
+    """
+
+    base_type = _absence_base_object_type(expected.object_type) or expected.object_type
+    return base_type in _STRUCTURAL_EXPECTED_OBJECT_TYPES
+
+
+def _schema_bootstrap_missing_by_migration(
+    readiness: WorkflowSchemaReadiness,
+) -> dict[str, tuple[WorkflowMigrationExpectedObject, ...]]:
+    return {
+        filename: tuple(
+            expected
+            for expected in missing_objects
+            if _is_schema_bootstrap_object(expected)
+        )
+        for filename, missing_objects in readiness.missing_by_migration.items()
+    }
+
+
+def _schema_bootstrap_missing_objects(
+    readiness: WorkflowSchemaReadiness,
+) -> tuple[WorkflowMigrationExpectedObject, ...]:
+    return tuple(
+        expected
+        for expected in readiness.missing_objects
+        if _is_schema_bootstrap_object(expected)
+    )
+
+
+def _non_schema_bootstrap_missing_objects(
+    readiness: WorkflowSchemaReadiness,
+) -> tuple[WorkflowMigrationExpectedObject, ...]:
+    return tuple(
+        expected
+        for expected in readiness.missing_objects
+        if not _is_schema_bootstrap_object(expected)
+    )
+
+
+def _missing_objects_for_migration(
+    readiness: WorkflowSchemaReadiness,
+    filename: str,
+) -> tuple[WorkflowMigrationExpectedObject, ...]:
+    return tuple(readiness.missing_by_migration.get(filename, ()))
+
+
+def _workflow_bootstrap_repair_filenames(
+    readiness: WorkflowSchemaReadiness,
+    migration_audit: WorkflowMigrationAudit,
+) -> tuple[str, ...]:
+    """Return migration files startup bootstrap may apply for schema repair.
+
+    Structural migrations may explicitly depend on earlier authority-row
+    migrations. Bootstrap may complete those prerequisites only when the
+    ledger says they were never applied. If the prerequisite was recorded and
+    its expected rows later vanished, that is row drift and must be repaired by
+    an explicit operator action instead of hidden startup mutation.
+    """
+
+    schema_missing_by_migration = _schema_bootstrap_missing_by_migration(readiness)
+    missing_ledger_filenames = set(migration_audit.missing)
+    prerequisites_by_filename = _workflow_bootstrap_prerequisites()
+    repair_filenames: list[str] = []
+    added: set[str] = set()
+
+    def _add(filename: str) -> None:
+        if filename in added:
+            return
+        added.add(filename)
+        repair_filenames.append(filename)
+
+    def _add_prerequisites(filename: str) -> None:
+        for prerequisite in prerequisites_by_filename.get(filename, ()):
+            _add_prerequisites(prerequisite)
+            missing_prerequisite_objects = _missing_objects_for_migration(
+                readiness,
+                prerequisite,
+            )
+            if prerequisite in missing_ledger_filenames:
+                if missing_prerequisite_objects:
+                    _add(prerequisite)
+                continue
+            if missing_prerequisite_objects:
+                raise PostgresSchemaError(
+                    "postgres.schema_bootstrap_prerequisite_drift",
+                    (
+                        f"workflow migration {filename} requires prerequisite "
+                        f"{prerequisite}, but prerequisite objects are missing "
+                        "after the prerequisite was already recorded"
+                    ),
+                    details={
+                        "migration": filename,
+                        "prerequisite": prerequisite,
+                        "missing_objects": [
+                            f"{item.object_type}:{item.object_name}"
+                            for item in missing_prerequisite_objects
+                        ],
+                    },
+                )
+
+    for filename in _workflow_schema_manifest_filenames():
+        missing_objects = schema_missing_by_migration.get(filename, ())
+        if not missing_objects:
+            continue
+        _add_prerequisites(filename)
+        _add(filename)
+    return tuple(repair_filenames)
 
 
 async def _workflow_expected_object_exists(
@@ -933,20 +1056,32 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
     # stale bootstrap holder when no schema work is needed makes healthy servers
     # look broken.
     #
-    # Exception: migrations declared in `migrations_always_reapply` re-run on
-    # every bootstrap. Their CREATE OR REPLACE FUNCTION/TRIGGER bodies refresh
-    # objects created by earlier migrations; the readiness audit can't see body
-    # drift, so without forced reapply the earlier migration silently wins.
-    # See BUG-193C9A50.
-    always_reapply = frozenset(_GENERATED_WORKFLOW_MIGRATIONS_ALWAYS_REAPPLY)
+    # Bootstrap owns schema shape, not control-plane data repair. Migrations
+    # declared in `migrations_always_reapply` are intentionally ignored here:
+    # function/view body refresh and authority row repair must run through an
+    # explicit migration or repair command, not ordinary read/test/tool startup.
     readiness = await inspect_workflow_schema(conn)
-    if readiness.is_bootstrapped:
+    schema_missing_objects = _schema_bootstrap_missing_objects(readiness)
+    if not schema_missing_objects:
         migration_audit = await workflow_migration_audit(conn)
-        if not migration_audit.missing:
-            if always_reapply:
-                for filename in _workflow_schema_manifest_filenames():
-                    if filename in always_reapply:
-                        await _bootstrap_migration(conn, filename)
+        if readiness.is_bootstrapped and migration_audit.missing:
+            # Ledger backfill writes only apply-tracking rows after the actual
+            # schema is present. If non-structural rows are missing, leave the
+            # migration audit alone so explicit repair can see the drift.
+            pass
+        elif not migration_audit.missing:
+            if _non_schema_bootstrap_missing_objects(readiness):
+                logger.warning(
+                    "workflow schema has missing non-structural authority objects; "
+                    "bootstrap will not replay migrations for row drift"
+                )
+            return
+        elif _non_schema_bootstrap_missing_objects(readiness):
+            logger.warning(
+                "workflow schema has missing non-structural authority objects; "
+                "bootstrap will not backfill migration ledger rows until explicit "
+                "authority repair handles row drift"
+            )
             return
 
     async with conn.transaction():
@@ -954,12 +1089,18 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
         # Re-check after taking the lock in case another process finished the
         # bootstrap while we were waiting.
         readiness = await inspect_workflow_schema(conn)
-        if readiness.is_bootstrapped:
+        schema_missing_objects = _schema_bootstrap_missing_objects(readiness)
+        if not schema_missing_objects:
             migration_audit = await workflow_migration_audit(conn)
-            if migration_audit.missing:
+            if readiness.is_bootstrapped and migration_audit.missing:
                 await _record_bootstrapped_schema_migration_rows(
                     conn,
                     migration_audit.missing,
+                )
+            elif _non_schema_bootstrap_missing_objects(readiness):
+                logger.warning(
+                    "workflow schema has missing non-structural authority objects; "
+                    "bootstrap will not replay migrations for row drift"
                 )
             return
         control_readiness = await inspect_control_plane_schema(conn)
@@ -971,15 +1112,12 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
             for filename in _full_workflow_migration_filenames():
                 await _bootstrap_migration(conn, filename)
             return
-        # Per-bootstrap behavior: re-apply migrations whose missing_by_migration
-        # set is non-empty (the readiness check). Plus the always-reapply set
-        # (defined above) for CREATE OR REPLACE-only refresh migrations whose
-        # body drift the readiness audit can't see.
-        for filename in _workflow_schema_manifest_filenames():
-            missing_objects = readiness.missing_by_migration.get(filename, ())
-            force = filename in always_reapply
-            if not missing_objects and not force:
-                continue
+        # Per-bootstrap behavior: re-apply migrations whose structural
+        # missing_by_migration set is non-empty. Explicit migration-authority
+        # prerequisites may run first only if their ledger rows are missing,
+        # which means they are unapplied rather than drifted.
+        migration_audit = await workflow_migration_audit(conn)
+        for filename in _workflow_bootstrap_repair_filenames(readiness, migration_audit):
             await _bootstrap_migration(conn, filename)
 
 

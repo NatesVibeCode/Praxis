@@ -32,12 +32,13 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `410`.
+Public route count: `8`. All route count: `437`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
 | `GET` | `/` | `internal` | - | root_redirect |
 | `POST` | `/api/access_control` | `internal` | `operations` | access_control |
+| `POST` | `/api/action_fingerprint_record` | `internal` | `operations` | action_fingerprint_record |
 | `GET` | `/api/agent-sessions` | `internal` | - | agent_sessions_index_get |
 | `GET` | `/api/atlas.html` | `internal` | - | Send legacy Atlas artifact traffic to the live Atlas surface. |
 | `GET` | `/api/atlas/graph` | `internal` | - | Return the canonical Atlas graph payload for native app rendering. |
@@ -54,10 +55,14 @@ Public route count: `8`. All route count: `410`.
 | `POST` | `/api/authority-domain/register` | `internal` | `operations` | authority_domain_register |
 | `POST` | `/api/authority/compose_binding/resolve` | `internal` | `operations` | authority.compose_binding.resolve |
 | `POST` | `/api/authority/impact_contract_audit/scan` | `internal` | `operations` | authority.impact_contract_audit.scan |
+| `GET` | `/api/authority/managed-runtime` | `internal` | `operations` | authority.managed_runtime.read |
+| `POST` | `/api/authority/managed-runtime` | `internal` | `operations` | authority.managed_runtime.record |
 | `GET` | `/api/authority/objects` | `internal` | `operations` | authority.objects.list |
 | `GET` | `/api/authority/objects/adoption` | `internal` | `operations` | authority.objects.adoption |
 | `GET` | `/api/authority/objects/domain-summary` | `internal` | `operations` | authority.objects.domain_summary |
 | `GET` | `/api/authority/objects/drift` | `internal` | `operations` | authority.objects.drift |
+| `GET` | `/api/authority/portable-cartridges` | `internal` | `operations` | authority.portable_cartridge.read |
+| `POST` | `/api/authority/portable-cartridges` | `internal` | `operations` | authority.portable_cartridge.record |
 | `POST` | `/api/bug_attach_evidence` | `internal` | `operations` | bug_attach_evidence |
 | `POST` | `/api/bug_file` | `internal` | `operations` | bug_file |
 | `POST` | `/api/bug_patch_resume` | `internal` | `operations` | bug_patch_resume |
@@ -191,6 +196,12 @@ Public route count: `8`. All route count: `410`.
 | `GET` | `/api/metrics` | `internal` | - | Return the core metrics summary for the last N days. |
 | `GET` | `/api/metrics/heatmap` | `internal` | - | Return the failure code x provider heatmap for the last N days. |
 | `GET` | `/api/metrics/surface-usage` | `internal` | - | Return durable frontdoor surface-usage counters for the last N days. |
+| `GET` | `/api/model_eval_compare` | `internal` | `operations` | model_eval_compare |
+| `GET` | `/api/model_eval_export` | `internal` | `operations` | model_eval_export |
+| `GET` | `/api/model_eval_inspect` | `internal` | `operations` | model_eval_inspect |
+| `GET` | `/api/model_eval_plan` | `internal` | `operations` | model_eval_plan |
+| `POST` | `/api/model_eval_promote_proposal` | `internal` | `operations` | model_eval_promote_proposal |
+| `POST` | `/api/model_eval_run_matrix` | `internal` | `operations` | model_eval_run_matrix |
 | `GET` | `/api/models` | `internal` | - | models_get |
 | `GET` | `/api/models/market` | `internal` | - | models_market_get |
 | `POST` | `/api/models/run` | `internal` | - | models_run_post |
@@ -200,6 +211,7 @@ Public route count: `8`. All route count: `410`.
 | `GET` | `/api/object-truth/compare-versions` | `internal` | `operations` | object_truth_compare_versions |
 | `GET` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_read |
 | `POST` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_record |
+| `GET` | `/api/object-truth/latest-version` | `internal` | `operations` | object_truth_latest_version_read |
 | `GET` | `/api/object-truth/mdm/resolutions` | `internal` | `operations` | object_truth_mdm_resolution_read |
 | `POST` | `/api/object-truth/mdm/resolutions` | `internal` | `operations` | object_truth_mdm_resolution_record |
 | `POST` | `/api/object-truth/observe-record` | `internal` | `operations` | object_truth_observe_record |
@@ -351,6 +363,14 @@ Public route count: `8`. All route count: `410`.
 | `GET` | `/api/structured_documents_context_assemble` | `internal` | `operations` | structured_documents.context_assemble |
 | `POST` | `/api/surface/action` | `internal` | `operations` | surface.action.performed |
 | `POST` | `/api/surface/templates` | `internal` | `operations` | surface.template.register |
+| `GET` | `/api/synthetic-data` | `internal` | `operations` | synthetic_data_read |
+| `POST` | `/api/synthetic-data/generate` | `internal` | `operations` | synthetic_data_generate |
+| `GET` | `/api/synthetic-environments` | `internal` | `operations` | synthetic_environment_read |
+| `POST` | `/api/synthetic-environments` | `internal` | `operations` | synthetic_environment_create |
+| `POST` | `/api/synthetic-environments/clear` | `internal` | `operations` | synthetic_environment_clear |
+| `POST` | `/api/synthetic-environments/clock` | `internal` | `operations` | synthetic_environment_clock_advance |
+| `POST` | `/api/synthetic-environments/events` | `internal` | `operations` | synthetic_environment_event_inject |
+| `POST` | `/api/synthetic-environments/reset` | `internal` | `operations` | synthetic_environment_reset |
 | `GET` | `/api/task-environment/contracts` | `internal` | `operations` | task_environment_contract_read |
 | `POST` | `/api/task-environment/contracts` | `internal` | `operations` | task_environment_contract_record |
 | `GET` | `/api/templates` | `internal` | - | templates_get |
@@ -360,6 +380,8 @@ Public route count: `8`. All route count: `410`.
 | `POST` | `/api/trigger/{rest_of_path:path}` | `internal` | - | trigger_post |
 | `GET` | `/api/trust` | `internal` | - | Return ELO-based trust scores for all (provider, model) pairs. |
 | `POST` | `/api/typed_gap/emit` | `internal` | `operations` | typed_gap.emit |
+| `POST` | `/api/ui/telemetry` | `internal` | - | Append a frontend prx-* primitive event to the UI telemetry log. |
+| `GET` | `/api/ui/telemetry/recent` | `internal` | - | Return the last N rows from the UI telemetry log for inspection. |
 | `GET` | `/api/verifiers` | `internal` | `operations` | verifier.catalog.list |
 | `GET` | `/api/virtual-lab/sandbox-promotions` | `internal` | `operations` | virtual_lab_sandbox_promotion_read |
 | `POST` | `/api/virtual-lab/sandbox-promotions` | `internal` | `operations` | virtual_lab_sandbox_promotion_record |
@@ -369,6 +391,11 @@ Public route count: `8`. All route count: `410`.
 | `POST` | `/api/virtual-lab/state` | `internal` | `operations` | virtual_lab_state_record |
 | `POST` | `/api/webhooks/endpoints` | `internal` | `webhooks` | Register a new webhook endpoint. Auto-creates workflow_trigger if target_workflow_id is set. |
 | `POST` | `/api/webhooks/{slug}` | `internal` | `webhooks` | Receive an incoming webhook, validate signature, store event. |
+| `GET` | `/api/workflow-context` | `internal` | `operations` | workflow_context_read |
+| `POST` | `/api/workflow-context/bind` | `internal` | `operations` | workflow_context_bind |
+| `POST` | `/api/workflow-context/compile` | `internal` | `operations` | workflow_context_compile |
+| `GET` | `/api/workflow-context/guardrails` | `internal` | `operations` | workflow_context_guardrail_check |
+| `POST` | `/api/workflow-context/transition` | `internal` | `operations` | workflow_context_transition |
 | `POST` | `/api/workflow-job` | `internal` | - | workflow_job_post |
 | `POST` | `/api/workflow-runs` | `internal` | - | workflow_runs_handler_post |
 | `POST` | `/api/workflow-runs/spawn` | `internal` | - | workflow_runs_spawn_post |

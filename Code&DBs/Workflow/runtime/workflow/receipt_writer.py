@@ -334,6 +334,10 @@ def write_job_receipt(
     workspace_manifest_audit = result.get("workspace_manifest_audit")
     if isinstance(workspace_manifest_audit, Mapping) and workspace_manifest_audit:
         receipt_outputs["workspace_manifest_audit"] = _json_safe(workspace_manifest_audit)
+    artifact_scope_drift = result.get("artifact_scope_drift")
+    if isinstance(artifact_scope_drift, list) and artifact_scope_drift:
+        receipt_outputs["artifact_scope_drift"] = _json_safe(artifact_scope_drift)
+        receipt_outputs["artifact_scope_drift_count"] = len(artifact_scope_drift)
     # Sandbox resource observability: peak CPU% and memory bytes captured by
     # sandbox_runtime's background docker-stats poller. Forwarded here so
     # `SELECT outputs->>'container_mem_bytes' FROM receipts` yields a usable

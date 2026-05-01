@@ -1,0 +1,76 @@
+{
+  "name": "Roadmap Burn Down Wave 2 - Gateway Authority Cleanup",
+  "workflow_id": "roadmap_burndown_20260501_wave2_gateway_authority_cleanup",
+  "phase": "execute",
+  "workdir": ".",
+  "outcome_goal": "Collapse duplicated execution authority back through the CQRS gateway and receipt/event proof model.",
+  "jobs": [
+    {
+      "label": "operation_receipt_failure_envelope",
+      "agent": "google/gemini-3.1-pro-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave2.operation_receipt_failure_envelope"
+      ],
+      "timeout": 1200,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/operation_catalog_gateway.py",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Fix gateway failure responses so handler-raised failures still return an actionable operation_receipt envelope. Do not hide heterogeneous causes behind a generic wrapper reason. Add focused tests that prove a failed command/query has a receipt id, error code, and traceable detail."
+    },
+    {
+      "label": "mcp_direct_fallback_removal",
+      "agent": "google/gemini-3.1-pro-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave2.mcp_direct_fallback_removal"
+      ],
+      "timeout": 1200,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/tools",
+        "Code&DBs/Workflow/surfaces/api",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Remove or fail-closed the MCP/API direct runtime fallback branches that can masquerade as successful operator work outside operation_catalog_gateway. Start from BUG-142389D9 and BUG-78E5F99C if available. MCP tools should be thin gateway wrappers. Add tests that prove fallback success is not possible without a receipt."
+    },
+    {
+      "label": "search_status_receipt_fallbacks",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave2.search_status_receipt_fallbacks"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/tools",
+        "Code&DBs/Workflow/runtime/operations",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Fix search/status surfaces that can return unreceipted direct_fallback success. Search and status are read operations, but reads still need receipt-backed determinism. Keep praxis_search as the canonical front door and prove the fallback path cannot silently claim success."
+    },
+    {
+      "label": "event_receipt_projection_edges",
+      "agent": "google/gemini-3.1-pro-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave2.event_receipt_projection_edges"
+      ],
+      "timeout": 1200,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime",
+        "Code&DBs/Workflow/storage",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Tighten the event/receipt projection boundary. Plan/composed/launched and feedback/friction events should not split between system_events and authority_events in ways that lose CQRS proof. Make the smallest durable correction and add tests that tie the read model to the authoritative event/receipt source."
+    }
+  ]
+}

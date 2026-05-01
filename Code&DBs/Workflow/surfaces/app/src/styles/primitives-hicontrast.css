@@ -1,0 +1,233 @@
+/* =============================================================
+ * Praxis primitives — HIGH CONTRAST MODE
+ *
+ * For accessibility: WCAG AAA contrast ratios, bright borders,
+ * unmistakable status colors. Activated by body.high-contrast.
+ *
+ * Honors prefers-reduced-motion automatically.
+ * ============================================================= */
+
+body.high-contrast {
+  --bg:           #000000;
+  --bg-edge:      #000000;
+  --bg-card:      #0a0a0a;
+  --bg-alt:       #141414;
+  --bg-input:     #000000;
+  --bg-editor:    #0a0a0a;
+
+  --text:         #ffffff;
+  --text-muted:   #d4d4d4;   /* AAA on black */
+  --text-inverse: #000000;
+  --fg-faint:     #8a8a8a;
+  --fg1:          #ffffff;
+  --fg2:          #d4d4d4;
+  --fg3:          #a8a8a8;
+  --fg-inverse:   #000000;
+
+  /* Saturated accents — bright enough to read against black */
+  --accent:        #ffd700;   /* yellow — primary signal */
+  --accent-strong: #ffffff;
+  --accent-warm:   #ffb800;
+  --brand-secondary: #66ccff;
+
+  --success:        #00ff66;
+  --success-bright: #66ff99;
+  --warning:        #ffd700;
+  --warning-strong: #ffb800;
+  --danger:         #ff4d4d;
+  --danger-soft:    #ff8080;
+
+  /* Bright borders — 2px in places */
+  --border:        #ffffff;
+  --border-soft:   #d4d4d4;
+  --border-faint:  #8a8a8a;
+  --border-accent: #ffd700;
+  --border-accent-soft: #ffd700;
+  --border-success-soft: #00ff66;
+  --border-warning-soft: #ffd700;
+  --border-danger-soft:  #ff4d4d;
+
+  --surface-hover:        rgba(255, 215, 0, 0.16);
+  --surface-muted:        #141414;
+  --surface-subtle:       #0a0a0a;
+  --surface-accent-soft:  rgba(255, 215, 0, 0.20);
+  --surface-accent-strong:rgba(255, 215, 0, 0.40);
+  --surface-success-soft: rgba(0, 255, 102, 0.16);
+  --surface-warning-soft: rgba(255, 215, 0, 0.20);
+  --surface-danger-soft:  rgba(255, 77, 77, 0.20);
+
+  /* Strong shadows for separation, not subtlety */
+  --shadow-card:    0 0 0 2px #ffffff;
+  --shadow-panel:   0 0 0 2px #ffffff;
+  --shadow-popover: 0 0 0 2px #ffffff;
+  --shadow-modal:   0 0 0 3px #ffffff;
+  --shadow-drawer:  -4px 0 0 0 #ffffff;
+  --card-shadow:    0 0 0 2px #ffffff;
+
+  --surface-elevated: #0a0a0a;
+  --surface-raised:   #141414;
+
+  --accent-glow-soft:   0 0 0 3px #ffd700;
+  --accent-glow-strong: 0 0 0 4px #ffd700;
+  --focus-ring:         0 0 0 4px #ffd700;
+
+  color-scheme: dark;
+  background: #000000;
+  color: #ffffff;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 15px;
+}
+
+/* Borders go to 2px in high-contrast where they carry semantic weight */
+body.high-contrast .prx-receipt,
+body.high-contrast .prx-table,
+body.high-contrast .prx-friction,
+body.high-contrast .prx-subscribers,
+body.high-contrast .prx-idem,
+body.high-contrast .prx-roi,
+body.high-contrast .prx-diag,
+body.high-contrast .prx-workflow-bar,
+body.high-contrast .prx-flow,
+body.high-contrast .prx-wizard,
+body.high-contrast .prx-step-builder,
+body.high-contrast .prx-cmd-bar,
+body.high-contrast .prx-flow-node,
+body.high-contrast .stage,
+body.high-contrast .prx-frame,
+body.high-contrast .prx-vgap,
+body.high-contrast .prx-transport,
+body.high-contrast .prx-dispatch {
+  border-width: 2px;
+}
+
+/* Buttons — bright outline, hover inverts */
+body.high-contrast button {
+  background: #000000;
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  font-weight: 600;
+}
+body.high-contrast button:hover {
+  background: #ffffff;
+  color: #000000;
+}
+body.high-contrast button.primary,
+body.high-contrast .prx-dispatch .run,
+body.high-contrast .prx-workflow-bar .controls button.primary,
+body.high-contrast .prx-wizard-foot button.primary {
+  background: #ffd700;
+  color: #000000;
+  border-color: #ffd700;
+}
+body.high-contrast button.primary:hover {
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}
+
+/* Inputs — high contrast border, big focus ring */
+body.high-contrast input,
+body.high-contrast textarea,
+body.high-contrast select,
+body.high-contrast .prx-field-input,
+body.high-contrast .prx-table-filter,
+body.high-contrast .prx-palette-input,
+body.high-contrast .prx-cmd-bar input.q {
+  background: #000000;
+  border: 2px solid #ffffff;
+  color: #ffffff;
+}
+body.high-contrast input:focus,
+body.high-contrast .prx-field-input:focus,
+body.high-contrast .prx-table-filter:focus,
+body.high-contrast .prx-palette-input:focus,
+body.high-contrast .prx-cmd-bar input.q:focus {
+  outline: none;
+  border-color: #ffd700;
+  box-shadow: 0 0 0 3px #ffd700;
+}
+
+/* Status caps — saturated, bold */
+body.high-contrast .stat-cap,
+body.high-contrast .prx-runlog .stat,
+body.high-contrast .prx-table .stat-cap,
+body.high-contrast .prx-flow-node .ft .stat-cap {
+  font-weight: 600;
+  font-size: 12px;
+}
+body.high-contrast .stat-cap[data-tone="ok"],
+body.high-contrast .prx-runlog .stat[data-tone="ok"],
+body.high-contrast .prx-table .stat-cap[data-tone="ok"] { color: #00ff66; }
+body.high-contrast .stat-cap[data-tone="warn"],
+body.high-contrast .prx-runlog .stat[data-tone="warn"],
+body.high-contrast .prx-table .stat-cap[data-tone="warn"] { color: #ffd700; }
+body.high-contrast .stat-cap[data-tone="err"],
+body.high-contrast .prx-runlog .stat[data-tone="err"],
+body.high-contrast .prx-table .stat-cap[data-tone="err"] { color: #ff4d4d; }
+body.high-contrast .stat-cap[data-tone="dim"] { color: #d4d4d4; }
+
+/* LED — solid, brighter, no pulse if reduced-motion */
+body.high-contrast .prx-led {
+  width: 10px; height: 10px;
+}
+body.high-contrast .prx-led[data-tone="live"] {
+  background: #ffd700;
+  box-shadow: 0 0 0 2px #000000, 0 0 0 4px #ffd700;
+}
+body.high-contrast .prx-led[data-tone="ok"] {
+  background: #00ff66;
+  box-shadow: 0 0 0 2px #000000, 0 0 0 4px #00ff66;
+}
+body.high-contrast .prx-led[data-tone="err"] {
+  background: #ff4d4d;
+  box-shadow: 0 0 0 2px #000000, 0 0 0 4px #ff4d4d;
+}
+
+/* Cursor — solid yellow, faster blink so it's unmissable */
+body.high-contrast .prx-cursor { background: #ffd700; }
+
+/* Diff lines — saturated */
+body.high-contrast .prx-diff .line[data-mark="+"] { color: #00ff66; background: rgba(0, 255, 102, 0.10); font-weight: 600; }
+body.high-contrast .prx-diff .line[data-mark="-"] { color: #ff4d4d; background: rgba(255, 77, 77, 0.10); font-weight: 600; }
+body.high-contrast .prx-diff .line[data-mark="="] { color: #d4d4d4; }
+body.high-contrast .prx-diff .line[data-mark="!"] { color: #ffd700; background: rgba(255, 215, 0, 0.10); font-weight: 600; }
+
+/* Block characters — bright accent */
+body.high-contrast .prx-gauge .ticks .t.on,
+body.high-contrast .prx-lcd .bar .on { background: #ffd700; color: #ffd700; }
+body.high-contrast .prx-gauge[data-tone="warn"] .ticks .t.on { background: #ffd700; }
+body.high-contrast .prx-gauge[data-tone="bad"]  .ticks .t.on { background: #ff4d4d; }
+
+/* Frames — keep ASCII brackets but make them brighter */
+body.high-contrast .prx-frame::before,
+body.high-contrast .prx-frame::after { color: #ffffff; font-weight: 700; }
+body.high-contrast .prx-frame[data-tone="warn"] {
+  border: 2px solid #ffd700;
+  background: rgba(255, 215, 0, 0.08);
+}
+
+/* Selection */
+body.high-contrast ::selection { background: #ffd700; color: #000000; }
+
+/* Selected rows + sort indicators */
+body.high-contrast .prx-table tbody tr.selected {
+  background: rgba(255, 215, 0, 0.16);
+  box-shadow: inset 4px 0 0 #ffd700;
+}
+body.high-contrast .prx-table thead th.sort-asc .arrow::before,
+body.high-contrast .prx-table thead th.sort-desc .arrow::before { color: #ffd700; }
+
+/* Honor prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  body.high-contrast,
+  body.high-contrast * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Strong outline focus everywhere */
+body.high-contrast :focus-visible {
+  outline: 3px solid #ffd700 !important;
+  outline-offset: 2px !important;
+}

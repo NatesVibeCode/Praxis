@@ -138,10 +138,12 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       PRAXIS_AGENT_CWD: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
       PRAXIS_AGENT_SESSIONS_RUNNER_URL: ${PRAXIS_AGENT_SESSIONS_RUNNER_URL:-}
+      GEMINI_CLI_TRUST_WORKSPACE: "true"
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.gemini:/root/.gemini
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
     command:
       - sh
@@ -219,6 +221,7 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       PRAXIS_AGENT_CWD: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
       PRAXIS_AGENT_SESSIONS_RUNNER_URL: ${PRAXIS_AGENT_SESSIONS_RUNNER_URL:-}
+      GEMINI_CLI_TRUST_WORKSPACE: "true"
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}

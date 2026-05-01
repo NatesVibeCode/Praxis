@@ -44,13 +44,53 @@ DELETE FROM runtime_profile_admitted_routes
  WHERE provider_slug = 'together'
    AND model_slug = 'deepseek-ai/DeepSeek-V3.2';
 
-UPDATE task_type_routing
-   SET permitted = FALSE,
-       rank = 99,
-       rationale = 'Retired by migration 364: Together DeepSeek V3.2 is not an active serverless candidate; native API compile authority is V4-Pro only.',
-       updated_at = now()
- WHERE provider_slug = 'together'
-   AND model_slug = 'deepseek-ai/DeepSeek-V3.2';
+-- Re-apply note:
+--   Together is HTTP/API-only. Historical rows may still carry the old
+--   task_type_routing transport_type='CLI' default; migration 378 rejects
+--   updates to those rows. Prune impossible legacy CLI rows first, then retire
+--   only the API routes that can be validly represented.
+DO $$
+DECLARE
+    has_transport_type BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'task_type_routing'
+           AND column_name = 'transport_type'
+    ) INTO has_transport_type;
+
+    IF has_transport_type THEN
+        DELETE FROM task_type_routing AS route
+         WHERE route.provider_slug = 'together'
+           AND route.transport_type = 'CLI'
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM provider_transport_admissions AS admission
+                WHERE admission.provider_slug = route.provider_slug
+                  AND admission.transport_kind = 'cli'
+                  AND admission.status = 'active'
+           );
+
+        UPDATE task_type_routing
+           SET permitted = FALSE,
+               rank = 99,
+               rationale = 'Retired by migration 364: Together DeepSeek V3.2 is not an active serverless candidate; native API compile authority is V4-Pro only.',
+               updated_at = now()
+         WHERE provider_slug = 'together'
+           AND model_slug = 'deepseek-ai/DeepSeek-V3.2'
+           AND transport_type = 'API';
+    ELSE
+        UPDATE task_type_routing
+           SET permitted = FALSE,
+               rank = 99,
+               rationale = 'Retired by migration 364: Together DeepSeek V3.2 is not an active serverless candidate; native API compile authority is V4-Pro only.',
+               updated_at = now()
+         WHERE provider_slug = 'together'
+           AND model_slug = 'deepseek-ai/DeepSeek-V3.2';
+    END IF;
+END $$;
 
 INSERT INTO private_provider_api_job_allowlist (
     runtime_profile_ref,
@@ -86,4 +126,3 @@ SELECT refresh_private_provider_control_plane_snapshot(runtime_profile_ref)
   FROM registry_native_runtime_profile_authority;
 
 COMMIT;
-

@@ -660,6 +660,34 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Show repeated CLI failures", {"action": "patterns", "source": "cli.workflow"}),
         ],
     ),
+    "praxis_action_fingerprints": _tool(
+        surface="evidence",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Record one raw shell/edit/write/read harness action so recurring patterns can surface as tool opportunities.",
+        when_not_to_use="Do not use it for gateway operation receipts or general friction analytics.",
+        risks={"default": "write", "actions": {"record": "write"}},
+        examples=[
+            _example(
+                "Record one raw shell action",
+                {
+                    "action": "record",
+                    "tool_name": "local_shell",
+                    "source_surface": "codex:host",
+                    "tool_input": {"command": ["pytest", "Code&DBs/Workflow/tests/test_x.py", "-q"]},
+                },
+            ),
+            _example(
+                "Record one raw file read",
+                {
+                    "action": "record",
+                    "tool_name": "read_file",
+                    "source_surface": "gemini:host",
+                    "tool_input": {"file_path": "Code&DBs/Workflow/runtime/workflow/_admission.py"},
+                },
+            ),
+        ],
+    ),
     "praxis_get_submission": _tool(
         surface="submissions",
         tier="session",
@@ -944,8 +972,9 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         tier="advanced",
         recommended_alias="moon",
         when_to_use=(
-            "Read, compose, suggest, mutate, or launch Moon workflow graphs through "
-            "the same CQRS-backed build authority used by the in-app Moon surface."
+            "Read, compose, suggest, mutate, or launch Workflow graphs through "
+            "the same CQRS-backed build authority used by the in-app Workflow surface. "
+            "The praxis_moon tool name and moon alias remain compatibility entrypoints."
         ),
         when_not_to_use=(
             "Do not use it for unrelated roadmap, bug, provider-routing, or direct "
@@ -962,9 +991,9 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             },
         },
         examples=[
-            _example("Read a Moon graph", {"action": "get_build", "workflow_id": "wf_abc"}),
+            _example("Read a Workflow graph", {"action": "get_build", "workflow_id": "wf_abc"}),
             _example(
-                "Compose a Moon graph",
+                "Compose a Workflow graph",
                 {"action": "compose", "intent": "Search GitHub issues and draft a summary"},
             ),
         ],
@@ -973,7 +1002,10 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="operator",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Preview or commit operator work-item closeout through the shared gate.",
+        when_to_use=(
+            "Preview or commit operator closeout through the shared gate, including "
+            "bug-backed work items and parent initiatives with completed direct children."
+        ),
         when_not_to_use="Do not use it for roadmap item creation or read-only status views.",
         risks={"default": "read", "actions": {"preview": "read", "commit": "write"}},
         examples=[
@@ -1037,7 +1069,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "'does_not_apply_to': [...]} so downstream surfaces can quote the "
             "clamp verbatim instead of paraphrasing rationale; rows omit it "
             "default to a 'pending_review' placeholder for the operator to "
-            "fill in via the Moon Decisions panel."
+            "fill in via the Workflow Decisions panel."
         ),
         when_not_to_use="Do not use it for roadmap item authoring or cutover-gate admission.",
         risks={"default": "read", "actions": {"list": "read", "record": "write"}},
@@ -1497,6 +1529,32 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_object_truth_latest_version_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-latest-version",
+        when_to_use=(
+            "Read the latest trusted Object Truth version for a system/object/"
+            "identity/client filter when the caller should not know or manage "
+            "exact version digests."
+        ),
+        when_not_to_use=(
+            "Do not use it to ingest new evidence or change Object Truth. "
+            "Do not treat stale or conflict no-go states as deployable proof."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Read latest trusted account version",
+                {
+                    "system_ref": "salesforce",
+                    "object_ref": "account",
+                    "identity_digest": "identity.digest.account.001",
+                    "max_age_seconds": 86400,
+                },
+            ),
+        ],
+    ),
     "praxis_object_truth_record_comparison_run": _tool(
         surface="operations",
         tier="advanced",
@@ -1634,6 +1692,131 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "action": "describe",
                     "packet_ref": "object_truth_mdm_packet.demo",
                     "include_records": True,
+                },
+            ),
+        ],
+    ),
+    "praxis_workflow_context_compile": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="workflow-context-compile",
+        when_to_use=(
+            "Compile a Workflow Context pack from intent and optional graph so "
+            "the LLM can infer systems, objects, fields, risks, blockers, and "
+            "optional deterministic synthetic worlds before real integrations exist."
+        ),
+        when_not_to_use=(
+            "Do not use it to call live client systems or promote synthetic "
+            "evidence. Promotion is a guarded transition, not a compile side effect."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Compile a synthetic renewal-risk context",
+                {
+                    "intent": "Detect renewal risk from CRM, billing, support, and Slack signals.",
+                    "context_mode": "synthetic",
+                    "scenario_pack_refs": ["renewal_risk"],
+                    "seed": "demo-renewal-risk",
+                },
+            ),
+        ],
+    ),
+    "praxis_workflow_context_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="workflow-context-read",
+        when_to_use=(
+            "Read persisted Workflow Context packs, entities, bindings, "
+            "transition history, blockers, guardrails, synthetic worlds, and "
+            "review packets."
+        ),
+        when_not_to_use=(
+            "Do not use it to mutate context state. Use compile, transition, "
+            "or bind operations for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Read one context pack",
+                {
+                    "context_ref": "workflow_context:renewal_risk:demo",
+                    "include_entities": True,
+                    "include_bindings": True,
+                },
+            ),
+        ],
+    ),
+    "praxis_workflow_context_transition": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="workflow-context-transition",
+        when_to_use=(
+            "Move a Workflow Context pack between truth states through backend "
+            "policy, for example inferred to schema_bound or verified to promoted."
+        ),
+        when_not_to_use=(
+            "Do not use it to bypass review at real trust boundaries. Synthetic "
+            "or inferred context cannot be promoted by supplying nicer labels."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Mark context verified after verifier evidence",
+                {
+                    "context_ref": "workflow_context:renewal_risk:demo",
+                    "to_truth_state": "verified",
+                    "transition_reason": "verifier passed against observed Object Truth",
+                    "evidence": [{"evidence_ref": "verification.run.123", "evidence_tier": "verified"}],
+                },
+            ),
+        ],
+    ),
+    "praxis_workflow_context_bind": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="workflow-context-bind",
+        when_to_use=(
+            "Bind an inferred or synthetic Workflow Context entity to Object "
+            "Truth or another explicit authority ref while preserving risk, "
+            "review, confidence, and reversibility."
+        ),
+        when_not_to_use=(
+            "Do not use it to decide source authority implicitly or to accept "
+            "high-risk bindings without review evidence."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Propose binding synthetic Account to Object Truth",
+                {
+                    "context_ref": "workflow_context:renewal_risk:demo",
+                    "entity_ref": "workflow_context:renewal_risk:demo:entity:object:account",
+                    "target_ref": "object_truth_object_version:account.digest",
+                    "risk_level": "medium",
+                },
+            ),
+        ],
+    ),
+    "praxis_workflow_context_guardrail_check": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="workflow-context-guardrails",
+        when_to_use=(
+            "Ask backend policy what the LLM can safely do next with a "
+            "Workflow Context pack, including no-go states and review requirements."
+        ),
+        when_not_to_use=(
+            "Do not use it as a substitute for the transition command when the "
+            "state actually needs to change."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Check whether promotion is allowed",
+                {
+                    "context_ref": "workflow_context:renewal_risk:demo",
+                    "target_truth_state": "promoted",
                 },
             ),
         ],
@@ -2171,7 +2354,8 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "provided evidence: system census, Object Truth inspection, "
             "identity/source authority, simulation timeline, verifier results, "
             "sandbox drift, cartridge status, managed-runtime accounting, next "
-            "safe actions, or workflow-builder validation."
+            "safe actions, workflow-builder validation, or Workflow Context "
+            "customer composite deployability."
         ),
         when_not_to_use=(
             "Do not use it to persist client evidence, mutate workflows, call live "
@@ -2208,6 +2392,26 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                         "allowed_edges": [
                             {"from_block": "source.refresh", "to_block": "verifier.run"}
                         ],
+                    },
+                },
+            ),
+            _example(
+                "Build a Workflow Context composite view",
+                {
+                    "view": "workflow_context_composite",
+                    "generated_at": "2026-04-30T12:00:00Z",
+                    "permission_scope": {"scope_ref": "workflow.demo", "visibility": "full"},
+                    "inputs": {
+                        "workflow_ref": "workflow.demo",
+                        "context_pack": {
+                            "context_ref": "workflow_context:demo",
+                            "context_mode": "synthetic",
+                            "truth_state": "synthetic",
+                            "confidence_score": 0.42,
+                            "entities": [],
+                            "blockers": [],
+                            "evidence_refs": [],
+                        },
                     },
                 },
             ),

@@ -26,6 +26,7 @@ import {
 import { useShellState } from './shell/useShellState';
 import { MenuPanel, type MenuSection } from './menu';
 import { StrategyConsole, type StrategyStage } from './dashboard/StrategyConsole';
+import praxisSymbol from './assets/praxis-symbol-nav.svg';
 import './styles/app-shell.css';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error: Error | null }> {
@@ -99,6 +100,36 @@ function staticTabDescription(row: RouteRegistryRow, state: ShellState): string 
   return row.surface_name === 'manifests'
     ? 'Open Compose and workspace records.'
     : interpolateLabel(row.nav_description_template, state) || '';
+}
+
+function tabGlyphSvg(key: string): React.ReactNode {
+  const svgs: Record<string, React.ReactNode> = {
+    dashboard: (
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+    ),
+    build: (
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M12 6.5v5M10 13l-3 3M14 13l3 3"/><circle cx="12" cy="12" r="1.5"/></svg>
+    ),
+    manifests: (
+      <svg viewBox="0 0 24 24"><path d="M4 18l8-4 8 4M4 14l8-4 8 4M4 10l8-4 8 4"/></svg>
+    ),
+    atlas: (
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3.5 9h17M3.5 15h17"/></svg>
+    ),
+    'run-detail': (
+      <svg viewBox="0 0 24 24"><polygon points="9,5 19,12 9,19"/></svg>
+    ),
+    manifest: (
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+    ),
+    'manifest-editor': (
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6l6-6"/></svg>
+    ),
+    compose: (
+      <svg viewBox="0 0 24 24"><path d="M4 18l8-4 8 4M4 14l8-4 8 4M4 10l8-4 8 4"/></svg>
+    ),
+  };
+  return svgs[key] ?? <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/></svg>;
 }
 
 function initialStrategyStageFromLocation(): StrategyStage {
@@ -566,9 +597,9 @@ export function AppShell() {
       <div className={`app-shell${isBuildMode ? ' app-shell--build-mode' : ''}`}>
         <header className={`app-shell__chrome${isBuildMode ? ' app-shell__chrome--collapsed' : ''}`}>
           <div className="app-shell__identity">
-            <div className="app-shell__identity-mark" aria-hidden="true" />
+            <img className="app-shell__identity-mark" src={praxisSymbol} alt={APP_CONFIG.name} />
             <div className="app-shell__identity-copy">
-              <span>{APP_CONFIG.suiteName} · Moon</span>
+              <span>{APP_CONFIG.suiteName} · Workflow</span>
               <strong>{APP_CONFIG.name}</strong>
             </div>
           </div>
@@ -595,7 +626,7 @@ export function AppShell() {
                       className="app-shell__tab-button"
                     >
                       <span className="app-shell__tab-glyph" aria-hidden="true">
-                        {(kindLabel || tabLabel || row.surface_name).slice(0, 1)}
+                        {tabGlyphSvg(surface)}
                       </span>
                       <span className="app-shell__tab-copy">
                         {kindLabel ? <span className="app-shell__tab-kind">{kindLabel}</span> : null}
@@ -628,7 +659,7 @@ export function AppShell() {
                       }}
                       className="app-shell__tab-button"
                     >
-                      <span className="app-shell__tab-glyph" aria-hidden="true">{kindLabel.slice(0, 1)}</span>
+                      <span className="app-shell__tab-glyph" aria-hidden="true">{tabGlyphSvg(tab.kind)}</span>
                       <span className="app-shell__tab-copy">
                         <span className="app-shell__tab-kind">{kindLabel}</span>
                         <span className="app-shell__tab-label">{tabLabel}</span>
@@ -660,7 +691,9 @@ export function AppShell() {
                 aria-haspopup="dialog"
                 aria-expanded={commandMenuOpen}
               >
-                <span className="app-shell__action-icon app-shell__action-icon--new" aria-hidden="true" />
+                <span className="app-shell__action-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                </span>
                 <span className="app-shell__action-copy">
                   <span className="app-shell__action-kicker">Workspace</span>
                   <span>New</span>
@@ -672,7 +705,9 @@ export function AppShell() {
               onClick={() => setStrategyStage(s => s === 'icon' ? 'sidebar' : 'icon')}
               className={`app-shell__action-button ${strategyStage !== 'icon' ? 'app-shell__action-button--active' : ''}`}
             >
-              <span className="app-shell__action-icon app-shell__action-icon--chat" aria-hidden="true" />
+              <span className="app-shell__action-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+              </span>
               <span className="app-shell__action-copy">
                 <span className="app-shell__action-kicker">Assistant</span>
                 <span>Chat</span>

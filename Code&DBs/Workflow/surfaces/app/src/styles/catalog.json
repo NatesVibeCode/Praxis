@@ -1,0 +1,243 @@
+[
+  {
+    "name": "praxis_search",
+    "kind": "search",
+    "idempotency": "read_only",
+    "event_required": false,
+    "status": { "label": "ok", "tone": "ok" },
+    "input_schema": {
+      "title": "FederatedSearchInput",
+      "description": "Federated search across code, decisions, knowledge, bugs, receipts, git history, files, allowlisted DB rows.",
+      "type": "object",
+      "required": ["query"],
+      "x-praxis-steps": [
+        { "label": "query", "title": "Query", "fields": ["query", "mode"] },
+        { "label": "scope", "title": "Scope", "fields": ["sources", "limit"] }
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "format": "textarea",
+          "x-rows": 3,
+          "title": "query",
+          "description": "Free-text or /regex/ or 'exact'. Mode auto-detected unless overridden.",
+          "examples": ["provider routing CLI default API exception"]
+        },
+        "mode": {
+          "type": "string",
+          "title": "mode",
+          "description": "Search mode. auto picks by query shape.",
+          "enum": ["auto", "semantic", "exact", "regex"],
+          "default": "auto"
+        },
+        "sources": {
+          "type": "string",
+          "title": "sources",
+          "description": "Comma-separated sources to query. Defaults to all federated sources.",
+          "examples": ["code, decisions, knowledge, bugs"]
+        },
+        "limit": {
+          "type": "integer",
+          "title": "limit",
+          "description": "Max anchors returned per cluster.",
+          "default": 8
+        }
+      }
+    }
+  },
+  {
+    "name": "plan.compose",
+    "kind": "command",
+    "idempotency": "idempotent",
+    "event_required": true,
+    "status": { "label": "ok", "tone": "ok" },
+    "input_schema": {
+      "title": "ComposePlanCommand",
+      "description": "Compose a plan from intent. Emits plan.composed event on success.",
+      "type": "object",
+      "required": ["intent", "approved_by"],
+      "x-praxis-steps": [
+        { "label": "intent", "title": "Intent", "fields": ["intent", "plan_name"] },
+        { "label": "scope", "title": "Sources & approver", "fields": ["source_refs", "approved_by"] }
+      ],
+      "properties": {
+        "intent": {
+          "type": "string",
+          "format": "textarea",
+          "x-rows": 5,
+          "title": "intent",
+          "description": "Multi-line. Drives compose_plan_from_intent.",
+          "examples": ["1. Inspect refund batch from yesterday\n2. Build reconciliation envelope"]
+        },
+        "plan_name": {
+          "type": "string",
+          "title": "plan_name",
+          "description": "Optional override for the generated plan name.",
+          "examples": ["refund-batch-audit-2026-05-01"]
+        },
+        "source_refs": {
+          "type": "string",
+          "title": "source_refs",
+          "description": "Comma-separated. Source pills/decisions/receipts to pin in scope."
+        },
+        "approved_by": {
+          "type": "string",
+          "title": "approved_by",
+          "description": "Operator handle.",
+          "enum": ["nate@praxis", "system@praxis"]
+        }
+      }
+    }
+  },
+  {
+    "name": "plan.launch",
+    "kind": "command",
+    "idempotency": "idempotent",
+    "event_required": true,
+    "status": { "label": "ok", "tone": "ok" },
+    "input_schema": {
+      "title": "LaunchPlanCommand",
+      "description": "Launch a workflow run from a composed plan. Emits plan.launched event.",
+      "type": "object",
+      "required": ["plan_id", "approved_by"],
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "title": "plan_id",
+          "description": "ID of the plan returned from plan.compose.",
+          "examples": ["plan_5fb2_9c1d"]
+        },
+        "approved_by": {
+          "type": "string",
+          "title": "approved_by",
+          "enum": ["nate@praxis", "system@praxis"]
+        },
+        "kill_if_idle": {
+          "type": "boolean",
+          "title": "kill_if_idle",
+          "description": "Auto-kill if run goes idle past max_idle_seconds.",
+          "default": false
+        }
+      }
+    }
+  },
+  {
+    "name": "praxis_recall",
+    "kind": "search",
+    "idempotency": "read_only",
+    "event_required": false,
+    "status": { "label": "ok", "tone": "ok" },
+    "input_schema": {
+      "title": "RecallInput",
+      "description": "Knowledge-graph entity lookup.",
+      "type": "object",
+      "required": ["query"],
+      "properties": {
+        "query": { "type": "string", "title": "query", "description": "Entity name or fuzzy match." },
+        "type": {
+          "type": "string",
+          "title": "type",
+          "enum": ["any", "decision", "knowledge", "research", "person", "concept"],
+          "default": "any"
+        },
+        "limit": { "type": "integer", "title": "limit", "default": 5 }
+      }
+    }
+  },
+  {
+    "name": "praxis_bugs",
+    "kind": "write",
+    "idempotency": "none",
+    "event_required": false,
+    "status": { "label": "warn", "tone": "warn" },
+    "input_schema": {
+      "title": "BugTrackerInput",
+      "description": "File, dedupe, evidence-link, or resolve a bug.",
+      "type": "object",
+      "required": ["action"],
+      "x-praxis-steps": [
+        { "label": "action", "title": "Action", "fields": ["action", "bug_id"] },
+        { "label": "details", "title": "Details", "fields": ["title", "description", "verifier_ref"] }
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "title": "action",
+          "enum": ["file", "search", "resolve", "evidence-link"]
+        },
+        "bug_id": {
+          "type": "string",
+          "title": "bug_id",
+          "description": "Required for resolve / evidence-link / search-by-id.",
+          "examples": ["BUG-9475EEB0"]
+        },
+        "title": { "type": "string", "title": "title", "description": "Required when action=file." },
+        "description": {
+          "type": "string",
+          "format": "textarea",
+          "title": "description",
+          "description": "Multi-line. Required when action=file."
+        },
+        "verifier_ref": {
+          "type": "string",
+          "title": "verifier_ref",
+          "description": "Required when resolving to FIXED. Must be a registered verifier authority.",
+          "examples": ["verifier.job.python.pytest_file"]
+        }
+      }
+    }
+  },
+  {
+    "name": "verifier.run",
+    "kind": "command",
+    "idempotency": "idempotent",
+    "event_required": true,
+    "status": { "label": "failed", "tone": "err" },
+    "input_schema": {
+      "title": "VerifierRunCommand",
+      "description": "Dispatch a registered verifier authority. Emits verification.completed.",
+      "type": "object",
+      "required": ["verifier_ref", "target_kind", "target_ref"],
+      "properties": {
+        "verifier_ref": {
+          "type": "string",
+          "title": "verifier_ref",
+          "examples": ["verifier.job.python.pytest_file"]
+        },
+        "target_kind": {
+          "type": "string",
+          "title": "target_kind",
+          "enum": ["path", "module", "operation", "capability"]
+        },
+        "target_ref": {
+          "type": "string",
+          "title": "target_ref",
+          "description": "Path, module, operation_name, or capability_ref."
+        },
+        "inputs": {
+          "type": "string",
+          "format": "textarea",
+          "title": "inputs (JSON)",
+          "description": "Optional. JSON object passed to the verifier as payload.",
+          "examples": ["{\"path\": \"/Users/nate/Praxis/...\"}"]
+        }
+      }
+    }
+  },
+  {
+    "name": "praxis_health",
+    "kind": "analytics",
+    "idempotency": "read_only",
+    "event_required": false,
+    "status": { "label": "ok", "tone": "ok" },
+    "input_schema": {
+      "title": "HealthInput",
+      "description": "Runtime health and provider status.",
+      "type": "object",
+      "properties": {
+        "include_providers": { "type": "boolean", "title": "include_providers", "default": true },
+        "include_capacity": { "type": "boolean", "title": "include_capacity", "default": false }
+      }
+    }
+  }
+]

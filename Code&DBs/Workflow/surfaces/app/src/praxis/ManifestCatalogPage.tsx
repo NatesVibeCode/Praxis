@@ -280,6 +280,8 @@ export function ManifestCatalogPage({ onOpenManifest, onEditManifest }: Manifest
   const composeWorkspaceId = composeWorkspace?.id ?? null;
   const composeSurface = useMemo(() => findComposeSurface(composeBundle), [composeBundle]);
   const composeTitle = composeWorkspace ? displayWorkspaceName(composeWorkspace) : 'Compose';
+  const showAdvancedRecords = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('advanced') === '1';
 
   useEffect(() => {
     if (!composeWorkspaceId) {
@@ -369,128 +371,130 @@ export function ManifestCatalogPage({ onOpenManifest, onEditManifest }: Manifest
         )}
       </section>
 
-      <details className="manifest-catalog__advanced">
-        <summary>Advanced workspace records</summary>
-        <section className="manifest-catalog__filters">
-          <label className="manifest-catalog__field">
-            <span>Search</span>
-            <input
-              type="text"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="plan, approval, cleanup..."
-            />
-          </label>
-          <label className="manifest-catalog__field">
-            <span>Family</span>
-            <input
-              type="text"
-              value={manifestFamily}
-              onChange={(event) => setManifestFamily(event.target.value)}
-              placeholder="Any family"
-            />
-          </label>
-          <label className="manifest-catalog__field">
-            <span>Type</span>
-            <input
-              type="text"
-              value={manifestType}
-              onChange={(event) => setManifestType(event.target.value)}
-              placeholder="Any type"
-            />
-          </label>
-          <label className="manifest-catalog__field">
-            <span>Status</span>
-            <input
-              type="text"
-              value={status}
-              onChange={(event) => setStatus(event.target.value)}
-              placeholder="Any status"
-            />
-          </label>
-          <label className="manifest-catalog__field manifest-catalog__field--small">
-            <span>Limit</span>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={limit}
-              onChange={(event) => setLimit(Math.min(100, Math.max(1, Number.parseInt(event.target.value || '25', 10) || 25)))}
-            />
-          </label>
-          <button
-            type="button"
-            className="manifest-catalog__reset"
-            onClick={() => {
-              setQuery('');
-              setManifestFamily('');
-              setManifestType('');
-              setStatus('');
-              setLimit(25);
-            }}
-          >
-            Reset filters
-          </button>
-        </section>
+      {showAdvancedRecords ? (
+        <details className="manifest-catalog__advanced">
+          <summary>Advanced workspace records</summary>
+          <section className="manifest-catalog__filters">
+            <label className="manifest-catalog__field">
+              <span>Search</span>
+              <input
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="plan, approval, cleanup..."
+              />
+            </label>
+            <label className="manifest-catalog__field">
+              <span>Family</span>
+              <input
+                type="text"
+                value={manifestFamily}
+                onChange={(event) => setManifestFamily(event.target.value)}
+                placeholder="Any family"
+              />
+            </label>
+            <label className="manifest-catalog__field">
+              <span>Type</span>
+              <input
+                type="text"
+                value={manifestType}
+                onChange={(event) => setManifestType(event.target.value)}
+                placeholder="Any type"
+              />
+            </label>
+            <label className="manifest-catalog__field">
+              <span>Status</span>
+              <input
+                type="text"
+                value={status}
+                onChange={(event) => setStatus(event.target.value)}
+                placeholder="Any status"
+              />
+            </label>
+            <label className="manifest-catalog__field manifest-catalog__field--small">
+              <span>Limit</span>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={limit}
+                onChange={(event) => setLimit(Math.min(100, Math.max(1, Number.parseInt(event.target.value || '25', 10) || 25)))}
+              />
+            </label>
+            <button
+              type="button"
+              className="manifest-catalog__reset"
+              onClick={() => {
+                setQuery('');
+                setManifestFamily('');
+                setManifestType('');
+                setStatus('');
+                setLimit(25);
+              }}
+            >
+              Reset filters
+            </button>
+          </section>
 
-        <div className="manifest-catalog__summary">
-          {loading ? 'Loading workspaces...' : error ? error : activeFilterSummary || 'Showing recent workspace records'}
-        </div>
+          <div className="manifest-catalog__summary">
+            {loading ? 'Loading workspaces...' : error ? error : activeFilterSummary || 'Showing recent workspace records'}
+          </div>
 
-        <section className="manifest-catalog__results">
-          {loading ? (
-            <div className="manifest-catalog__empty">Loading workspaces...</div>
-          ) : error ? (
-            <div className="manifest-catalog__empty manifest-catalog__empty--error">{error}</div>
-          ) : manifests.length === 0 ? (
-            <div className="manifest-catalog__empty">No workspaces matched the current filters.</div>
-          ) : (
-            manifests.map((manifest) => (
-              <article key={manifest.id} className="manifest-catalog__card">
-                <div className="manifest-catalog__card-header">
-                  <div>
-                    {isComposeAuthoringRow(manifest) ? (
-                      <div className="manifest-catalog__card-title">{displayWorkspaceName(manifest)}</div>
-                    ) : (
-                      <EditableCatalogTitle
-                        manifest={manifest}
-                        onSaved={(saved) => {
-                          setManifests((current) => current.map((row) => (row.id === saved.id ? saved : row)));
-                        }}
-                        onError={(message) => setError(message)}
-                      />
-                    )}
-                    <div className="manifest-catalog__card-id">
-                      {isComposeWorkspaceRow(manifest)
-                        ? 'authoring workspace'
-                        : isComposeSeedRow(manifest)
-                          ? 'workspace template'
-                          : manifest.id}
+          <section className="manifest-catalog__results">
+            {loading ? (
+              <div className="manifest-catalog__empty">Loading workspaces...</div>
+            ) : error ? (
+              <div className="manifest-catalog__empty manifest-catalog__empty--error">{error}</div>
+            ) : manifests.length === 0 ? (
+              <div className="manifest-catalog__empty">No workspaces matched the current filters.</div>
+            ) : (
+              manifests.map((manifest) => (
+                <article key={manifest.id} className="manifest-catalog__card">
+                  <div className="manifest-catalog__card-header">
+                    <div>
+                      {isComposeAuthoringRow(manifest) ? (
+                        <div className="manifest-catalog__card-title">{displayWorkspaceName(manifest)}</div>
+                      ) : (
+                        <EditableCatalogTitle
+                          manifest={manifest}
+                          onSaved={(saved) => {
+                            setManifests((current) => current.map((row) => (row.id === saved.id ? saved : row)));
+                          }}
+                          onError={(message) => setError(message)}
+                        />
+                      )}
+                      <div className="manifest-catalog__card-id">
+                        {isComposeWorkspaceRow(manifest)
+                          ? 'authoring workspace'
+                          : isComposeSeedRow(manifest)
+                            ? 'workspace template'
+                            : manifest.id}
+                      </div>
+                    </div>
+                    <div className="manifest-catalog__card-actions">
+                      <button type="button" onClick={() => onOpenManifest(manifest.id)}>
+                        {isComposeWorkspaceRow(manifest) ? 'Open Compose' : 'Open'}
+                      </button>
+                      <button type="button" onClick={() => onEditManifest(manifest.id)}>
+                        Advanced JSON
+                      </button>
                     </div>
                   </div>
-                  <div className="manifest-catalog__card-actions">
-                    <button type="button" onClick={() => onOpenManifest(manifest.id)}>
-                      {isComposeWorkspaceRow(manifest) ? 'Open Compose' : 'Open'}
-                    </button>
-                    <button type="button" onClick={() => onEditManifest(manifest.id)}>
-                      Advanced JSON
-                    </button>
+                  <p className="manifest-catalog__card-copy">
+                    {displayWorkspaceDescription(manifest)}
+                  </p>
+                  <div className="manifest-catalog__tags">
+                    <span className="manifest-catalog__tag">status: {manifest.status || 'unknown'}</span>
+                    <span className="manifest-catalog__tag">family: {manifest.manifest_family || 'unknown'}</span>
+                    <span className="manifest-catalog__tag">type: {manifest.manifest_type || 'unknown'}</span>
+                    <span className="manifest-catalog__tag">updated: {formatUpdatedAt(manifest.updated_at)}</span>
                   </div>
-                </div>
-                <p className="manifest-catalog__card-copy">
-                  {displayWorkspaceDescription(manifest)}
-                </p>
-                <div className="manifest-catalog__tags">
-                  <span className="manifest-catalog__tag">status: {manifest.status || 'unknown'}</span>
-                  <span className="manifest-catalog__tag">family: {manifest.manifest_family || 'unknown'}</span>
-                  <span className="manifest-catalog__tag">type: {manifest.manifest_type || 'unknown'}</span>
-                  <span className="manifest-catalog__tag">updated: {formatUpdatedAt(manifest.updated_at)}</span>
-                </div>
-              </article>
-            ))
-          )}
-        </section>
-      </details>
+                </article>
+              ))
+            )}
+          </section>
+        </details>
+      ) : null}
     </div>
   );
 }

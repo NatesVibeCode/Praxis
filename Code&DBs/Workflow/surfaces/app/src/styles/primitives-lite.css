@@ -1,0 +1,456 @@
+/* =============================================================
+ * Praxis primitives — LITE MODE
+ *
+ * Same primitives, business-app register. Activated by adding
+ * `class="lite"` (or `data-mode="lite"`) to <body>. The full
+ * dark/firmware version is the default; this file is layered
+ * on top to override colors, typography, and animations.
+ *
+ * Strategy:
+ *   1. Re-token color + shadow scale (handles most styling)
+ *   2. Override specific retro idioms (corner frames, marquee
+ *      rules, scanlines, ASCII flanking, blinking caret)
+ *   3. Reset uppercase tracked labels to sentence-case sans
+ * ============================================================= */
+
+/* ── Token overrides ────────────────────────────────────── */
+body.lite,
+body[data-mode="lite"] {
+  /* Surfaces */
+  --bg:           #fafbfc;
+  --bg-edge:      #f3f4f6;
+  --bg-card:      #ffffff;
+  --bg-alt:       #f9fafb;
+  --bg-input:     #ffffff;
+  --bg-editor:    #f9fafb;
+
+  /* Foreground */
+  --text:         #111827;
+  --text-muted:   #6b7280;
+  --text-inverse: #ffffff;
+  --fg-faint:     #d1d5db;
+  --fg1:          #111827;
+  --fg2:          #6b7280;
+  --fg3:          #9ca3af;
+  --fg-inverse:   #ffffff;
+
+  /* Brand */
+  --accent:        #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-warm:   #d97706;
+  --brand-secondary: #6366f1;
+
+  /* Status */
+  --success:        #10b981;
+  --success-bright: #059669;
+  --warning:        #f59e0b;
+  --warning-strong: #d97706;
+  --danger:         #ef4444;
+  --danger-soft:    #f87171;
+
+  /* Borders */
+  --border:        #e5e7eb;
+  --border-soft:   #e5e7eb;
+  --border-faint:  #f3f4f6;
+  --border-accent: rgba(37, 99, 235, 0.30);
+  --border-accent-soft: rgba(37, 99, 235, 0.30);
+  --border-success-soft: rgba(16, 185, 129, 0.30);
+  --border-warning-soft: rgba(245, 158, 11, 0.30);
+  --border-danger-soft: rgba(239, 68, 68, 0.30);
+  --shell-border:  rgba(17, 24, 39, 0.08);
+
+  /* Surfaces (translucent) */
+  --surface-hover:        rgba(17, 24, 39, 0.04);
+  --surface-muted:        rgba(17, 24, 39, 0.02);
+  --surface-subtle:       #fafbfc;
+  --surface-accent-soft:  rgba(37, 99, 235, 0.06);
+  --surface-accent-strong:rgba(37, 99, 235, 0.16);
+  --surface-success-soft: rgba(16, 185, 129, 0.10);
+  --surface-warning-soft: rgba(245, 158, 11, 0.10);
+  --surface-warning-soft-muted: rgba(245, 158, 11, 0.06);
+  --surface-danger-soft:  rgba(239, 68, 68, 0.10);
+
+  /* Shadows (Stripe / Linear feel) */
+  --shadow-card:    0 1px 3px rgba(17, 24, 39, 0.06), 0 1px 2px rgba(17, 24, 39, 0.04);
+  --shadow-panel:   0 2px 8px rgba(17, 24, 39, 0.06);
+  --shadow-popover: 0 8px 24px rgba(17, 24, 39, 0.10);
+  --shadow-modal:   0 16px 48px rgba(17, 24, 39, 0.14);
+  --shadow-drawer:  -4px 0 16px rgba(17, 24, 39, 0.08);
+  --shadow-ambient: 0 4px 16px rgba(17, 24, 39, 0.06);
+  --shadow-lifted:  0 12px 32px rgba(17, 24, 39, 0.10);
+  --card-shadow:    0 1px 3px rgba(17, 24, 39, 0.06), 0 1px 2px rgba(17, 24, 39, 0.04);
+
+  --surface-elevated: linear-gradient(180deg, #ffffff, #fafbfc);
+  --surface-raised:   linear-gradient(180deg, #ffffff, #fafbfc);
+
+  /* Glows → soft focus rings instead */
+  --accent-glow-soft:   0 0 0 3px rgba(37, 99, 235, 0.10);
+  --accent-glow-strong: 0 0 0 3px rgba(37, 99, 235, 0.20);
+  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.16);
+
+  --grid-accent:  rgba(17, 24, 39, 0.04);
+  --selection-bg: rgba(37, 99, 235, 0.16);
+
+  color-scheme: light;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ── Typography reset ──────────────────────────────────── */
+body.lite h1,
+body.lite h2,
+body.lite h3,
+body.lite h4 {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+  color: var(--text);
+}
+body.lite .topline h1 { letter-spacing: -0.02em; }
+body.lite .topline .sub { letter-spacing: 0.04em; text-transform: none; }
+
+/* Most labels lose tracked-uppercase, gain sentence case */
+body.lite .prx-section-strip,
+body.lite .prx-table thead th,
+body.lite .prx-table-meta,
+body.lite .prx-receipt .hd,
+body.lite .prx-receipt .k,
+body.lite .prx-form-group-title,
+body.lite .prx-field-label,
+body.lite .prx-runlog .row .stat,
+body.lite .prx-friction .hd,
+body.lite .prx-subscribers .hd,
+body.lite .prx-flow-node .body .kind,
+body.lite .prx-wizard-steps,
+body.lite .prx-wizard-foot,
+body.lite .prx-roi .hd .kind,
+body.lite .prx-roi .stat .label,
+body.lite .prx-diag .hd,
+body.lite .prx-diag .row .k,
+body.lite .prx-workflow-bar .id .meta,
+body.lite .prx-cmd-bar .results .prx-palette-row .kind,
+body.lite .prx-palette-foot,
+body.lite .prx-palette-row .kind,
+body.lite .prx-step-builder .accum .label,
+body.lite .prx-step-builder .narrow-bar .cap,
+body.lite .prx-step-builder .narrow-bar .op-row .kind,
+body.lite .prx-numeral { font-family: 'Inter', sans-serif; letter-spacing: 0; text-transform: none; }
+
+/* Keep mono only where it carries semantic weight: code, hashes, sql */
+body.lite code,
+body.lite pre,
+body.lite .mono,
+body.lite .prx-receipt .ft .hash,
+body.lite .prx-idem .hash,
+body.lite .prx-dispatch .hash,
+body.lite .prx-wizard-preview pre,
+body.lite .prx-form-body input.prx-field-input { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+
+/* ── Kill the most retro idioms ────────────────────────── */
+
+/* Section-strip flanking ticks: 01 · ▮▮ · LABEL · ▮▮ → 01 · LABEL */
+body.lite .prx-section-strip .label::before,
+body.lite .prx-section-strip .label::after { content: none; }
+
+/* Receipt header wax-seal stamps */
+body.lite .prx-receipt .hd > span:first-child::before,
+body.lite .prx-receipt .hd > span:first-child::after { content: none; }
+
+/* ASCII corner-bracket frame */
+body.lite .prx-frame::before,
+body.lite .prx-frame::after { content: none; }
+body.lite .prx-frame {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-accent-soft);
+  padding: 16px 18px;
+}
+body.lite .prx-frame[data-tone="warn"] {
+  background: var(--surface-warning-soft);
+  border-color: var(--border-warning-soft);
+}
+
+/* Marquee rule glyphs → flat hairline */
+body.lite .prx-rule {
+  display: block;
+  font-size: 0;
+  height: 1px;
+  background: var(--border);
+  letter-spacing: 0;
+  color: transparent;
+  margin: 12px 0;
+}
+body.lite .prx-rule[data-tone="warn"] { background: var(--border-warning-soft); }
+
+/* Drawer wax-seal stamp on header */
+body.lite .prx-drawer-panel > header .title::before,
+body.lite .prx-drawer-panel > header .title::after { content: none; }
+
+/* Wizard preview wax-seal */
+body.lite .prx-wizard-preview .preview-cap::before { content: none; }
+
+/* CRT scanlines: off */
+body.lite [data-scanlines]::after,
+body.lite [data-scanlines="sweep"]::before { display: none; }
+
+/* ── Animations: dial way down ─────────────────────────── */
+body.lite .prx-led[data-tone="live"] {
+  animation: none;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+}
+body.lite .prx-cursor { animation: none; opacity: 0.6; }
+body.lite .prx-radar svg .sweep,
+body.lite .prx-radar svg .trail { animation-duration: 4s; opacity: 0.7; }
+body.lite .prx-numeral .digit.flip {
+  color: var(--accent);
+  transform: none;
+  background: var(--surface-accent-soft);
+  border-radius: 2px;
+}
+body.lite .prx-flow-cursor { box-shadow: none; }
+body.lite .prx-flow-cursor::before { animation: none; box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.20); }
+
+/* Glyph spinner → CSS-only spinning circle */
+body.lite .prx-spinner {
+  font-size: 0 !important;
+  color: transparent !important;
+  width: 12px;
+  height: 12px;
+  position: relative;
+  vertical-align: -2px;
+}
+body.lite .prx-spinner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(17, 24, 39, 0.10);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: prx-lite-spin 0.7s linear infinite;
+}
+@keyframes prx-lite-spin { to { transform: rotate(360deg); } }
+
+/* ── Components: business-app polish ───────────────────── */
+
+/* Buttons — solid primary, white secondary */
+body.lite .hero-form button,
+body.lite .prx-table button,
+body.lite .prx-drawer-panel > footer button.primary,
+body.lite .prx-wizard-foot button.primary,
+body.lite .prx-dispatch .run,
+body.lite .prx-workflow-bar .controls button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+body.lite .prx-drawer-panel > footer button.primary:hover,
+body.lite .prx-wizard-foot button.primary:hover,
+body.lite .prx-dispatch .run:hover,
+body.lite .prx-workflow-bar .controls button.primary:hover {
+  background: var(--accent-strong);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.20);
+}
+body.lite .prx-drawer-panel > footer button:not(.primary),
+body.lite .prx-wizard-foot button:not(.primary),
+body.lite .prx-workflow-bar .controls button:not(.primary):not(.warn):not(.danger) {
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+}
+body.lite .prx-drawer-panel > footer button:not(.primary):hover,
+body.lite .prx-wizard-foot button:not(.primary):hover { background: var(--surface-hover); border-color: #d1d5db; }
+
+/* Inputs */
+body.lite input,
+body.lite textarea,
+body.lite select,
+body.lite .prx-field-input,
+body.lite .prx-table-filter,
+body.lite .prx-palette-input,
+body.lite .prx-cmd-bar input.q,
+body.lite .hero-form input {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+}
+body.lite .prx-field-input:focus,
+body.lite .prx-table-filter:focus,
+body.lite .prx-palette-input:focus,
+body.lite .prx-cmd-bar input.q:focus,
+body.lite .hero-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* Cards, panels, drawer, modal — softer shadow, no warm-paper gradient */
+body.lite .prx-receipt,
+body.lite .prx-table,
+body.lite .prx-friction,
+body.lite .prx-subscribers,
+body.lite .prx-idem,
+body.lite .prx-roi,
+body.lite .prx-diag,
+body.lite .prx-workflow-bar,
+body.lite .prx-flow,
+body.lite .prx-wizard,
+body.lite .prx-step-builder,
+body.lite .prx-cmd-bar,
+body.lite .prx-flow-node {
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+}
+body.lite .prx-drawer-panel { box-shadow: var(--shadow-drawer); }
+body.lite .prx-palette-panel { box-shadow: var(--shadow-modal); }
+
+/* Status caps (ok/warn/err glyphs in tables, runlog, flow) become quieter */
+body.lite .stat-cap,
+body.lite .prx-runlog .stat,
+body.lite .prx-table .stat-cap,
+body.lite .prx-flow-node .ft .stat-cap {
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
+  font-size: 11px;
+}
+
+/* Chips — pill but cleaner */
+body.lite .prx-chip {
+  background: #fff;
+  border: 1px solid var(--border);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  border-radius: 4px;
+}
+body.lite .prx-chip[data-tone="locked"] {
+  background: var(--surface-warning-soft);
+  border-color: var(--border-warning-soft);
+}
+body.lite .prx-chip[data-tone="ok"] {
+  background: var(--surface-success-soft);
+  border-color: var(--border-success-soft);
+}
+body.lite .prx-chip[data-tone="bad"] {
+  background: var(--surface-danger-soft);
+  border-color: var(--border-danger-soft);
+}
+
+/* Gauges keep the LCD block characters but tone down — remove glow + amber hard-codes */
+body.lite .prx-gauge .ticks .t.on { background: var(--accent); }
+body.lite .prx-lcd .bar .on { color: var(--accent); }
+
+/* Flow canvas — drop the grid backdrop, give a subtle dotted one instead */
+body.lite .prx-flow {
+  background-image: radial-gradient(circle, rgba(17, 24, 39, 0.06) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+body.lite .prx-flow .canvas-svg path { stroke: var(--border); }
+body.lite .prx-flow .canvas-svg path.live { stroke: var(--accent); }
+body.lite .prx-flow .canvas-svg path.warn { stroke: var(--warning); }
+body.lite .prx-flow .canvas-svg path.err  { stroke: var(--danger); }
+
+/* Diff lines: keep +/-/= but cleaner — no amber on equal */
+body.lite .prx-diff {
+  background: #fff;
+  border: 1px solid var(--border);
+}
+body.lite .prx-diff .line[data-mark="+"] { color: var(--success-bright); background: rgba(16, 185, 129, 0.06); }
+body.lite .prx-diff .line[data-mark="-"] { color: var(--danger); background: rgba(239, 68, 68, 0.06); }
+body.lite .prx-diff .line[data-mark="="] { color: var(--text-muted); background: transparent; }
+body.lite .prx-diff .line[data-mark="!"] { color: var(--warning); background: var(--surface-warning-soft); }
+
+/* Tape transport — flatter, no chunky press */
+body.lite .prx-transport {
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+}
+body.lite .prx-transport button {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-bottom-width: 1px;
+  color: var(--text);
+}
+body.lite .prx-transport button:active,
+body.lite .prx-transport button.active {
+  background: var(--surface-accent-soft);
+  border-bottom-width: 1px; border-top-width: 1px;
+  box-shadow: none;
+  color: var(--accent);
+}
+
+/* Palette / cmd-bar — softer */
+body.lite .prx-palette-row.sel,
+body.lite .prx-cmd-bar .results .prx-palette-row.sel {
+  background: var(--surface-accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+body.lite .prx-palette-row .glyph,
+body.lite .prx-cmd-bar .results .prx-palette-row .glyph { color: var(--accent); }
+
+/* Wizard step indicators */
+body.lite .prx-wizard-step.active .num {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.30);
+}
+body.lite .prx-wizard-step.done .num {
+  color: var(--success-bright);
+  border-color: rgba(16, 185, 129, 0.30);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+/* Topbar (showcase) */
+body.lite .topline { border-bottom-color: var(--border); }
+body.lite section.demo h2 { color: var(--text); }
+body.lite section.demo p.note { color: var(--text-muted); }
+body.lite .stage {
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+}
+body.lite code.tag {
+  background: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* Scrollbars (webkit) — cleaner */
+body.lite ::-webkit-scrollbar { width: 10px; height: 10px; }
+body.lite ::-webkit-scrollbar-track { background: transparent; }
+body.lite ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 5px; }
+body.lite ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* Radar / SVG rings recolor */
+body.lite .prx-radar svg .ring { stroke: var(--border); }
+body.lite .prx-radar svg .tick { stroke: var(--text-muted); }
+body.lite .prx-radar svg .sweep { stroke: var(--accent); }
+body.lite .prx-radar svg .trail { fill: var(--accent); }
+
+/* Workflow bar — cleaner, lift on hover */
+body.lite .prx-workflow-bar .controls button.warn {
+  border-color: rgba(245, 158, 11, 0.40);
+  color: var(--warning-strong);
+  background: var(--surface-warning-soft);
+}
+
+/* Hover state on flow nodes — subtle accent border */
+body.lite .prx-flow-node:hover { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.10), var(--shadow-card); }
+
+/* Step builder narrowed list — selected state */
+body.lite .prx-step-builder .narrow-bar .op-row.sel {
+  background: var(--surface-accent-soft);
+  border-color: var(--accent);
+}

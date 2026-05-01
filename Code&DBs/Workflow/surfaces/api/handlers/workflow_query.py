@@ -766,6 +766,49 @@ def _dashboard_health_descriptor(
     }
 
 
+def _load_tool_opportunities(pg: Any, limit: int = 5) -> list[dict[str, Any]]:
+    """Read top pending tool-opportunity shapes from the view.
+
+    Backed by `tool_opportunities_pending` (migration 383+385). Best-effort:
+    if the view is absent (older DB) or the query fails, return an empty
+    list rather than blocking the dashboard payload.
+    """
+    if pg is None:
+        return []
+    try:
+        rows = pg.execute(
+            """SELECT shape_hash,
+                      proposed_decision_key,
+                      occurrence_count,
+                      distinct_surfaces,
+                      action_kinds,
+                      operation_names,
+                      sample_commands,
+                      sample_path_shapes,
+                      last_seen
+               FROM public.tool_opportunities_pending
+               ORDER BY occurrence_count DESC, last_seen DESC
+               LIMIT $1""",
+            limit,
+        )
+    except Exception:
+        return []
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        out.append({
+            "shape_hash": str(row.get("shape_hash") or ""),
+            "decision_key": str(row.get("proposed_decision_key") or ""),
+            "occurrence_count": int(row.get("occurrence_count") or 0),
+            "distinct_surfaces": int(row.get("distinct_surfaces") or 0),
+            "action_kinds": list(row.get("action_kinds") or []),
+            "operation_names": list(row.get("operation_names") or [])[:3],
+            "sample_commands": list(row.get("sample_commands") or [])[:3],
+            "sample_path_shapes": list(row.get("sample_path_shapes") or [])[:3],
+            "last_seen": row.get("last_seen").isoformat() if row.get("last_seen") else None,
+        })
+    return out
+
+
 def _build_dashboard_payload(subs: Any) -> dict[str, Any]:
     pg = subs.get_pg_conn() if hasattr(subs, "get_pg_conn") else None
     workflows = _load_workflow_inventory(pg) if pg is not None else []
@@ -773,6 +816,7 @@ def _build_dashboard_payload(subs: Any) -> dict[str, Any]:
     queue_snapshot = _queue_depth_snapshot(pg)
     leaderboard = _load_leaderboard_snapshot(subs)
     recent_runs = _load_recent_runs_snapshot(pg, limit=20) if pg is not None else []
+    tool_opportunities = _load_tool_opportunities(pg, limit=5)
 
     workflow_ids_by_bucket: dict[str, list[str]] = {key: [] for key in _DASHBOARD_SECTION_ORDER}
     for workflow in workflows:
@@ -834,6 +878,7 @@ def _build_dashboard_payload(subs: Any) -> dict[str, Any]:
         "workflows": workflows,
         "recent_runs": recent_runs,
         "leaderboard": leaderboard,
+        "tool_opportunities": tool_opportunities,
     }
 
 

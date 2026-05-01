@@ -247,7 +247,11 @@ export function MoonReleaseTray({
           <span className="moon-release__summary-line">{summaryLine}</span>
           {totalChecks > 0 && (
             <span className="moon-release__summary-checks" aria-label={`${passedChecks} of ${totalChecks} checks passed`}>
-              {passedChecks}/{totalChecks} checks
+              {release.checklist.map((c, i) => (
+                <span key={i} style={{ color: c.passed ? 'var(--success)' : 'var(--danger)' }}>
+                  {c.passed ? '✓' : '✗'} {c.label}{i < totalChecks - 1 ? ' · ' : ''}
+                </span>
+              ))}
             </span>
           )}
         </div>

@@ -493,7 +493,10 @@ def test_first_slice_execution_boundary_fails_closed_on_authority_mismatch() -> 
             evidence_writer=writer,
         )
 
-    assert str(exc_info.value) == "runtime.execution_boundary_authority_mismatch"
+    assert (
+        exc_info.value.reason_code
+        == "runtime.execution_boundary_authority_mismatch.workspace_ref"
+    )
     assert [
         row.record.event_type
         for row in writer.evidence_timeline(outcome.run_id)

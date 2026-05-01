@@ -398,7 +398,15 @@
     "381_register_chat_template_review_command.sql",
     "382_managed_runtime_authority.sql",
     "383_action_fingerprint_authority.sql",
-    "384_chat_picker_full_model_coverage.sql"
+    "384_chat_picker_full_model_coverage.sql",
+    "386_workflow_context_authority.sql",
+    "385_action_fingerprint_view_refinement.sql",
+    "387_synthetic_data_authority.sql",
+    "388_synthetic_environment_authority.sql",
+    "389_tool_opportunities_view_pin.sql",
+    "390_register_action_fingerprint_record_operation.sql",
+    "391_register_model_eval_operations.sql",
+    "392_model_eval_case_runs_and_scorecards.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -10803,7 +10811,358 @@
         "object_name": "tool_opportunities_pending"
       }
     ],
-    "384_chat_picker_full_model_coverage.sql": []
+    "384_chat_picker_full_model_coverage.sql": [],
+    "386_workflow_context_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "workflow_context_packs"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_context_entities"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_context_bindings"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_context_transitions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_context_packs_workflow"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_context_packs_truth_state"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_context_packs_metadata_gin"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_context_entities_context_kind"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_context_entities_payload_gin"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_context_bindings_context"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_context_bindings_target"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_context_transitions_context"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_workflow_context_packs_updated_at"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_workflow_context_entities_updated_at"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_workflow_context_bindings_updated_at"
+      }
+    ],
+    "385_action_fingerprint_view_refinement.sql": [
+      {
+        "object_type": "view",
+        "object_name": "tool_opportunities_pending"
+      },
+      {
+        "object_type": "view",
+        "object_name": "gateway_op_recurrence"
+      }
+    ],
+    "387_synthetic_data_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "synthetic_data_sets"
+      },
+      {
+        "object_type": "table",
+        "object_name": "synthetic_data_records"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_data_sets_namespace"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_data_sets_source_context"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_data_sets_quality"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_data_sets_metadata_gin"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_data_records_dataset_object"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_data_records_display_name"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_data_records_fields_gin"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_synthetic_data_sets_updated_at"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_synthetic_data_records_updated_at"
+      }
+    ],
+    "388_synthetic_environment_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "synthetic_environments"
+      },
+      {
+        "object_type": "table",
+        "object_name": "synthetic_environment_effects"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environments_namespace"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environments_source_dataset"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environments_lifecycle"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environments_current_digest"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environments_metadata_gin"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environment_effects_environment_seq"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environment_effects_type"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environment_effects_event_ref"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_synthetic_environment_effects_json_gin"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_synthetic_environments_updated_at"
+      }
+    ],
+    "389_tool_opportunities_view_pin.sql": [],
+    "390_register_action_fingerprint_record_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.action_fingerprints"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.action_fingerprint.recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.action_fingerprint_recorded_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.action_fingerprint_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.action_fingerprint_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.action_fingerprint_record"
+      }
+    ],
+    "391_register_model_eval_operations.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.model_eval"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.model_eval_matrix_completed_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.model_eval_promotion_proposed_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.model_eval.matrix.completed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.model_eval.promotion_proposed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.model_eval_plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.model_eval_plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.model_eval_plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.model_eval_inspect"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.model_eval_inspect"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.model_eval_inspect"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.model_eval_compare"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.model_eval_compare"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.model_eval_compare"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.model_eval_export"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.model_eval_export"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.model_eval_export"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.model_eval_run_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.model_eval_run_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.model_eval_run_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.model_eval_promote_proposal"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.model_eval_promote_proposal"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.model_eval_promote_proposal"
+      }
+    ],
+    "392_model_eval_case_runs_and_scorecards.sql": [
+      {
+        "object_type": "table",
+        "object_name": "model_eval_case_runs"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_model_eval_case_runs_matrix"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_model_eval_case_runs_child_receipt"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_model_eval_case_runs_score"
+      },
+      {
+        "object_type": "table",
+        "object_name": "model_eval_scorecards"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_model_eval_scorecards_family"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.model_eval_case_runs"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.model_eval_scorecards"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.model_eval_case_runs"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.model_eval_scorecards"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.model_eval_case_run_completed_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.model_eval.case_run.completed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.model_eval_run_case"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.model_eval_run_case"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.model_eval_run_case"
+      }
+    ]
   },
   "policy_buckets": {
     "canonical": [
@@ -11205,7 +11564,15 @@
       "381_register_chat_template_review_command.sql",
       "382_managed_runtime_authority.sql",
       "383_action_fingerprint_authority.sql",
-      "384_chat_picker_full_model_coverage.sql"
+      "384_chat_picker_full_model_coverage.sql",
+      "386_workflow_context_authority.sql",
+      "385_action_fingerprint_view_refinement.sql",
+      "387_synthetic_data_authority.sql",
+      "388_synthetic_environment_authority.sql",
+      "389_tool_opportunities_view_pin.sql",
+      "390_register_action_fingerprint_record_operation.sql",
+      "391_register_model_eval_operations.sql",
+      "392_model_eval_case_runs_and_scorecards.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -11395,6 +11762,11 @@
       "347_register_authority_impact_contract_verifier.sql"
     ]
   },
+  "bootstrap_prerequisites": {
+    "392_model_eval_case_runs_and_scorecards.sql": [
+      "391_register_model_eval_operations.sql"
+    ]
+  },
   "migrations_always_reapply": [
     "298_policy_authority_compliance_receipts.sql",
     "300_policy_authority_receipt_writer_bypasses_self.sql",
@@ -11403,6 +11775,7 @@
     "337_llm_request_contract_authority.sql",
     "338_zero_token_detector_wiring.sql",
     "350_operation_lane_initial_classification.sql",
-    "364_remove_retired_deepseek_v32_native_profile.sql"
+    "364_remove_retired_deepseek_v32_native_profile.sql",
+    "389_tool_opportunities_view_pin.sql"
   ]
 }

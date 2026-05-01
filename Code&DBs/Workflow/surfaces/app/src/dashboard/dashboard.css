@@ -1002,6 +1002,12 @@ button.dash-hero-card__stat--link:focus-visible {
   line-height: 1.35;
 }
 
+.dash-review-item__body span.dash-review-item__detail--mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 .dash-review-item em {
   align-self: start;
   color: var(--text-muted);

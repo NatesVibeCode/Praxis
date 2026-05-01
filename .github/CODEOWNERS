@@ -1,0 +1,29 @@
+# Praxis CODEOWNERS
+#
+# Routing for review on path-based ownership. Lines later in this file
+# take precedence over earlier ones for the same path.
+#
+# See operator_decisions::architecture-policy::design-system-single-react-primitive-library
+# for the design-system ownership policy.
+
+# Design system — the single React primitive library + the prx-* CSS vocabulary
+Code&DBs/Workflow/surfaces/app/src/styles/primitives.css       @nate
+Code&DBs/Workflow/surfaces/app/src/styles/primitives-lite.css  @nate
+Code&DBs/Workflow/surfaces/app/src/styles/primitives-print.css @nate
+Code&DBs/Workflow/surfaces/app/src/styles/primitives-hicontrast.css @nate
+Code&DBs/Workflow/surfaces/app/src/styles/primitives.js        @nate
+Code&DBs/Workflow/surfaces/app/src/styles/primitives.html      @nate
+Code&DBs/Workflow/surfaces/app/src/styles/tokens.css           @nate
+
+# React primitives — DataTable, MetricCard, StatsRow, ActivityFeed, etc.
+# Render the prx-* CSS structure. NOT a parallel library.
+Code&DBs/Workflow/surfaces/app/src/primitives/                 @nate
+
+# Stateful primitive adapters — only behaviors that don't fit pure CSS
+# (PromptInput, Tabstrip, DispatchButton). Presentational primitives
+# (NodeBand, StatusRail, IconTile, Tooltip, FlowEdge, FlowCursor) are
+# consumed via raw className and have NO React adapter here.
+Code&DBs/Workflow/surfaces/app/src/primitives-prx/             @nate
+
+# Bundled showcase artifact — regenerated from the source files above
+docs/praxis-primitives.html                                    @nate

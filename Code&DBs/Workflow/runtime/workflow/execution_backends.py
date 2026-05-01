@@ -649,11 +649,27 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
     if parse_json_output:
         stdout, telemetry = _parse_llm_output(raw_stdout)
     stderr = result.stderr
+    artifact_scope_drift = [
+        dict(entry) for entry in getattr(result, "artifact_scope_drift", ())
+    ]
     status = "succeeded" if result.exit_code == 0 and not result.timed_out else "failed"
     error_code = ""
     if result.timed_out:
         stderr = stderr or f"timed out after {timeout}s"
         error_code = "workflow.timeout"
+    elif artifact_scope_drift:
+        status = "failed"
+        error_code = "workflow_scope.out_of_scope_write"
+        drift_refs = ", ".join(
+            str(entry.get("artifact_ref") or "<unknown>") for entry in artifact_scope_drift[:5]
+        )
+        stderr = (
+            stderr
+            + (
+                "\nsandbox artifact scope drift: "
+                f"{drift_refs or 'artifact outside declared write_scope'}"
+            )
+        ).strip()
     elif status == "failed":
         from runtime.failure_classifier import classify_failure_from_stderr
 
@@ -672,7 +688,7 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
         "sandbox_session_id": result.sandbox_session_id,
         "sandbox_group_id": result.sandbox_group_id,
         "artifact_refs": list(result.artifact_refs),
-        "artifact_scope_drift": [dict(entry) for entry in getattr(result, "artifact_scope_drift", ())],
+        "artifact_scope_drift": artifact_scope_drift,
         "workspace_manifest_audit": dict(getattr(result, "workspace_manifest_audit", {}) or {}),
         "started_at": result.started_at,
         "finished_at": result.finished_at,

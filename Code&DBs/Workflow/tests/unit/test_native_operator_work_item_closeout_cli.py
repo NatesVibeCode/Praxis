@@ -472,6 +472,7 @@ def test_work_item_closeout_accepts_operator_relation_as_roadmap_bug_link(monkey
     assert payload["proof_threshold"]["roadmap_bug_link_authorities"] == [
         "roadmap_items.source_bug_id",
         "operator_object_relations.active_roadmap_item_to_bug",
+        "roadmap_items.parent_roadmap_item_id",
     ]
     assert payload["candidates"]["roadmap_items"] == [
         {
@@ -629,6 +630,296 @@ def test_work_item_closeout_accepts_decided_decision_ref_for_capability_without_
         }
     ]
     assert payload["skipped"]["roadmap_items"] == []
+
+
+def test_work_item_closeout_accepts_completed_children_for_initiative_without_bug(
+    monkeypatch,
+) -> None:
+    completed_at = datetime(2026, 4, 9, 17, 0, tzinfo=timezone.utc)
+
+    async def _fetch_bug_rows_for_closeout(self, conn, bug_ids):
+        del self, conn, bug_ids
+        raise AssertionError("roadmap-scoped initiative closeout must not scan bugs")
+
+    async def _fetch_roadmap_rows_for_closeout(
+        self,
+        conn,
+        roadmap_item_ids: tuple[str, ...],
+        source_bug_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn, source_bug_ids
+        assert roadmap_item_ids == ("roadmap_item.closeout.parent",)
+        return (
+            {
+                "roadmap_item_id": "roadmap_item.closeout.parent",
+                "title": "Parent initiative",
+                "status": "active",
+                "lifecycle": "claimed",
+                "item_kind": "initiative",
+                "source_bug_id": None,
+                "decision_ref": "architecture-policy::example::parent-program",
+                "acceptance_criteria": {},
+                "completed_at": None,
+                "updated_at": completed_at,
+            },
+        )
+
+    async def _fetch_child_rows_for_closeout(
+        self,
+        conn,
+        parent_roadmap_item_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn
+        assert parent_roadmap_item_ids == ("roadmap_item.closeout.parent",)
+        return (
+            {
+                "roadmap_item_id": "roadmap_item.closeout.child.1",
+                "parent_roadmap_item_id": "roadmap_item.closeout.parent",
+                "title": "Completed child 1",
+                "status": "completed",
+                "lifecycle": "completed",
+                "item_kind": "capability",
+                "source_bug_id": None,
+                "decision_ref": None,
+                "acceptance_criteria": {},
+                "completed_at": completed_at,
+                "updated_at": completed_at,
+            },
+            {
+                "roadmap_item_id": "roadmap_item.closeout.child.2",
+                "parent_roadmap_item_id": "roadmap_item.closeout.parent",
+                "title": "Completed child 2",
+                "status": "completed",
+                "lifecycle": "completed",
+                "item_kind": "capability",
+                "source_bug_id": None,
+                "decision_ref": None,
+                "acceptance_criteria": {},
+                "completed_at": None,
+                "updated_at": completed_at,
+            },
+        )
+
+    async def _fetch_bug_evidence_for_closeout(
+        self,
+        conn,
+        bug_ids: tuple[str, ...],
+    ) -> dict[str, tuple[dict[str, str], ...]]:
+        del self, conn
+        assert bug_ids == ()
+        return {}
+
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_rows_for_closeout",
+        _fetch_bug_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_rows_for_closeout",
+        _fetch_roadmap_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_child_rows_for_closeout",
+        _fetch_child_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_evidence_for_closeout",
+        _fetch_bug_evidence_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_bug_relation_rows_for_closeout",
+        _fetch_no_relation_rows_for_closeout,
+    )
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=lambda env=None: asyncio.sleep(0, result=_NoSqlConnectionProxy()),
+    )
+
+    payload = asyncio.run(
+        frontdoor.reconcile_work_item_closeout_async(
+            action="preview",
+            bug_ids=(),
+            roadmap_item_ids=("roadmap_item.closeout.parent",),
+        )
+    )
+
+    assert payload["evaluated"]["bug_ids"] == []
+    assert (
+        payload["proof_threshold"][
+            "roadmap_initiative_without_bug_accepts_completed_children"
+        ]
+        is True
+    )
+    assert payload["candidates"]["roadmap_items"] == [
+        {
+            "roadmap_item_id": "roadmap_item.closeout.parent",
+            "source_bug_id": None,
+            "source_bug_link_source": None,
+            "source_bug_relation_id": None,
+            "current_status": "active",
+            "current_lifecycle": "claimed",
+            "next_status": "completed",
+            "next_lifecycle": "completed",
+            "reason_codes": ["initiative_direct_children_completed"],
+            "child_completion": {
+                "completed": 2,
+                "incomplete": 0,
+                "total": 2,
+            },
+            "evidence_refs": [
+                {
+                    "kind": "roadmap_item",
+                    "ref": "roadmap_item.closeout.child.1",
+                    "role": "completed_child_roadmap_item",
+                    "status": "completed",
+                    "lifecycle": "completed",
+                    "completed_at": completed_at.isoformat(),
+                },
+                {
+                    "kind": "roadmap_item",
+                    "ref": "roadmap_item.closeout.child.2",
+                    "role": "completed_child_roadmap_item",
+                    "status": "completed",
+                    "lifecycle": "completed",
+                    "completed_at": None,
+                },
+            ],
+        }
+    ]
+    assert payload["skipped"]["roadmap_items"] == []
+
+
+def test_work_item_closeout_blocks_initiative_when_child_is_incomplete(
+    monkeypatch,
+) -> None:
+    now = datetime(2026, 4, 9, 17, 0, tzinfo=timezone.utc)
+
+    async def _fetch_bug_rows_for_closeout(self, conn, bug_ids):
+        del self, conn, bug_ids
+        raise AssertionError("roadmap-scoped initiative closeout must not scan bugs")
+
+    async def _fetch_roadmap_rows_for_closeout(
+        self,
+        conn,
+        roadmap_item_ids: tuple[str, ...],
+        source_bug_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn, source_bug_ids
+        assert roadmap_item_ids == ("roadmap_item.closeout.incomplete.parent",)
+        return (
+            {
+                "roadmap_item_id": "roadmap_item.closeout.incomplete.parent",
+                "title": "Incomplete parent initiative",
+                "status": "active",
+                "lifecycle": "claimed",
+                "item_kind": "initiative",
+                "source_bug_id": None,
+                "decision_ref": None,
+                "acceptance_criteria": {},
+                "completed_at": None,
+                "updated_at": now,
+            },
+        )
+
+    async def _fetch_child_rows_for_closeout(
+        self,
+        conn,
+        parent_roadmap_item_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn
+        assert parent_roadmap_item_ids == (
+            "roadmap_item.closeout.incomplete.parent",
+        )
+        return (
+            {
+                "roadmap_item_id": "roadmap_item.closeout.incomplete.child",
+                "parent_roadmap_item_id": "roadmap_item.closeout.incomplete.parent",
+                "title": "Incomplete child",
+                "status": "active",
+                "lifecycle": "claimed",
+                "item_kind": "capability",
+                "source_bug_id": None,
+                "decision_ref": None,
+                "acceptance_criteria": {},
+                "completed_at": None,
+                "updated_at": now,
+            },
+        )
+
+    async def _fetch_bug_evidence_for_closeout(
+        self,
+        conn,
+        bug_ids: tuple[str, ...],
+    ) -> dict[str, tuple[dict[str, str], ...]]:
+        del self, conn
+        assert bug_ids == ()
+        return {}
+
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_rows_for_closeout",
+        _fetch_bug_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_rows_for_closeout",
+        _fetch_roadmap_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_child_rows_for_closeout",
+        _fetch_child_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_evidence_for_closeout",
+        _fetch_bug_evidence_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_bug_relation_rows_for_closeout",
+        _fetch_no_relation_rows_for_closeout,
+    )
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=lambda env=None: asyncio.sleep(0, result=_NoSqlConnectionProxy()),
+    )
+
+    payload = asyncio.run(
+        frontdoor.reconcile_work_item_closeout_async(
+            action="preview",
+            bug_ids=(),
+            roadmap_item_ids=("roadmap_item.closeout.incomplete.parent",),
+        )
+    )
+
+    assert payload["candidates"]["roadmap_items"] == []
+    assert payload["skipped"]["roadmap_items"] == [
+        {
+            "roadmap_item_id": "roadmap_item.closeout.incomplete.parent",
+            "source_bug_id": None,
+            "source_bug_link_source": None,
+            "source_bug_relation_id": None,
+            "current_status": "active",
+            "current_lifecycle": "claimed",
+            "item_kind": "initiative",
+            "decision_ref": None,
+            "proof_kind": None,
+            "child_completion": {
+                "completed": 0,
+                "incomplete": 1,
+                "total": 1,
+                "incomplete_roadmap_item_ids": [
+                    "roadmap_item.closeout.incomplete.child"
+                ],
+            },
+            "reason_codes": ["initiative_child_items_incomplete"],
+        }
+    ]
 
 
 def test_work_item_closeout_does_not_report_missing_decision_proof_when_already_completed(

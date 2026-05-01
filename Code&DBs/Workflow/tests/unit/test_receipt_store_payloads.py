@@ -118,7 +118,7 @@ def test_post_receipt_hooks_dedupe_auto_bug_by_source_issue_id(monkeypatch):
     assert ("BUG-existing",) == tuple({bug_id for bug_id, _ in observed["links"]})
 
 
-def test_post_receipt_hooks_files_auto_bug_with_stable_source_issue_id(monkeypatch):
+def test_post_receipt_hooks_files_auto_bug_with_stable_receipt_identity(monkeypatch):
     captured: dict[str, object] = {}
 
     class _NoopFrictionLedger:
@@ -174,7 +174,7 @@ def test_post_receipt_hooks_files_auto_bug_with_stable_source_issue_id(monkeypat
         "limit": 1,
     }
     filed = captured["file_bug"]
-    assert filed["source_issue_id"] == "receipt.failure:provider-capacity:plan-runtime-packet"
+    assert filed["source_issue_id"] is None
     assert filed["tags"] == (
         "auto-filed",
         "failure_code:provider-capacity",
@@ -183,6 +183,7 @@ def test_post_receipt_hooks_files_auto_bug_with_stable_source_issue_id(monkeypat
         "failure_category:capacity",
         "provider:openai",
         "model:gpt-5.4-mini",
+        "receipt_failure_identity:receipt.failure:provider-capacity:plan-runtime-packet",
     )
     assert all(not tag.startswith("signature:") for tag in filed["tags"])
     assert filed["resume_context"]["auto_bug_identity"]["authority"] == (

@@ -10,7 +10,7 @@
 
 .chat-panel-backdrop--open {
   opacity: 1;
-  pointer-events: auto;
+  /* pointer-events removed so canvas stays manipulable */
 }
 
 .chat-panel {

@@ -353,6 +353,20 @@ class TestRetryOrchestrator:
         assert decision.next_agent == "openai/gpt-5.4"
         assert decision.should_requeue is True
 
+    def test_rate_limit_failover_wraps_when_route_scorer_selected_tail(self):
+        decision = retry_orchestrator.decide(
+            error_code="rate_limited",
+            stderr="HTTP 429 rate limit exceeded",
+            attempt=3,
+            max_attempts=3,
+            failover_chain=["google/gemini-3-flash-preview", "google/gemini-3.1-pro-preview"],
+            resolved_agent="google/gemini-3.1-pro-preview",
+        )
+
+        assert decision.action == "failover"
+        assert decision.next_agent == "google/gemini-3-flash-preview"
+        assert decision.should_requeue is True
+
     def test_non_retryable_preclassification_forces_terminal_failure(self):
         pre_classified = FailureClassification(
             category=OrchestratorFailureCategory.CREDENTIAL_ERROR,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from .validators import (
     PostgresWriteError,
@@ -723,6 +723,175 @@ def load_object_version(
             "stored object_version_json must be a JSON object",
         )
     return payload
+
+
+def load_latest_object_truth_version(
+    conn: Any,
+    *,
+    system_ref: str | None = None,
+    object_ref: str | None = None,
+    identity_digest: str | None = None,
+    client_ref: str | None = None,
+    trusted_only: bool = True,
+    max_age_seconds: int | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Load the latest trusted Object Truth version without a known digest."""
+
+    rows = conn.fetch(
+        """
+        SELECT
+            object_version_digest,
+            object_version_ref,
+            system_ref,
+            object_ref,
+            identity_digest,
+            payload_digest,
+            schema_snapshot_digest,
+            source_metadata_json,
+            hierarchy_signals_json,
+            object_version_json,
+            observed_by_ref,
+            source_ref,
+            created_at,
+            updated_at
+          FROM object_truth_object_versions
+         WHERE ($1::text IS NULL OR system_ref = $1)
+           AND ($2::text IS NULL OR object_ref = $2)
+           AND ($3::text IS NULL OR identity_digest = $3)
+           AND (
+                $4::text IS NULL
+                OR source_metadata_json ->> 'client_ref' = $4
+                OR object_version_json ->> 'client_ref' = $4
+           )
+         ORDER BY updated_at DESC, created_at DESC, object_version_digest
+         LIMIT $5
+        """,
+        _optional_text(system_ref, field_name="system_ref"),
+        _optional_text(object_ref, field_name="object_ref"),
+        _optional_text(identity_digest, field_name="identity_digest"),
+        _optional_text(client_ref, field_name="client_ref"),
+        max(1, min(int(limit), 200)),
+    )
+    candidates = _normalize_rows(rows, operation="load_latest_object_truth_version")
+    if trusted_only:
+        candidates = [row for row in candidates if _object_truth_row_is_trusted(row)]
+    if not candidates:
+        return {
+            "state": "missing",
+            "version": None,
+            "freshness": {"state": "missing"},
+            "conflicts": [],
+            "no_go_states": ["missing"],
+            "filters": {
+                "system_ref": system_ref,
+                "object_ref": object_ref,
+                "identity_digest": identity_digest,
+                "client_ref": client_ref,
+                "trusted_only": trusted_only,
+            },
+        }
+
+    latest = candidates[0]
+    freshness = _latest_version_freshness(latest, max_age_seconds=max_age_seconds)
+    conflicts = _latest_version_conflicts(candidates)
+    no_go_states: list[str] = []
+    if freshness["state"] == "stale":
+        no_go_states.append("stale")
+    if conflicts:
+        no_go_states.append("conflict")
+    state = "ready" if not no_go_states else "blocked"
+    return {
+        "state": state,
+        "version": latest,
+        "freshness": freshness,
+        "conflicts": conflicts,
+        "no_go_states": no_go_states,
+        "candidate_count": len(candidates),
+        "filters": {
+            "system_ref": system_ref,
+            "object_ref": object_ref,
+            "identity_digest": identity_digest,
+            "client_ref": client_ref,
+            "trusted_only": trusted_only,
+        },
+    }
+
+
+def _object_truth_row_is_trusted(row: Mapping[str, Any]) -> bool:
+    source_metadata = row.get("source_metadata_json") or {}
+    version = row.get("object_version_json") or {}
+    if not isinstance(source_metadata, Mapping):
+        source_metadata = {}
+    if not isinstance(version, Mapping):
+        version = {}
+    trust_markers = {
+        str(source_metadata.get("trust_state") or "").lower(),
+        str(source_metadata.get("evidence_tier") or "").lower(),
+        str(version.get("truth_state") or "").lower(),
+        str(version.get("evidence_tier") or "").lower(),
+    }
+    if trust_markers.intersection({"trusted", "observed", "verified", "promoted", "schema_bound"}):
+        return True
+    if bool(source_metadata.get("trusted")) or bool(version.get("trusted")):
+        return True
+    return not trust_markers.difference({""})
+
+
+def _latest_version_freshness(
+    row: Mapping[str, Any],
+    *,
+    max_age_seconds: int | None,
+) -> dict[str, Any]:
+    updated_at = row.get("updated_at") or row.get("created_at")
+    observed_at = updated_at
+    source_metadata = row.get("source_metadata_json") or {}
+    if isinstance(source_metadata, Mapping) and source_metadata.get("observed_at"):
+        try:
+            observed_at = _timestamp(source_metadata.get("observed_at"), field_name="source_metadata.observed_at")
+        except PostgresWriteError:
+            observed_at = updated_at
+    if not isinstance(observed_at, datetime):
+        return {"state": "unknown", "observed_at": None, "max_age_seconds": max_age_seconds}
+    normalized = observed_at if observed_at.tzinfo else observed_at.replace(tzinfo=timezone.utc)
+    age_seconds = max(0.0, (datetime.now(timezone.utc) - normalized.astimezone(timezone.utc)).total_seconds())
+    state = "fresh"
+    if max_age_seconds is not None and age_seconds > int(max_age_seconds):
+        state = "stale"
+    return {
+        "state": state,
+        "observed_at": normalized.isoformat(),
+        "age_seconds": round(age_seconds, 3),
+        "max_age_seconds": max_age_seconds,
+    }
+
+
+def _latest_version_conflicts(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    conflicts: list[dict[str, Any]] = []
+    payload_digests = {
+        str(row.get("payload_digest"))
+        for row in rows[:10]
+        if row.get("payload_digest")
+    }
+    if len(payload_digests) > 1:
+        conflicts.append(
+            {
+                "conflict_type": "multiple_payload_digests",
+                "payload_digests": sorted(payload_digests),
+                "candidate_count": len(rows[:10]),
+            }
+        )
+    for row in rows[:10]:
+        metadata = row.get("source_metadata_json") or {}
+        if isinstance(metadata, Mapping) and metadata.get("conflicts"):
+            conflicts.append(
+                {
+                    "conflict_type": "source_metadata_conflict",
+                    "object_version_digest": row.get("object_version_digest"),
+                    "details": metadata.get("conflicts"),
+                }
+            )
+    return conflicts
 
 
 def persist_comparison_run(
@@ -1677,6 +1846,7 @@ __all__ = [
     "list_mdm_resolution_packets",
     "load_ingestion_sample",
     "load_mdm_resolution_packet",
+    "load_latest_object_truth_version",
     "load_object_version",
     "persist_mdm_resolution_packet",
     "persist_ingestion_sample",

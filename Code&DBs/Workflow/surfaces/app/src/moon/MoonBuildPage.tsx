@@ -10,6 +10,11 @@ import { moonBuildReducer, initialMoonBuildState } from './moonBuildReducer';
 import { MoonGlyph } from './MoonGlyph';
 import { MoonPopout } from './MoonPopout';
 import { MoonNodeDetail, type AuthorityActionMeta, type WorkflowInspectorSummary } from './MoonNodeDetail';
+import {
+  fetchWorkflowContextAuthority,
+  workflowContextFromPayload,
+  workflowContextSummaryFromAuthority,
+} from './workflowContext';
 import { MoonActionDock } from './MoonActionDock';
 import { MoonReleaseTray } from './MoonReleaseTray';
 import { MoonBindingReviewQueue, reviewReadinessCount } from './MoonBindingReviewQueue';
@@ -36,6 +41,15 @@ import {
   summarizeComposeAuthority,
   type MoonComposeAuthoritySummary,
 } from './moonComposeAuthority';
+import {
+  checkingBuilderValidationStatus,
+  fetchWorkflowContextCompositeStatus,
+  fetchWorkflowBuilderValidationStatus,
+  statusFromCompositeError,
+  statusFromBuilderValidationError,
+  type ClientOperatingModelBuilderStatus,
+  type ClientOperatingModelCompositeStatus,
+} from './clientOperatingModel';
 import { appendOutcomeContract } from './outcomeContract';
 import { buildPrimitiveContractSuggestions } from './moonContractSuggestions';
 import { setMoonChatContext, clearMoonChatContext, publishMoonChatHandoff } from './moonChatContext';
@@ -104,8 +118,8 @@ function buildMaterializeFallbackPrompt(params: {
     params.intent,
     '',
     'Do not apply a generic workflow.',
-    'If a workflow id exists, first call moon_get_build before making any claim about the graph.',
-    'If you can repair the draft, use moon_mutate_field one field of one node at a time.',
+    'If a workflow id exists, first call moon_get_build, the legacy Workflow graph read tool, before making any claim about the graph.',
+    'If you can repair the draft, use moon_mutate_field, the legacy Workflow graph mutation tool, one field of one node at a time.',
     'Use one repeated tool lane per packet; do not mix unrelated tools inside a single packet.',
     'If the draft cannot be repaired, say the exact blocker and what Nate can approve manually.',
     'Do not launch the workflow unless the user explicitly asks.',
@@ -332,6 +346,7 @@ function workflowInspectorSummary(
   payload: BuildPayload | null,
   viewModel: MoonBuildViewModel,
   pendingReviewCount: number,
+  workflowContextAuthority: ReturnType<typeof workflowContextFromPayload>,
 ): WorkflowInspectorSummary | null {
   if (!payload) return null;
   const graph = payload.build_graph;
@@ -351,6 +366,7 @@ function workflowInspectorSummary(
     dataPills,
     receipt: receiptId,
     disconnected: graphDisconnectedCount(graph),
+    contextAuthority: workflowContextSummaryFromAuthority(workflowContextAuthority),
   };
 }
 
@@ -809,6 +825,9 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const [compilePreview, setCompilePreview] = useState<CompilePreviewPayload | null>(null);
   const [compilePreviewLoading, setCompilePreviewLoading] = useState(false);
   const [compilePreviewError, setCompilePreviewError] = useState<string | null>(null);
+  const [builderValidationStatus, setBuilderValidationStatus] = useState<ClientOperatingModelBuilderStatus | null>(null);
+  const [compositeOperatingModelStatus, setCompositeOperatingModelStatus] = useState<ClientOperatingModelCompositeStatus | null>(null);
+  const [hydratedWorkflowContextAuthority, setHydratedWorkflowContextAuthority] = useState<ReturnType<typeof workflowContextFromPayload>>(null);
   /**
    * Which node has its branch-family picker open. A node-scoped picker is the
    * single affordance for adding a new outgoing edge from an existing step
@@ -827,6 +846,26 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     () => moonVisibleSnapshot(payload, state.selectedNodeId, state.selectedEdgeId, pendingReviewCount),
     [payload, pendingReviewCount, state.selectedEdgeId, state.selectedNodeId],
   );
+  const handleCheckClientOperatingModel = useCallback(async () => {
+    setBuilderValidationStatus((current) => checkingBuilderValidationStatus(current));
+    try {
+      const status = await fetchWorkflowBuilderValidationStatus(
+        payload,
+        catalog,
+        {
+          scopeRef: persistedWorkflowId || workflowId || 'moon.workflow_builder',
+        },
+      );
+      setBuilderValidationStatus(status);
+      if (status.ok === false || status.errorCount > 0) {
+        show(`Builder check found blockers: ${status.message}`, 'info');
+      }
+    } catch (err) {
+      const status = statusFromBuilderValidationError(err);
+      setBuilderValidationStatus(status);
+      show(`Builder check unavailable: ${status.message}`, 'error');
+    }
+  }, [catalog, payload, persistedWorkflowId, show, workflowId]);
   // Push the active workflow + selection state into the shared chat context
   // store so ChatPanel can forward it as selection_context on every send.
   // The chat orchestrator threads this down to the moon_* tools so they
@@ -958,6 +997,21 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHydratedWorkflowContextAuthority(null);
+    void fetchWorkflowContextAuthority(payload)
+      .then((context) => {
+        if (!cancelled) setHydratedWorkflowContextAuthority(context);
+      })
+      .catch(() => {
+        if (!cancelled) setHydratedWorkflowContextAuthority(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [payload]);
 
   // Self-heal the current tab after a transient catalog miss instead of
   // leaving the trigger picker stranded on an empty cache.
@@ -1316,7 +1370,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
         reason: `Assign ${title} to ${nodeDisplayName(nodes[idx])}.`,
         outcome: hasUnresolved
           ? `${nodeDisplayName(nodes[idx])} now runs ${title}.`
-          : `${nodeDisplayName(nodes[idx])} now runs ${title}, and Moon appended a new empty next step.`,
+          : `${nodeDisplayName(nodes[idx])} now runs ${title}, and Workflow appended a new empty next step.`,
         target: nodeTarget(nodes[idx]),
         changeSummary: hasUnresolved
           ? ['Route assignment', title]
@@ -1423,7 +1477,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       await commitMoonGraphAction({
         label: 'Create branch',
         reason: `Convert the path from ${nodeDisplayName(sourceNode)} into a conditional split.`,
-        outcome: `Moon created conditional branches from ${nodeDisplayName(sourceNode)}.`,
+        outcome: `Workflow created conditional branches from ${nodeDisplayName(sourceNode)}.`,
         target: edgeTarget(edge, graph),
         changeSummary: hasSiblingBranch
           ? ['Conditional gate']
@@ -1821,7 +1875,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     void commitMoonGraphAction({
       label: 'Choose trigger',
       reason: `Start the workflow from a ${item.label} trigger.`,
-      outcome: `Moon created a two-step draft with ${item.label} as the first node.`,
+      outcome: `Workflow created a two-step draft with ${item.label} as the first node.`,
       target: {
         kind: 'trigger',
         label: item.label,
@@ -2272,9 +2326,43 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const actionOpen = state.openDock === 'action';
   const contextOpen = state.openDock === 'context';
   const releaseOpen = state.releaseOpen;
+  const embeddedWorkflowContextAuthority = useMemo(
+    () => workflowContextFromPayload(payload),
+    [payload],
+  );
+  const workflowContextAuthority = useMemo(
+    () => hydratedWorkflowContextAuthority || embeddedWorkflowContextAuthority,
+    [embeddedWorkflowContextAuthority, hydratedWorkflowContextAuthority],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    if (!workflowContextAuthority) {
+      setCompositeOperatingModelStatus(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void fetchWorkflowContextCompositeStatus(
+      payload,
+      workflowContextAuthority,
+      builderValidationStatus,
+      {
+        scopeRef: persistedWorkflowId || workflowId || 'workflow.context_composite',
+      },
+    )
+      .then((status) => {
+        if (!cancelled) setCompositeOperatingModelStatus(status);
+      })
+      .catch((err) => {
+        if (!cancelled) setCompositeOperatingModelStatus(statusFromCompositeError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [builderValidationStatus, payload, persistedWorkflowId, workflowContextAuthority, workflowId]);
   const inspectorWorkflowSummary = useMemo(
-    () => workflowInspectorSummary(payload, viewModel, pendingReviewCount),
-    [payload, pendingReviewCount, viewModel],
+    () => workflowInspectorSummary(payload, viewModel, pendingReviewCount, workflowContextAuthority),
+    [payload, pendingReviewCount, viewModel, workflowContextAuthority],
   );
   const reviewDockLabel = pendingReviewCount === 1 ? 'Review 1 decision' : `Review ${pendingReviewCount} decisions`;
   const releaseNeedsReview = pendingReviewCount > 0;
@@ -2530,6 +2618,10 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                 onApplyGate={handleApplyGate}
                 gateItems={catalog.filter(c => c.family === 'control' && c.status === 'ready')}
                 workflowSummary={inspectorWorkflowSummary}
+                workflowContext={workflowContextAuthority}
+                operatingModelStatus={builderValidationStatus}
+                operatingModelCompositeStatus={compositeOperatingModelStatus}
+                onCheckOperatingModel={handleCheckClientOperatingModel}
               />
             ) : null}
           </div>
@@ -2552,7 +2644,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     <DockToggleButton
                       active={releaseOpen}
                       ariaLabel="Open release checklist"
-                      label={releaseDockLabel}
+                      label={`${releaseDockLabel} ›`}
                       onClick={openReleaseChecklist}
                       tone={releaseDockTone}
                     />
@@ -2958,7 +3050,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     );
                   })}
                   {/*
-                    Node-scoped branch pod. Sits just past a node's right edge
+                    Node-scoped branch pod. Sits below a node's bottom edge
                     and opens a family picker. Unlike the edge pod (which
                     configures an existing edge), this one creates a new
                     outgoing edge + downstream node — the affordance for
@@ -2968,8 +3060,8 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     .filter(node => node.kind === 'step')
                     .map((node) => {
                       const position = getMoonNodeCanvasPosition(node);
-                      const podLeft = position.left + node.width + 10;
-                      const podTop = position.top + node.height / 2 - 14;
+                      const podLeft = position.left + node.width / 2 - 14;
+                      const podTop = position.top + node.height + 8;
                       const open = branchPickerNodeId === node.id;
                       return (
                         <div

@@ -2,14 +2,14 @@ import type React from 'react';
 
 export const MOON_LAYOUT = {
   canvasPad: 120,
-  graphAppendRadius: 24,
-  graphAppendSize: 48,
+  graphAppendRadius: 18,
+  graphAppendSize: 36,
   minGraphHeight: 260,
-  nodeHeight: 96,
+  nodeHeight: 78,
   nodeRadius: 36,
-  nodeSpacing: 144,
+  nodeSpacing: 120,
   nodeSize: 72,
-  nodeWidth: 244,
+  nodeWidth: 188,
   projectedNodeSize: 52,
   triggerMenuWidth: 400,
 } as const;

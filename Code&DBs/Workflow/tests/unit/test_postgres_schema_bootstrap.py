@@ -305,6 +305,11 @@ def test_bootstrap_workflow_schema_locks_and_applies_only_missing_migrations(
         "_bootstrap_baseline_anchor_is_missing",
         lambda _conn: asyncio.sleep(0, result=False),
     )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(0, result=_migration_audit()),
+    )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     acquire_calls: list[_FakeAsyncConn] = []
 
@@ -329,6 +334,323 @@ def test_bootstrap_workflow_schema_locks_and_applies_only_missing_migrations(
     assert acquire_calls == [conn]
     assert conn.executed == []
     assert applied == ["001_compile_artifacts.sql"]
+
+
+def test_bootstrap_workflow_schema_does_not_replay_row_drift_migrations(
+    monkeypatch,
+    caplog,
+) -> None:
+    conn = _FakeAsyncConn()
+    row_object = "task_type_routing.compile|together|deepseek-ai/DeepSeek-V4-Pro"
+    applied: list[str] = []
+
+    async def _bootstrap_migration(_conn, filename: str) -> None:
+        applied.append(filename)
+
+    async def _unexpected_lock(_conn) -> float:
+        raise AssertionError("row drift must not acquire the bootstrap lock")
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_workflow_schema",
+        lambda _conn: asyncio.sleep(
+            0,
+            result=_readiness(
+                bootstrapped=False,
+                missing_objects=(("row", row_object),),
+                missing_by_migration={
+                    "262_together_compile_primary.sql": (("row", row_object),),
+                },
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(0, result=_migration_audit()),
+    )
+    monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
+    monkeypatch.setattr(postgres_schema, "_acquire_schema_bootstrap_lock", _unexpected_lock)
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
+
+    assert applied == []
+    assert conn.transaction_entries == 0
+    assert "bootstrap will not replay migrations for row drift" in caplog.text
+
+
+def test_bootstrap_workflow_schema_applies_structural_drift_but_not_row_drift(
+    monkeypatch,
+) -> None:
+    conn = _FakeAsyncConn()
+    row_object = "task_type_routing.compile|together|deepseek-ai/DeepSeek-V4-Pro"
+    readiness_states = iter(
+        (
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(
+                    ("row", row_object),
+                    ("table", "compile_artifacts"),
+                ),
+                missing_by_migration={
+                    "262_together_compile_primary.sql": (("row", row_object),),
+                    "001_compile_artifacts.sql": (("table", "compile_artifacts"),),
+                },
+            ),
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(
+                    ("row", row_object),
+                    ("table", "compile_artifacts"),
+                ),
+                missing_by_migration={
+                    "262_together_compile_primary.sql": (("row", row_object),),
+                    "001_compile_artifacts.sql": (("table", "compile_artifacts"),),
+                },
+            ),
+        )
+    )
+    applied: list[str] = []
+
+    async def _inspect(_conn):
+        return next(readiness_states)
+
+    async def _bootstrap_migration(_conn, filename: str) -> None:
+        applied.append(filename)
+
+    monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_control_plane_schema",
+        lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_bootstrap_baseline_anchor_is_missing",
+        lambda _conn: asyncio.sleep(0, result=False),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(0, result=_migration_audit()),
+    )
+    monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
+    monkeypatch.setattr(
+        postgres_schema,
+        "_acquire_schema_bootstrap_lock",
+        lambda _conn: asyncio.sleep(0, result=0.0),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_workflow_schema_manifest_filenames",
+        lambda: (
+            "262_together_compile_primary.sql",
+            "001_compile_artifacts.sql",
+        ),
+    )
+
+    asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
+
+    assert applied == ["001_compile_artifacts.sql"]
+
+
+def test_bootstrap_workflow_schema_applies_unapplied_explicit_prerequisite(
+    monkeypatch,
+) -> None:
+    conn = _FakeAsyncConn()
+    readiness_states = iter(
+        (
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(
+                    ("row", "authority_domains.authority.model_eval"),
+                    ("table", "model_eval_case_runs"),
+                ),
+                missing_by_migration={
+                    "391_register_model_eval_operations.sql": (
+                        ("row", "authority_domains.authority.model_eval"),
+                    ),
+                    "392_model_eval_case_runs_and_scorecards.sql": (
+                        ("table", "model_eval_case_runs"),
+                    ),
+                },
+            ),
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(
+                    ("row", "authority_domains.authority.model_eval"),
+                    ("table", "model_eval_case_runs"),
+                ),
+                missing_by_migration={
+                    "391_register_model_eval_operations.sql": (
+                        ("row", "authority_domains.authority.model_eval"),
+                    ),
+                    "392_model_eval_case_runs_and_scorecards.sql": (
+                        ("table", "model_eval_case_runs"),
+                    ),
+                },
+            ),
+        )
+    )
+    applied: list[str] = []
+
+    async def _inspect(_conn):
+        return next(readiness_states)
+
+    async def _bootstrap_migration(_conn, filename: str) -> None:
+        applied.append(filename)
+
+    monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_control_plane_schema",
+        lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_bootstrap_baseline_anchor_is_missing",
+        lambda _conn: asyncio.sleep(0, result=False),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(
+            0,
+            result=_migration_audit(
+                missing=(
+                    "391_register_model_eval_operations.sql",
+                    "392_model_eval_case_runs_and_scorecards.sql",
+                )
+            ),
+        ),
+    )
+    monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
+    monkeypatch.setattr(
+        postgres_schema,
+        "_acquire_schema_bootstrap_lock",
+        lambda _conn: asyncio.sleep(0, result=0.0),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_workflow_schema_manifest_filenames",
+        lambda: (
+            "391_register_model_eval_operations.sql",
+            "392_model_eval_case_runs_and_scorecards.sql",
+        ),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_workflow_bootstrap_prerequisites",
+        lambda: {
+            "392_model_eval_case_runs_and_scorecards.sql": (
+                "391_register_model_eval_operations.sql",
+            )
+        },
+    )
+
+    asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
+
+    assert applied == [
+        "391_register_model_eval_operations.sql",
+        "392_model_eval_case_runs_and_scorecards.sql",
+    ]
+
+
+def test_bootstrap_workflow_schema_blocks_recorded_prerequisite_row_drift(
+    monkeypatch,
+) -> None:
+    conn = _FakeAsyncConn()
+    readiness_states = iter(
+        (
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(
+                    ("row", "authority_domains.authority.model_eval"),
+                    ("table", "model_eval_case_runs"),
+                ),
+                missing_by_migration={
+                    "391_register_model_eval_operations.sql": (
+                        ("row", "authority_domains.authority.model_eval"),
+                    ),
+                    "392_model_eval_case_runs_and_scorecards.sql": (
+                        ("table", "model_eval_case_runs"),
+                    ),
+                },
+            ),
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(
+                    ("row", "authority_domains.authority.model_eval"),
+                    ("table", "model_eval_case_runs"),
+                ),
+                missing_by_migration={
+                    "391_register_model_eval_operations.sql": (
+                        ("row", "authority_domains.authority.model_eval"),
+                    ),
+                    "392_model_eval_case_runs_and_scorecards.sql": (
+                        ("table", "model_eval_case_runs"),
+                    ),
+                },
+            ),
+        )
+    )
+    applied: list[str] = []
+
+    async def _inspect(_conn):
+        return next(readiness_states)
+
+    async def _bootstrap_migration(_conn, filename: str) -> None:
+        applied.append(filename)
+
+    monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_control_plane_schema",
+        lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_bootstrap_baseline_anchor_is_missing",
+        lambda _conn: asyncio.sleep(0, result=False),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(
+            0,
+            result=_migration_audit(missing=("392_model_eval_case_runs_and_scorecards.sql",)),
+        ),
+    )
+    monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
+    monkeypatch.setattr(
+        postgres_schema,
+        "_acquire_schema_bootstrap_lock",
+        lambda _conn: asyncio.sleep(0, result=0.0),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_workflow_schema_manifest_filenames",
+        lambda: (
+            "391_register_model_eval_operations.sql",
+            "392_model_eval_case_runs_and_scorecards.sql",
+        ),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_workflow_bootstrap_prerequisites",
+        lambda: {
+            "392_model_eval_case_runs_and_scorecards.sql": (
+                "391_register_model_eval_operations.sql",
+            )
+        },
+    )
+
+    with pytest.raises(postgres_schema.PostgresSchemaError) as exc_info:
+        asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
+
+    assert exc_info.value.reason_code == "postgres.schema_bootstrap_prerequisite_drift"
+    assert applied == []
 
 
 def test_bootstrap_workflow_schema_applies_missing_constraint_migration(
@@ -375,6 +697,11 @@ def test_bootstrap_workflow_schema_applies_missing_constraint_migration(
         postgres_schema,
         "_bootstrap_baseline_anchor_is_missing",
         lambda _conn: asyncio.sleep(0, result=False),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(0, result=_migration_audit()),
     )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     monkeypatch.setattr(
@@ -440,6 +767,11 @@ def test_bootstrap_workflow_schema_applies_partially_drifted_migration(
         postgres_schema,
         "_bootstrap_baseline_anchor_is_missing",
         lambda _conn: asyncio.sleep(0, result=False),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(0, result=_migration_audit()),
     )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     monkeypatch.setattr(

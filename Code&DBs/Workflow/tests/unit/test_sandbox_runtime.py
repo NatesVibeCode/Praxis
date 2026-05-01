@@ -178,7 +178,7 @@ def test_cli_auth_volume_flags_use_explicit_host_home(monkeypatch) -> None:
     assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" not in flags
     assert (
         f"{AUTH_HOME}/.gemini/oauth_creds.json:"
-        f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
+        f"{sandbox_runtime._GOOGLE_AUTH_SEED_PATH}:ro"
     ) in flags
 
 
@@ -202,7 +202,7 @@ def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypat
     assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" not in flags
     assert (
         f"{AUTH_HOME}/.gemini/oauth_creds.json:"
-        f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
+        f"{sandbox_runtime._GOOGLE_AUTH_SEED_PATH}:ro"
     ) in flags
 
 
@@ -233,6 +233,37 @@ def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) ->
         f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro",
     ]
     assert anthropic_flags == []
+
+
+def test_google_cli_auth_uses_seed_copy_bootstrap() -> None:
+    assert sandbox_runtime._cli_requires_root_auth_bootstrap(
+        provider_slug="google",
+        auth_mount_policy="provider_scoped",
+        requested_user="1100:1100",
+    )
+
+    command = sandbox_runtime._cli_auth_bootstrap_command("gemini --version", provider_slug="google")
+
+    assert sandbox_runtime._GOOGLE_AUTH_SEED_PATH in command
+    assert f"{CONTAINER_HOME}/.gemini/oauth_creds.json" in command
+    assert "setpriv --reuid=1100 --regid=1100" in command
+
+
+def test_prepare_workspace_write_scope_clamps_workspace_before_exec(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "readonly.txt").write_text("seed", encoding="utf-8")
+
+    sandbox_runtime._prepare_workspace_write_scope(
+        str(workspace),
+        (("allowed.txt", False), ("allowed_dir", True)),
+    )
+
+    assert (workspace / "readonly.txt").stat().st_mode & 0o222 == 0
+    assert (workspace / "allowed.txt").stat().st_mode & 0o222 != 0
+    assert (workspace / "allowed_dir").stat().st_mode & 0o222 != 0
+
+    sandbox_runtime._make_workspace_writable(str(workspace))
 
 
 def test_docker_local_exec_prefers_metadata_resource_limits(monkeypatch, tmp_path) -> None:
@@ -1405,6 +1436,7 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
             f"{AUTH_HOME}/.gemini/oauth_creds.json:"
             f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
         ) not in joined_cmd
+        assert f"{AUTH_HOME}/.gemini/oauth_creds.json:{sandbox_runtime._GOOGLE_AUTH_SEED_PATH}:ro" not in joined_cmd
     finally:
         provider.destroy_session(session, "completed")
 

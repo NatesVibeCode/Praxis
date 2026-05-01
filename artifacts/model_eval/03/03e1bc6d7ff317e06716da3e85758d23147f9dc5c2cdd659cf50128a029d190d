@@ -1,0 +1,14 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "{\"task_id\": \"x\", \"answer\": \"ok\", \"artifacts\": []}"
+      }
+    }
+  ],
+  "model": "moonshotai/kimi-k2.6",
+  "provider": "moonshot",
+  "usage": {
+    "cost": 0
+  }
+}

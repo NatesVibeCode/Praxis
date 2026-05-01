@@ -1834,10 +1834,10 @@ def launcher_resolve(
 def atlas_html() -> RedirectResponse:
     """Send legacy Atlas artifact traffic to the live Atlas surface.
 
-    The static ``artifacts/atlas.html`` file remains an offline export produced
-    by ``scripts/praxis_atlas.py``. Operator traffic must use the React Atlas
-    app backed by ``/api/atlas/graph`` so this route cannot silently serve an
-    old snapshot as current system authority.
+    The static-snapshot generator was removed in the Atlas redo (Stream B,
+    packet B1). This redirect remains so any historical bookmark or external
+    reference to ``/api/atlas.html`` lands on the live React Atlas app backed
+    by ``/api/atlas/graph`` — the only Atlas in the system.
     """
     return RedirectResponse(
         url="/app/atlas",
@@ -2052,6 +2052,79 @@ def get_leaderboard() -> list[dict[str, Any]]:
 
     scores = _build_leaderboard()
     return [dataclasses.asdict(s) for s in scores]
+
+
+@app.post("/api/ui/telemetry")
+async def post_ui_telemetry(request: Request) -> dict[str, Any]:
+    """Append a frontend prx-* primitive event to the UI telemetry log.
+
+    Per architecture-policy::design-system-single-react-primitive-library,
+    the frontend telemetry bridge (primitives-prx/telemetry.ts) emits one
+    payload per `prx:*` custom event. We persist them as JSONL in
+    ~/.praxis/ui-telemetry.jsonl for the design-system owner to inspect.
+
+    Pre-CQRS path. The eventual move is to register `frontend.primitive.event`
+    as a query operation in operation_catalog_registry and dispatch through
+    execute_operation_from_subsystems. For now: append-only log file.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid_json"}
+    if not isinstance(body, dict):
+        return {"ok": False, "error": "expected_object"}
+
+    # Allowed event types — must match TRACKED_EVENTS in primitives-prx/telemetry.ts
+    allowed = {
+        "prx:row-select", "prx:dispatch", "prx:wizard-submit", "prx:tool-run",
+        "prx:cmd-run", "prx:tab-select", "prx:flow-node-select", "prx:step-run",
+        "prx:transport", "prx:workflow-control", "prx:prompt-ref-insert",
+        "prx:prompt-change", "prx:form-change",
+    }
+    name = body.get("event_name")
+    if not isinstance(name, str) or name not in allowed:
+        return {"ok": False, "error": "unknown_event_name"}
+
+    log_dir = _Path.home() / ".praxis"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "ui-telemetry.jsonl"
+    record = {
+        "event_name": name,
+        "surface_id": body.get("surface_id"),
+        "detail": body.get("detail"),
+        "ts": body.get("ts"),
+        "mode": body.get("mode"),
+    }
+    try:
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(record) + "\n")
+    except Exception as exc:
+        return {"ok": False, "error": f"write_failed: {exc}"}
+    return {"ok": True, "logged_to": str(log_path)}
+
+
+@app.get("/api/ui/telemetry/recent")
+def get_ui_telemetry_recent(limit: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]:
+    """Return the last N rows from the UI telemetry log for inspection."""
+    import json as _json
+    from pathlib import Path as _Path
+    log_path = _Path.home() / ".praxis" / "ui-telemetry.jsonl"
+    if not log_path.exists():
+        return {"events": [], "total": 0}
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+    except Exception as exc:
+        return {"events": [], "total": 0, "error": str(exc)}
+    tail = lines[-limit:]
+    parsed: list[dict[str, Any]] = []
+    for line in tail:
+        try:
+            parsed.append(_json.loads(line))
+        except Exception:
+            continue
+    return {"events": parsed, "total": len(lines)}
 
 
 @app.get("/api/runs/recent")

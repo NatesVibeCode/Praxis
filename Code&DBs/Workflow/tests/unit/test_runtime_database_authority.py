@@ -130,6 +130,6 @@ def test_resolve_runtime_database_url_fails_closed_when_required_and_unconfigure
 
 def test_authority_scripts_do_not_bake_machine_specific_postgres_dsn() -> None:
     repo_root = Path(__file__).resolve().parents[4]
-    for relative in ("scripts/refresh_authority_memory.py", "scripts/praxis_atlas.py"):
+    for relative in ("scripts/refresh_authority_memory.py",):
         script_text = (repo_root / relative).read_text(encoding="utf-8")
         assert "praxis-postgres-1.orb.local" not in script_text

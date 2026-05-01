@@ -219,3 +219,53 @@ def test_submission_gate_defers_candidate_verification_to_materialization(
     assert result.submission_state == sealed_submission
     assert result.final_status == "succeeded"
     assert result.final_error_code == ""
+
+
+def test_submission_gate_fails_candidate_with_artifact_scope_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sealed_submission = {
+        "submission_id": "submission.alpha",
+        "result_kind": "code_change_candidate",
+        "changed_paths": ["runtime/example.py"],
+        "acceptance_status": "pending_review",
+        "acceptance_report": {},
+    }
+    monkeypatch.setattr(
+        submission_capture,
+        "attach_verification_artifact_refs_for_job",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        submission_capture,
+        "get_submission_for_job_attempt",
+        lambda *_args, **_kwargs: sealed_submission,
+    )
+
+    result = resolve_submission_for_job(
+        _Conn(),
+        run_id="run.alpha",
+        workflow_id="workflow.alpha",
+        job_label="job.alpha",
+        attempt_no=1,
+        execution_bundle=_bundle(result_kind="code_change_candidate"),
+        result={
+            "stdout": "candidate submitted",
+            "stderr": "",
+            "artifact_scope_drift": [
+                {
+                    "artifact_ref": "submit.py",
+                    "reason": "outside_write_scope",
+                    "declared_write_scope": ["runtime/example.py"],
+                }
+            ],
+        },
+        final_status="succeeded",
+        final_error_code="",
+        verification_artifact_refs=[],
+    )
+
+    assert result.submission_state == sealed_submission
+    assert result.final_status == "failed"
+    assert result.final_error_code == "workflow_scope.out_of_scope_write"
+    assert "submit.py" in result.result["stderr"]

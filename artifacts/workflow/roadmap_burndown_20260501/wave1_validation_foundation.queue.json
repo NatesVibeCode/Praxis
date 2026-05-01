@@ -1,0 +1,75 @@
+{
+  "name": "Roadmap Burn Down Wave 1 - Validation Foundation",
+  "workflow_id": "roadmap_burndown_20260501_wave1_validation_foundation",
+  "phase": "execute",
+  "workdir": ".",
+  "outcome_goal": "Make the validation and workflow lanes trustworthy enough for later roadmap burn-down work.",
+  "jobs": [
+    {
+      "label": "model_lane_sandbox_failures",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave1.model_lane_sandbox_failures"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow",
+        "Code&DBs/Workflow/runtime/sandbox_runtime.py",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Fix the recent workflow sandbox_error cluster enough that one explicit model-lane workflow can produce durable output. Start with praxis_discover. Focus on environment propagation and sandbox execution boundaries. Respect the standing order that Anthropic is CLI-only and must not be converted into direct API usage. Add or update focused tests. Submit a code-change candidate with evidence."
+    },
+    {
+      "label": "unit_fake_connection_contracts",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave1.unit_fake_connection_contracts"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/tests",
+        "Code&DBs/Workflow/runtime/workflow"
+      ],
+      "prompt": "Fix the unit-test fake connection failures called out by the full-suite run, especially fake DB connections that no longer implement the contract expected by unified workflow code. Prefer updating the test doubles to match the durable repository contract over weakening production code. Add the smallest verification that proves the fake now exercises the same query shape as production."
+    },
+    {
+      "label": "surface_docs_catalog_tests",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave1.surface_docs_catalog_tests"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces",
+        "Code&DBs/Workflow/tests",
+        "docs"
+      ],
+      "prompt": "Repair docs/catalog parity failures without hand-authoring docs as hidden authority. If generated docs are stale, route the fix through the generator or catalog metadata. Keep docs as projections of runtime/catalog truth. Submit a code-change candidate and include the focused validation command."
+    },
+    {
+      "label": "moon_atlas_literal_paths",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave1.moon_atlas_literal_paths"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Fix the Moon/Atlas route literal and UI validation regressions surfaced by the full-suite run. Prefer a single route authority or helper over inline API path strings. Keep UI color/selection policy intact. Add focused tests or update existing tests to prove the UI no longer hardcodes stale run routes."
+    }
+  ]
+}

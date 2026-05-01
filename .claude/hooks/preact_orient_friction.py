@@ -123,6 +123,46 @@ def _emit_friction_event(
         return False
 
 
+def _session_ref() -> str | None:
+    for key in ("CLAUDE_SESSION_ID", "AGENT_SESSION_ID", "SESSION_ID"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return value[:200]
+    return None
+
+
+def _record_action_fingerprint(
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> bool:
+    repo = _repo_root()
+    praxis_agent = os.path.join(repo, "bin", "praxis-agent")
+    if not os.access(praxis_agent, os.X_OK):
+        return False
+
+    payload = {
+        "action": "record",
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+        "source_surface": "claude-code:host",
+        "session_ref": _session_ref(),
+        "payload_meta": {
+            "harness": "claude_code",
+            "task_mode": (os.environ.get("PRAXIS_TASK_MODE") or "").strip().lower() or None,
+        },
+    }
+    try:
+        result = subprocess.run(
+            [praxis_agent, "praxis_action_fingerprints", "--input-json", json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def main() -> None:
     try:
         payload = json.loads(sys.stdin.read())
@@ -136,6 +176,8 @@ def main() -> None:
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         _continue()
+
+    _record_action_fingerprint(tool_name, tool_input)
 
     check, render, render_user_visible = _import_trigger_check()
     if check is None or render is None:

@@ -68,6 +68,28 @@ def _sandbox_result(**overrides):
     return SimpleNamespace(**values)
 
 
+def test_result_payload_fails_scope_drift_even_when_process_exits_zero() -> None:
+    payload = execution_backends._result_payload(
+        _sandbox_result(
+            artifact_scope_drift=[
+                {
+                    "artifact_ref": "submit.py",
+                    "declared_write_scope": ["Code&DBs/Databases/migrations/workflow/001.sql"],
+                    "reason": "outside_write_scope",
+                    "submission_required": True,
+                }
+            ]
+        ),
+        timeout=15,
+        parse_json_output=False,
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["error_code"] == "workflow_scope.out_of_scope_write"
+    assert payload["artifact_scope_drift"][0]["artifact_ref"] == "submit.py"
+    assert "submit.py" in payload["stderr"]
+
+
 @pytest.fixture(autouse=True)
 def _stub_provider_api_key_names(monkeypatch) -> None:
     monkeypatch.setenv("PRAXIS_HOST_RESOURCE_ADMISSION_DISABLED", "1")

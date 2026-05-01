@@ -42,8 +42,11 @@ Runtime blockers recorded:
 - Phase 7: Virtual Lab deterministic simulation promoted into DB-backed CQRS authority, MCP tools, live HTTP routes, simulation-run storage, runtime/state-event traces, transitions, action results, automation evaluations/firings, assertions, verifier results, typed gaps, promotion blockers, and queryable readbacks.
 - Phase 8: sandbox promotion, readback, predicted-vs-actual comparison, drift classification, and handoff primitives.
 - Phase 9: portable cartridge and deployment contract primitives.
-- Phase 10: managed-runtime mode, metering, receipt, accounting, and health primitives.
-- Phase 11: operator read-model substrate for census, object truth, identity/source authority, timelines, verifier results, drift, cartridge status, managed runtime, next safe actions, and builder validation.
+- Phase 10: optional managed runtime, compute accounting, pricing schedule
+  references, run receipts, heartbeat-derived pool health, audit events, and
+  customer-safe observability promoted into DB-backed CQRS authority, MCP
+  tools, migration registration, generated docs, and live gateway proof.
+- Phase 11: operator read-model substrate for census, object truth, identity/source authority, timelines, verifier results, drift, cartridge status, managed runtime, next safe actions, and Moon workflow-builder validation wired to the CQRS Client Operating Model authority.
 - Phase 12: read-only CQRS/MCP operator-view surface, live authority-domain registration, live operation registration, gateway execution readback, CLI metadata, migration registration, generated docs, and migration-authority refresh. Closed as the completed CQRS/MCP registration slice.
 - Phase 13: DB-backed operator-view snapshot storage, store/read CQRS operations, MCP tools, migration replay repair, and live HTTP GET/POST route proof.
 - Phase 1 CQRS follow-up: registered `client_system_discovery_census_record`,
@@ -181,6 +184,49 @@ Focused validation passed:
   - Phase 8 roadmap closeout command: `5a70709b-9f03-4023-8b81-5187b51d90fd`
   - Phase 8 roadmap closeout event: `970fa8c3-3eae-49e2-b75b-112a3b9aa6c5`
   - Phase 8 roadmap readback: `8a1e760e-eb73-48cb-bb87-9982ad21aa62`
+  - Phase 9 portable cartridge write: `408b9cb3-2817-41c7-a66b-09f212664b5e`
+  - Phase 9 portable cartridge event: `cf18d1bc-7c67-4896-a279-99aa6cf503b5`
+  - Phase 9 portable cartridge describe: `bffc2981-9780-4023-a648-a2f1b0e37dad`
+  - Phase 9 roadmap closeout preview: `844149f0-8492-49f7-ae1b-6d97e106e5c1`
+  - Phase 9 roadmap closeout command: `0587837a-4c81-42f7-9a6c-433a249cd9c5`
+  - Phase 9 roadmap closeout event: `85348157-1b3b-4075-af77-4f6f10426f8d`
+  - Phase 9 roadmap readback: `59a7ada2-f422-4aa1-8a35-80001acdd7be`
+  - Root roadmap readback after Phase 9: `510412a5-835e-40b4-9924-8cba0480c920`
+  - Phase 10 live smoke caught and fixed FK ordering:
+    `990f873e-3acb-4cb5-bcbc-97d337c6043e`
+  - Phase 10 managed-runtime write: `473ca58b-8fbb-493b-acde-0b54b96b7509`
+  - Phase 10 managed-runtime event: `d1cff397-f774-4859-b615-5795440a266b`
+  - Phase 10 meter-event readback: `634b64c8-0b4e-47bb-b237-cb1777c92b9e`
+  - Phase 10 roadmap closeout preview: `b25548fe-e162-41ad-a599-7ec06d7a8c5b`
+  - Phase 10 roadmap closeout preview event: `aa28bdde-04ff-4d0f-85df-3998490d83d4`
+  - Phase 10 roadmap closeout command: `6c3f2981-9b29-4d80-bd18-50ee3708669a`
+  - Phase 10 roadmap closeout event: `7633a6ac-7ee4-4a2b-a560-e21ad0ea4cff`
+  - Phase 10 roadmap readback: `52385c1b-80f2-475a-8192-5fbd05c14a99`
+  - Root roadmap readback after Phase 10: `add3cbe1-d700-4569-a055-e09cab40a232`
+  - Phase 11 workflow-builder validation live proof:
+    `1bfe260a-1974-40da-921c-a2be3afd7ebd`
+  - Phase 11 roadmap closeout preview:
+    `9a9e0bd7-cf14-41f0-b6d5-94052b3248aa`
+  - Phase 11 roadmap closeout preview event:
+    `d5863017-4acb-409e-9bed-130d5e24bfcb`
+  - Phase 11 roadmap closeout command:
+    `75aae626-22fe-4501-bd63-34f7742e39b2`
+  - Phase 11 roadmap closeout event:
+    `f01c6fc1-cb3f-4c6b-aa58-1decf8a9e6be`
+  - Phase 11 roadmap readback:
+    `de4d75fa-77bc-4408-90d9-cfb23a0d10a9`
+  - Root roadmap readback after Phase 11:
+    `fff6fe12-4e42-47ef-869f-426081cfef67`
+  - Root roadmap closeout preview:
+    `2fdb4936-d314-4358-9e00-708e839f2a8c`
+  - Root roadmap closeout preview event:
+    `f3618402-1d11-49ce-b7fe-1dc2882488bc`
+  - Root roadmap closeout command:
+    `af0ae138-ea42-410d-815b-bb54589d92d6`
+  - Root roadmap closeout event:
+    `8b07a321-211e-4764-95a6-7df0ea801a3f`
+  - Final root roadmap readback:
+    `ecf102b4-6ec9-4979-8d02-aff0633a6851`
 
 Latest focused validation passed:
 
@@ -214,6 +260,39 @@ Latest focused validation passed:
   `sandbox_promotion_record.phase_08_live_proof` with recommendation
   `continue`, comparison status `match`, `0` drift classifications, and `0`
   handoffs.
+- Phase 9 domain/operation/repository/MCP gate: `7 passed in 0.46s`
+- Phase 9 focused portable cartridge + catalog gate: `60 passed in 0.56s`
+- Phase 9 migration-authority gate: `13 passed in 0.31s`
+- Phase 9 docs metadata gate: `9 passed in 0.55s`
+- Phase 9 live CQRS smoke proof: recorded
+  `portable_cartridge_record.phase_09_live_proof` with readiness `ready`,
+  `0` validation errors, `3` Object Truth dependencies, `2` bindings, `9`
+  verifier checks, `5` drift hooks, and runtime sizing `medium`.
+- Phase 10 domain plus CQRS operation/repository/MCP gate:
+  `16 passed in 0.40s`
+- Phase 10 catalog route/binding gate: `56 passed in 0.55s`
+- Phase 10 catalog, migration-authority, and generated-docs unit gate:
+  `78 passed in 0.79s`
+- Phase 10 migration-authority gate: `13 passed in 0.33s`
+- Phase 10 docs metadata gate: `9 passed in 0.56s`
+- Phase 10 live CQRS smoke proof: recorded
+  `managed_runtime_record.phase_10_live_proof` with run receipt
+  `run_receipt.8ac939d2ab1da24ec7fc`, cost `0.240000 USD`, `3` meter
+  events, all meter events linked to the run receipt, pool health `healthy`,
+  and dispatch allowed.
+- Phase 11 backend Client Operating Model authority gate:
+  `20 passed in 0.43s`
+- Phase 11 Moon workflow-builder authority gate: `3` files, `22` tests passed.
+- Phase 11 frontend typecheck: passed.
+- Phase 11 live CQRS proof: `workflow_builder_validation.92bc255c06ef72fe4545`
+  returned state `healthy`, validation `ok`, `0` errors, `0` warnings, `2`
+  approved blocks, `2` nodes, `1` edge, and safe action
+  `workflow_builder.save_candidate`.
+
+Note: Phase 10 DB-backed migration integration collection still hits the
+existing local `praxis_test` bootstrap trigger issue around OpenRouter/CLI task
+routing. That is not caused by the managed-runtime authority and is separate
+from the live workflow authority proof.
 
 Note: API docs are generated from the active route authority. Collecting
 integration tests without pinning the live operator DB makes
@@ -222,9 +301,10 @@ which changes the route count and can produce a docs-only false negative.
 
 ## Roadmap State
 
-Latest roadmap readback receipt: `8a1e760e-eb73-48cb-bb87-9982ad21aa62`
+Latest roadmap readback receipt: `ecf102b4-6ec9-4979-8d02-aff0633a6851`
 
-- Root and Phases 9-11 are marked `claimed`, not completed.
+- Root is completed:
+  `roadmap_item.object.truth.trust.toolbelt.authority`
 - Phase 0 remains completed.
 - Phase 1 is completed:
   `roadmap_item.object.truth.trust.toolbelt.authority.client.system.discovery.connector.census`
@@ -242,22 +322,26 @@ Latest roadmap readback receipt: `8a1e760e-eb73-48cb-bb87-9982ad21aa62`
   `roadmap_item.object.truth.trust.toolbelt.authority.virtual.lab.simulation.verifier.runtime`
 - Phase 8 is completed:
   `roadmap_item.object.truth.trust.toolbelt.authority.live.sandbox.promotion.drift.feedback`
+- Phase 9 is completed:
+  `roadmap_item.object.truth.trust.toolbelt.authority.portable.cartridge.export.deployment.contract`
+- Phase 10 is completed:
+  `roadmap_item.object.truth.trust.toolbelt.authority.managed.runtime.compute.observability`
+- Phase 11 is completed:
+  `roadmap_item.object.truth.trust.toolbelt.authority.operator.inspection.moon.workflow.surfaces`
 - Phase 12 is completed: `roadmap_item.object.truth.trust.toolbelt.authority.object.truth.trust.toolbelt.authority.cqrs.persistence.operator.surface.wiring`
 - Phase 13 is completed: `roadmap_item.object.truth.trust.toolbelt.authority.phase.13.client.operating.model.projection.storage.and.http.route.verification`
 
 ## Remaining Authority Work
 
-Remaining work after the Phase 8 CQRS follow-up:
+Remaining work after root closeout:
 
-- Define the next customer-facing operator view that consumes these snapshots instead of hand-built proof payloads.
-- Use Phase 1 census records as the durable input to Object Truth ingestion,
-  MDM/source authority, and Virtual Lab consequence proofs instead of raw
-  connector chatter.
-- Use Phase 3 MDM resolution packets as durable inputs to hierarchy management,
-  integration/automation contract capture, and Virtual Lab consequence proofs.
-- Use Phase 8 sandbox promotion/drift records as durable inputs to deployment
-  cartridges, managed runtime accounting, Object Truth update handoffs, and
-  client-live rollout decisions.
+- No work remains open inside this roadmap root. The parent and all 14 child
+  phases are `completed`.
+- Define the next customer-facing composite view that consumes stored Client
+  Operating Model snapshots rather than hand-built proof payloads.
+- Keep using Phase 1 census records, Phase 3 MDM resolution packets, Phase 8
+  sandbox promotion/drift records, and Phase 10 managed-runtime records as the
+  durable inputs to downstream operator views and customer rollout decisions.
 - Keep the pre-existing `structured_documents.context_assemble` catalog warning separate; it is not caused by this chain.
 
 ## Boundary

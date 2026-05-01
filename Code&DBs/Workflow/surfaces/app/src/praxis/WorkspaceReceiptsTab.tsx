@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ReceiptCard, StatusRail, type ReceiptState } from '../primitives';
 import { emitPraxisOpenTab } from './events';
 
 export interface WorkspaceRunRow {
@@ -80,6 +81,13 @@ function verdictForReceipt(row: WorkspaceReceiptRow): Verdict {
   if (status.includes('repair') || verificationStatus === 'repaired') return 'repaired';
   if (['success', 'succeeded', 'passed', 'completed', 'ok'].includes(status)) return 'sealed';
   return 'pending';
+}
+
+function receiptStateForVerdict(verdict: Verdict): ReceiptState {
+  if (verdict === 'sealed') return 'sealed';
+  if (verdict === 'rejected') return 'refused';
+  if (verdict === 'repaired') return 'verify';
+  return 'ok';
 }
 
 function receiptCost(row: WorkspaceReceiptRow): number {
@@ -244,30 +252,29 @@ export function WorkspaceReceiptsTab({ manifestId, initialRuns = [] }: Workspace
       </section>
 
       <aside className="workspace-receipts__detail" aria-label="Receipt detail">
-        <div className="workspace-receipts__summary">
-          <div>
-            <span>runs</span>
-            <strong>{runs.length}</strong>
-          </div>
-          <div>
-            <span>sealed</span>
-            <strong>{totals.sealed}</strong>
-          </div>
-          <div>
-            <span>rejected</span>
-            <strong>{totals.rejected}</strong>
-          </div>
-          <div>
-            <span>cost</span>
-            <strong>{totals.cost ? `$${totals.cost.toFixed(4)}` : '-'}</strong>
-          </div>
-        </div>
+        <StatusRail
+          className="workspace-receipts__summary"
+          items={[
+            { label: 'runs', value: runs.length },
+            { label: 'sealed', value: totals.sealed, tone: totals.sealed ? 'ok' : 'dim' },
+            { label: 'rejected', value: totals.rejected, tone: totals.rejected ? 'err' : 'dim' },
+            { label: 'cost', value: totals.cost ? `$${totals.cost.toFixed(4)}` : '-' },
+          ]}
+        />
 
         {latestRun ? (
           <div className="workspace-receipts__run">
             <div className="workspace-receipts__eyebrow">Latest run</div>
             <strong>{latestRun.run_status || 'recorded'}</strong>
             <span>{compactId(latestRun.run_id)} / {formatTime(latestRun.started_at || latestRun.requested_at)}</span>
+            <StatusRail
+              className="workspace-receipts__run-rail"
+              items={[
+                { label: 'workflow', value: compactId(latestRun.workflow_id) },
+                { label: 'receipt', value: compactId(latestRun.latest_receipt_id), tone: latestRun.latest_receipt_id ? 'ok' : 'dim' },
+                { label: 'terminal', value: latestRun.terminal_reason_code || 'none', tone: latestRun.terminal_reason_code ? 'warn' : 'dim' },
+              ]}
+            />
             <button
               type="button"
               className="workspace-receipts__open-run"
@@ -281,29 +288,21 @@ export function WorkspaceReceiptsTab({ manifestId, initialRuns = [] }: Workspace
         {selectedReceipt ? (
           <div className="workspace-receipts__receipt-detail">
             <div className="workspace-receipts__eyebrow">Selected receipt</div>
-            <h3>{selectedReceipt.node_id || selectedReceipt.executor_type || 'Receipt'}</h3>
-            <dl>
-              <div>
-                <dt>verdict</dt>
-                <dd>{verdictForReceipt(selectedReceipt)}</dd>
-              </div>
-              <div>
-                <dt>status</dt>
-                <dd>{selectedReceipt.status || '-'}</dd>
-              </div>
-              <div>
-                <dt>receipt</dt>
-                <dd>{selectedReceipt.receipt_id}</dd>
-              </div>
-              <div>
-                <dt>workflow</dt>
-                <dd>{selectedReceipt.workflow_id}</dd>
-              </div>
-              <div>
-                <dt>tokens</dt>
-                <dd>{receiptTokens(selectedReceipt) || '-'}</dd>
-              </div>
-            </dl>
+            <ReceiptCard
+              className="workspace-receipts__receipt-card"
+              state={receiptStateForVerdict(verdictForReceipt(selectedReceipt))}
+              title={selectedReceipt.node_id || selectedReceipt.executor_type || 'Receipt'}
+              meta={verdictForReceipt(selectedReceipt)}
+              fields={[
+                { key: 'status', value: selectedReceipt.status || '-' },
+                { key: 'receipt', value: selectedReceipt.receipt_id },
+                { key: 'workflow', value: selectedReceipt.workflow_id },
+                { key: 'run', value: selectedReceipt.run_id },
+                { key: 'tokens', value: receiptTokens(selectedReceipt) || '-' },
+              ]}
+              hash={compactId(selectedReceipt.receipt_id)}
+              seal={formatTime(selectedReceipt.finished_at || selectedReceipt.started_at)}
+            />
             {selectedReceipt.failure_code ? (
               <div className="workspace-receipts__residue">{selectedReceipt.failure_code}</div>
             ) : null}

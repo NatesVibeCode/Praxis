@@ -1,0 +1,18 @@
+{
+  "name": "Roadmap Burn Down Proof Model Lane",
+  "workflow_id": "roadmap_burndown_20260501_proof_model_lane",
+  "phase": "execute",
+  "workdir": ".",
+  "outcome_goal": "Prove one explicit model route can launch before the roadmap waves are submitted.",
+  "jobs": [
+    {
+      "label": "proof_model_route",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "general",
+      "timeout": 180,
+      "submission_required": false,
+      "workdir": ".",
+      "prompt": "Return exactly one compact JSON object with keys ok, model, verdict, and launch_risk. Set ok to true, model to openai/gpt-5.4-mini, verdict to 'explicit model route is usable for the roadmap burn-down proof', and launch_risk to one sentence naming any evidence boundary you can infer from the prompt. Do not write files."
+    }
+  ]
+}

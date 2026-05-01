@@ -102,7 +102,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "inspection, identity/source authority, simulation timeline, "
                 "verifier results, sandbox drift, cartridge status, managed "
                 "runtime accounting, next safe actions, and workflow-builder "
-                "validation. The tool normalizes provided evidence into an "
+                "validation, plus Workflow Context customer-facing composite "
+                "readouts. The tool normalizes provided evidence into an "
                 "operator read model; it does not persist, mutate, or call live "
                 "client systems."
             ),
@@ -123,6 +124,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "managed_runtime",
                             "next_safe_actions",
                             "workflow_builder_validation",
+                            "workflow_context_composite",
                         ],
                         "description": "Operator view to build.",
                     },
@@ -227,6 +229,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "managed_runtime",
                             "next_safe_actions",
                             "workflow_builder_validation",
+                            "workflow_context_composite",
                         ],
                     },
                     "scope_ref": {

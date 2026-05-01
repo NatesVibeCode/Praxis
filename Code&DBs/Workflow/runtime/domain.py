@@ -16,6 +16,19 @@ from typing import Any, Protocol
 class RuntimeBoundaryError(RuntimeError):
     """Raised when runtime state would cross an authority boundary."""
 
+    def __init__(
+        self,
+        reason_code: str,
+        message: str | None = None,
+        *,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        rendered_message = reason_code if message is None else f"{reason_code}: {message}"
+        super().__init__(rendered_message)
+        self.reason_code = reason_code
+        self.message = message or reason_code
+        self.details = dict(details or {})
+
 
 class RuntimeLifecycleError(RuntimeError):
     """Raised when a lifecycle transition is invalid or incomplete."""

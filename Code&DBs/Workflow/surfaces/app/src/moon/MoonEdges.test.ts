@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getEdgeGeometry } from './MoonEdges';
 import { MOON_LAYOUT } from './moonLayout';
+import { COLUMN_SPACING, RANK_SPACING } from './moonBuildPresenter';
 import type { GraphLayout } from './moonBuildPresenter';
 
 function layout(nodes: Array<[string, number, number]>): GraphLayout {
@@ -30,7 +31,7 @@ describe('Moon edge geometry', () => {
       { from: 'a', to: 'b' },
       layout([
         ['a', 0, 0],
-        ['b', 0, 228],
+        ['b', 0, RANK_SPACING],
       ]),
     );
 
@@ -38,8 +39,8 @@ describe('Moon edge geometry', () => {
       startX: MOON_LAYOUT.canvasPad,
       startY: MOON_LAYOUT.canvasPad + MOON_LAYOUT.nodeHeight / 2,
       endX: MOON_LAYOUT.canvasPad,
-      endY: MOON_LAYOUT.canvasPad + 228 - MOON_LAYOUT.nodeHeight / 2,
-      path: `M${MOON_LAYOUT.canvasPad} ${MOON_LAYOUT.canvasPad + MOON_LAYOUT.nodeHeight / 2}L${MOON_LAYOUT.canvasPad} ${MOON_LAYOUT.canvasPad + 228 - MOON_LAYOUT.nodeHeight / 2}`,
+      endY: MOON_LAYOUT.canvasPad + RANK_SPACING - MOON_LAYOUT.nodeHeight / 2,
+      path: `M${MOON_LAYOUT.canvasPad} ${MOON_LAYOUT.canvasPad + MOON_LAYOUT.nodeHeight / 2}L${MOON_LAYOUT.canvasPad} ${MOON_LAYOUT.canvasPad + RANK_SPACING - MOON_LAYOUT.nodeHeight / 2}`,
     });
   });
 
@@ -48,11 +49,11 @@ describe('Moon edge geometry', () => {
       { from: 'a', to: 'b' },
       layout([
         ['a', 0, 0],
-        ['b', 368, 228],
+        ['b', COLUMN_SPACING, RANK_SPACING],
       ]),
     );
 
-    expect(geometry?.path).toBe('M120 168L120 200L488 268L488 300');
+    expect(geometry?.path).toBe('M120 159L120 191L392 217L392 249');
     expect(geometry?.path).not.toContain('C');
   });
 
@@ -61,14 +62,14 @@ describe('Moon edge geometry', () => {
       { from: 'a', to: 'b' },
       layout([
         ['a', 0, 0],
-        ['b', 368, 0],
+        ['b', COLUMN_SPACING, 0],
       ]),
     );
 
     expect(geometry).toMatchObject({
       startX: MOON_LAYOUT.canvasPad + MOON_LAYOUT.nodeWidth / 2,
       startY: MOON_LAYOUT.canvasPad,
-      endX: MOON_LAYOUT.canvasPad + 368 - MOON_LAYOUT.nodeWidth / 2,
+      endX: MOON_LAYOUT.canvasPad + COLUMN_SPACING - MOON_LAYOUT.nodeWidth / 2,
       endY: MOON_LAYOUT.canvasPad,
     });
     expect(geometry?.path).not.toContain('C');

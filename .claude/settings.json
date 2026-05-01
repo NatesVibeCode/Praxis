@@ -42,6 +42,15 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/post-edit-reindex.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/postact-fingerprint.sh"
+          }
+        ]
       }
     ]
   },

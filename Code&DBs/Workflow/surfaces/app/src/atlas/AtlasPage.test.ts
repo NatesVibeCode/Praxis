@@ -124,6 +124,48 @@ describe('AtlasPage', () => {
     expect(source).not.toContain('window.setInterval(() => { refresh(true); }');
   });
 
+  it('renders a provenance chain inside the focus card (B4.3)', () => {
+    const source = readAtlasSource();
+    const css = readAtlasCss();
+
+    // The focus card invokes the provenance subcomponent
+    expect(source).toContain('<AtlasProvenanceChain node={node} />');
+    expect(source).toContain('function AtlasProvenanceChain');
+
+    // Composes the canonical prx-chain primitive — not bespoke markup
+    expect(source).toContain('className="prx-chain"');
+    expect(source).toContain('atlas-card__provenance');
+
+    // Surfaces the canonical lineage fields the payload already carries
+    expect(source).toContain('node.authority_source');
+    expect(source).toContain('node.relation_source');
+    expect(source).toContain('node.binding_revision');
+    expect(source).toContain('node.decision_ref');
+
+    // CSS hooks the chain inside the focus card
+    expect(css).toContain('.atlas-card__provenance');
+    expect(css).toContain('.atlas-card__provenance .prx-chain');
+  });
+
+  it('exposes three-view toggle with URL sync (constellation / contact / ledger)', () => {
+    const source = readAtlasSource();
+
+    expect(source).toContain("type AtlasView = 'constellation' | 'contact' | 'ledger'");
+    expect(source).toContain('readViewFromUrl');
+    expect(source).toContain('syncViewToUrl');
+
+    expect(source).toContain("import { AtlasConstellation } from './AtlasConstellation'");
+    expect(source).toContain("import { AtlasContactSheet } from './AtlasContactSheet'");
+    expect(source).toContain("import { AtlasLedger } from './AtlasLedger'");
+
+    expect(source).toContain('atlas-view-toggle');
+    expect(source).toContain('prx-radio-pill');
+
+    expect(source).toContain("view === 'constellation'");
+    expect(source).toContain("view === 'contact'");
+    expect(source).toContain("view === 'ledger'");
+  });
+
   it('keeps the narrow-width responsive layout contract in the stylesheet', () => {
     const atlasCss = readAtlasCss();
 
@@ -133,6 +175,6 @@ describe('AtlasPage', () => {
     expect(atlasCss).toContain('bottom: 48px;');
     expect(atlasCss).toContain('.atlas-semantic-strip {');
     expect(atlasCss).toContain('display: none;');
-    expect(atlasCss).toContain('.atlas-area-hint {');
+    expect(atlasCss).toContain('.atlas-ledger {');
   });
 });

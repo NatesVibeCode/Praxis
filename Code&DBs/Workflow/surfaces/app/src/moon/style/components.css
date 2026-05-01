@@ -448,6 +448,35 @@
   background: rgba(210, 153, 34, 0.07);
   color: var(--moon-palette-amber);
 }
+.moon-dock-workflow__message {
+  color: var(--moon-fg-muted);
+  font-size: var(--moon-font-size-xs);
+  line-height: 1.45;
+}
+.moon-dock-workflow__action {
+  min-height: 34px;
+  width: 100%;
+  border: 1px solid var(--moon-white-a10);
+  border-radius: 8px;
+  background: var(--moon-white-a04);
+  color: var(--moon-fg);
+  cursor: pointer;
+  font-family: var(--moon-font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.moon-dock-workflow__action:hover:not(:disabled),
+.moon-dock-workflow__action:focus-visible {
+  border-color: var(--moon-accent-a34);
+  background: var(--moon-accent-a08);
+  outline: none;
+}
+.moon-dock-workflow__action:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
 .moon-dock-form__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1034,9 +1063,8 @@
   border: 1px solid var(--moon-white-a12);
   border-radius: 10px;
   background:
-    linear-gradient(90deg, var(--moon-white-a03), transparent 1px),
     linear-gradient(180deg, var(--moon-white-a03), var(--moon-black-a18));
-  background-size: 38px 100%, 100% 100%;
+  background-size: 100% 100%;
   box-shadow: var(--moon-shadow-line-soft);
 }
 .moon-outcome-contract-toggle {
@@ -1050,9 +1078,8 @@
   border: 1px solid var(--moon-white-a10);
   border-radius: 8px;
   background:
-    linear-gradient(90deg, var(--moon-white-a025), transparent 1px),
     var(--moon-black-a16);
-  background-size: 34px 100%, 100% 100%;
+  background-size: 100% 100%;
   color: var(--moon-fg);
   cursor: pointer;
   font: inherit;
@@ -1064,9 +1091,8 @@
 .moon-outcome-contract-toggle:hover {
   border-color: var(--moon-accent-a28);
   background:
-    linear-gradient(90deg, var(--moon-accent-a035), transparent 1px),
     var(--moon-black-a16);
-  background-size: 34px 100%, 100% 100%;
+  background-size: 100% 100%;
 }
 .moon-outcome-contract-toggle__mark {
   width: 10px;
@@ -1120,9 +1146,8 @@
   padding: 12px;
   border-color: var(--moon-white-a12);
   background:
-    linear-gradient(90deg, var(--moon-white-a04), transparent 1px),
     var(--moon-black-a18);
-  background-size: 36px 100%, 100% 100%;
+  background-size: 100% 100%;
 }
 .moon-outcome-contract__head {
   display: flex;
@@ -3641,7 +3666,7 @@ button.moon-release__dispatch-btn {
 .moon-run-overlay__run-id {
   font-size: 11px;
   color: var(--moon-text-muted);
-  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-family: var(--moon-font-mono);
 }
 
 .moon-run-overlay__chip {
@@ -3762,7 +3787,7 @@ button.moon-release__dispatch-btn {
 .moon-run-overlay__summary-run-id {
   margin-top: 6px;
   color: var(--moon-text-muted);
-  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-family: var(--moon-font-mono);
   font-size: 10px;
   line-height: 1.3;
   overflow: hidden;
@@ -3934,7 +3959,7 @@ button.moon-release__dispatch-btn {
   grid-area: label;
   min-width: 0;
   color: var(--moon-color-white);
-  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-family: var(--moon-font-mono);
   font-size: 12px;
   font-weight: 650;
   overflow: hidden;
@@ -4021,7 +4046,7 @@ button.moon-release__dispatch-btn {
 .moon-run-overlay__receipt-label {
   font-weight: 600;
   flex: 1;
-  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-family: var(--moon-font-mono);
   font-size: 13px;
 }
 
@@ -4057,7 +4082,7 @@ button.moon-release__dispatch-btn {
 .moon-run-overlay__receipt-meta dd {
   font-size: 12px;
   margin: 0;
-  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-family: var(--moon-font-mono);
 }
 .moon-run-overlay__contract {
   display: grid;
@@ -4105,7 +4130,7 @@ button.moon-release__dispatch-btn {
 }
 .moon-run-overlay__contract-grid dd {
   color: var(--moon-color-white);
-  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-family: var(--moon-font-mono);
   font-size: 12px;
   line-height: 1.45;
   margin: 0;
@@ -4129,7 +4154,7 @@ button.moon-release__dispatch-btn {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-family: var(--moon-font-mono);
   font-size: 11px;
   line-height: 1.45;
 }
