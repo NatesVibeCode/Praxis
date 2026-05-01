@@ -13,6 +13,8 @@ from runtime.operations.commands.paid_model_access import (
 from runtime.paid_model_access import (
     PaidModelAccessError,
     bind_paid_model_leases_to_run,
+    close_paid_model_leases_for_run,
+    ensure_paid_model_access_for_job,
     is_paid_model_route,
 )
 
@@ -170,3 +172,119 @@ def test_paid_detection_uses_reason_and_metered_cost() -> None:
     assert is_paid_model_route(reason_code="paid_model.default_hard_off") is True
     assert is_paid_model_route(cost_structure="metered_api") is True
     assert is_paid_model_route(cost_structure="subscription_included") is False
+
+
+class _PaidDispatchConn:
+    def __init__(self, *, has_lease: bool) -> None:
+        self.has_lease = has_lease
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    def execute(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+        self.calls.append((sql, args))
+        if "FROM private_model_access_control_matrix" in sql:
+            return [
+                {
+                    "runtime_profile_ref": args[0],
+                    "job_type": args[1],
+                    "transport_type": args[4],
+                    "adapter_type": args[5],
+                    "provider_slug": args[2],
+                    "model_slug": args[3],
+                    "cost_structure": "metered_api",
+                    "cost_metadata": {"billing_mode": "metered_api"},
+                    "control_enabled": False,
+                    "control_state": "off",
+                    "control_scope": "any_task/transport/adapter/provider/model",
+                    "control_reason_code": "control_panel.paid_model_default_hard_off",
+                    "control_operator_message": "Paid model route is hard-off by default.",
+                    "control_decision_ref": "decision.paid",
+                }
+            ]
+        if "FROM private_paid_model_access_leases" in sql:
+            exact_args = (
+                "run.paid.1",
+                "praxis",
+                "architecture",
+                "API",
+                "llm_task",
+                "fireworks",
+                "accounts/fireworks/models/kimi-k2p6",
+            )
+            if self.has_lease and args == exact_args:
+                return [
+                    {
+                        "lease_id": "paid-model-lease.live",
+                        "bound_run_id": args[0],
+                        "provider_slug": args[5],
+                        "model_slug": args[6],
+                        "status": "bound",
+                    }
+                ]
+            return []
+        if "UPDATE private_paid_model_access_leases" in sql:
+            return [
+                {
+                    "lease_id": "paid-model-lease.live",
+                    "bound_run_id": args[0],
+                    "status": "consumed",
+                    "consumed_runs": 1,
+                }
+            ]
+        return []
+
+
+def test_dispatch_guard_fails_closed_without_exact_bound_lease() -> None:
+    conn = _PaidDispatchConn(has_lease=False)
+
+    with pytest.raises(PaidModelAccessError, match="requires a bound one-run lease"):
+        ensure_paid_model_access_for_job(
+            conn,
+            run_id="run.paid.1",
+            job_label="architecture-hard-one",
+            runtime_profile_ref="praxis",
+            job_type="architecture",
+            agent_slug="fireworks/accounts/fireworks/models/kimi-k2p6",
+            transport_type="API",
+            adapter_type="llm_task",
+        )
+
+
+def test_dispatch_guard_allows_only_exact_bound_lease_then_terminal_close() -> None:
+    conn = _PaidDispatchConn(has_lease=True)
+
+    lease = ensure_paid_model_access_for_job(
+        conn,
+        run_id="run.paid.1",
+        job_label="architecture-hard-one",
+        runtime_profile_ref="praxis",
+        job_type="architecture",
+        agent_slug="fireworks/accounts/fireworks/models/kimi-k2p6",
+        transport_type="API",
+        adapter_type="llm_task",
+    )
+
+    assert lease is not None
+    assert lease["lease_id"] == "paid-model-lease.live"
+
+    with pytest.raises(PaidModelAccessError):
+        ensure_paid_model_access_for_job(
+            conn,
+            run_id="run.paid.1",
+            job_label="wrong-paid-model",
+            runtime_profile_ref="praxis",
+            job_type="architecture",
+            agent_slug="fireworks/accounts/fireworks/models/kimi-k2p5",
+            transport_type="API",
+            adapter_type="llm_task",
+        )
+
+    consumed = close_paid_model_leases_for_run(conn, run_id="run.paid.1")
+
+    assert consumed == [
+        {
+            "lease_id": "paid-model-lease.live",
+            "bound_run_id": "run.paid.1",
+            "status": "consumed",
+            "consumed_runs": 1,
+        }
+    ]
