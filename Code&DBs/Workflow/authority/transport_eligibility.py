@@ -202,10 +202,13 @@ def _adapter_transport_support_record(
     payload: Mapping[str, Any],
 ) -> AdapterTransportSupportAuthorityRecord:
     details = payload.get("details")
+    status = _require_text(payload.get("status"), field_name="status")
+    normalized_status = status.strip().lower()
+    is_disabled_by_policy = normalized_status == "disabled_by_policy"
     return AdapterTransportSupportAuthorityRecord(
         adapter_type=_require_text(adapter_type, field_name="adapter_type"),
-        supported=bool(payload.get("supported")),
-        status=_require_text(payload.get("status"), field_name="status"),
+        supported=bool(payload.get("supported")) and not is_disabled_by_policy,
+        status=status,
         message=_require_text(payload.get("message"), field_name="message"),
         details=dict(_require_mapping(details or {}, field_name="details")),
     )

@@ -302,9 +302,9 @@ def build_transport_support_summary(
                 continue
             raw_status = str(raw_support.get("status") or "").strip().lower()
             raw_details = raw_support.get("details")
-            policy_reason = (
-                str(raw_details.get("policy_reason")) if isinstance(raw_details, Mapping) and raw_details.get("policy_reason") else "adapter disabled by policy"
-            )
+            policy_reason = "adapter disabled by policy"
+            if isinstance(raw_details, Mapping):
+                policy_reason = str(raw_details.get("policy_reason") or policy_reason)
             if not bool(raw_support.get("supported")) and raw_status != "disabled_by_policy":
                 continue
             if raw_status == "disabled_by_policy":
