@@ -170,7 +170,7 @@ def test_provider_transport_probe_fails_when_runtime_registry_lacks_adapter(monk
     )
     monkeypatch.setattr(
         "registry.provider_execution_registry.resolve_lane_policy",
-        lambda provider_slug, adapter_type: {"policy_reason": "supported"},
+        lambda provider_slug, adapter_type: {"admitted_by_policy": True, "policy_reason": "supported"},
         raising=False,
     )
     monkeypatch.setattr(
@@ -200,7 +200,7 @@ def test_provider_transport_probe_fails_supported_api_without_ready_transport(mo
     )
     monkeypatch.setattr(
         "registry.provider_execution_registry.resolve_lane_policy",
-        lambda provider_slug, adapter_type: {"policy_reason": "admitted"},
+        lambda provider_slug, adapter_type: {"admitted_by_policy": True, "policy_reason": "admitted"},
         raising=False,
     )
     monkeypatch.setattr(
@@ -237,6 +237,39 @@ def test_provider_transport_probe_fails_supported_api_without_ready_transport(mo
     assert check.details["transport_ready"] is False
     assert check.details["credential_present"] is False
 
+
+def test_provider_transport_probe_treats_policy_disabled_lane_as_healthy(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "runtime.workflow._adapter_registry.runtime_supports_workflow_adapter_type",
+        lambda _adapter_type: True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_lane_policy_record",
+        lambda provider_slug, adapter_type: {
+            "admitted_by_policy": False,
+            "policy_reason": "provider temporarily disabled",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_adapter_contract",
+        lambda provider_slug, adapter_type: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.supports_adapter",
+        lambda provider_slug, adapter_type: False,
+        raising=False,
+    )
+
+    check = runtime_health.ProviderTransportProbe("openai", "llm_task").check()
+
+    assert check.passed is True
+    assert check.status == "disabled_by_policy"
+    assert check.message == "adapter disabled by policy: provider temporarily disabled"
+    assert check.details["admission_state"] == "disabled_by_policy"
+    assert check.details["policy_reason"] == "provider temporarily disabled"
 
 def test_workflow_runtime_uses_one_adapter_registry_authority(monkeypatch) -> None:
     monkeypatch.setattr("adapters.llm_task.default_provider_slug", lambda: "openai")
@@ -367,8 +400,16 @@ def test_admin_health_uses_transport_support_frontdoor_for_provider_probes(monke
         "default_adapter_type": "cli_llm",
         "registered_providers": ["openai", "google"],
         "providers": [
-            {"provider_slug": "openai", "adapters": ["cli_llm", "llm_task"]},
-            {"provider_slug": "google", "adapters": ["cli_llm"]},
+            {
+                "provider_slug": "openai",
+                "adapters": ["cli_llm", "llm_task"],
+                "disabled_adapters": [],
+            },
+            {
+                "provider_slug": "google",
+                "adapters": ["cli_llm"],
+                "disabled_adapters": [],
+            },
         ],
         "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
         "provider_registry_status": "loaded_from_db",
@@ -767,8 +808,16 @@ def test_mcp_health_uses_transport_support_frontdoor_for_provider_probes(monkeyp
         "default_adapter_type": "cli_llm",
         "registered_providers": ["openai", "google"],
         "providers": [
-            {"provider_slug": "openai", "adapters": ["cli_llm", "llm_task"]},
-            {"provider_slug": "google", "adapters": ["cli_llm"]},
+            {
+                "provider_slug": "openai",
+                "adapters": ["cli_llm", "llm_task"],
+                "disabled_adapters": [],
+            },
+            {
+                "provider_slug": "google",
+                "adapters": ["cli_llm"],
+                "disabled_adapters": [],
+            },
         ],
         "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
         "provider_registry_status": "loaded_from_db",

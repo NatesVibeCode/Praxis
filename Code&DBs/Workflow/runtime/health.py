@@ -338,12 +338,12 @@ class ProviderTransportProbe(HealthProbe):
                 resolve_adapter_contract,
                 resolve_api_endpoint,
                 resolve_binary,
-                resolve_lane_policy,
+                resolve_lane_policy_record,
                 supports_adapter,
             )
             from runtime.workflow._adapter_registry import runtime_supports_workflow_adapter_type
 
-            lane_policy = resolve_lane_policy(self._provider_slug, self._adapter_type)
+            lane_policy = resolve_lane_policy_record(self._provider_slug, self._adapter_type)
             contract = resolve_adapter_contract(self._provider_slug, self._adapter_type)
             supported = supports_adapter(self._provider_slug, self._adapter_type)
             runtime_adapter_supported = runtime_supports_workflow_adapter_type(self._adapter_type)
@@ -353,7 +353,26 @@ class ProviderTransportProbe(HealthProbe):
                 "supported": supported,
                 "runtime_adapter_supported": runtime_adapter_supported,
                 "lane_policy": lane_policy or {},
+                "admission_state": (
+                    "admitted_by_policy"
+                    if (lane_policy or {}).get("admitted_by_policy") is True
+                    else "disabled_by_policy"
+                )
+                if lane_policy is not None
+                else "policy_unknown",
             }
+            if lane_policy is not None and lane_policy.get("admitted_by_policy") is not True:
+                reason = str(lane_policy.get("policy_reason") or "adapter not admitted by policy")
+                details["policy_reason"] = reason
+                return _build_check(
+                    name=self.name,
+                    passed=True,
+                    message=f"adapter disabled by policy: {reason}",
+                    started_at=started_at,
+                    started_monotonic=started_monotonic,
+                    status="disabled_by_policy",
+                    details=details,
+                )
             if not runtime_adapter_supported:
                 return _build_check(
                     name=self.name,

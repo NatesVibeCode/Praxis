@@ -293,11 +293,28 @@ def build_transport_support_summary(
         transports = raw_provider.get("transports")
         transport_rows = transports if isinstance(transports, Mapping) else {}
         adapters: list[str] = []
+        disabled_adapters: list[dict[str, Any]] = []
         for adapter_type, raw_support in transport_rows.items():
-            if not isinstance(raw_support, Mapping) or not bool(raw_support.get("supported")):
+            if not isinstance(raw_support, Mapping):
                 continue
             normalized_adapter = str(adapter_type or "").strip()
             if not normalized_adapter:
+                continue
+            raw_status = str(raw_support.get("status") or "").strip().lower()
+            raw_details = raw_support.get("details")
+            policy_reason = (
+                str(raw_details.get("policy_reason")) if isinstance(raw_details, Mapping) and raw_details.get("policy_reason") else "adapter disabled by policy"
+            )
+            if not bool(raw_support.get("supported")) and raw_status != "disabled_by_policy":
+                continue
+            if raw_status == "disabled_by_policy":
+                disabled_adapters.append(
+                    {
+                        "adapter_type": normalized_adapter,
+                        "status": "disabled_by_policy",
+                        "policy_reason": policy_reason,
+                    }
+                )
                 continue
             adapters.append(normalized_adapter)
             probe_targets.append((provider_slug, normalized_adapter))
@@ -306,6 +323,7 @@ def build_transport_support_summary(
             {
                 "provider_slug": provider_slug,
                 "adapters": adapters,
+                "disabled_adapters": disabled_adapters,
             }
         )
     return {

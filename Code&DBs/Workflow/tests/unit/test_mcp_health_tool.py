@@ -215,8 +215,16 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
         "default_adapter_type": "cli_llm",
         "registered_providers": ["openai", "google"],
         "providers": [
-            {"provider_slug": "openai", "adapters": ["cli_llm", "llm_task"]},
-            {"provider_slug": "google", "adapters": ["cli_llm"]},
+            {
+                "provider_slug": "openai",
+                "adapters": ["cli_llm", "llm_task"],
+                "disabled_adapters": [],
+            },
+            {
+                "provider_slug": "google",
+                "adapters": ["cli_llm"],
+                "disabled_adapters": [],
+            },
         ],
         "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
         "provider_registry_status": "loaded_from_db",

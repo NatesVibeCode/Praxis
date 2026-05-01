@@ -855,6 +855,18 @@ def resolve_lane_policy(provider_slug: str, adapter_type: str) -> dict[str, Any]
     )
 
 
+def resolve_lane_policy_record(
+    provider_slug: str,
+    adapter_type: str,
+) -> dict[str, Any] | None:
+    _load_from_db()
+    return provider_transport.resolve_lane_policy_record(
+        provider_slug,
+        adapter_type,
+        profiles=_REGISTRY,
+    )
+
+
 def resolve_adapter_contract(
     provider_slug: str,
     adapter_type: str,
