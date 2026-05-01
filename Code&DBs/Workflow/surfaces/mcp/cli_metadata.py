@@ -2143,6 +2143,34 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_verifier_catalog": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="verifier-catalog",
+        when_to_use=(
+            "List registered verifier authority refs before picking one for "
+            "a bug-resolve, code-change preflight, or workflow-packet review "
+            "gate. Returns each verifier's verifier_ref, kind (platform / "
+            "receipt / run / path), enabled state, and any bound "
+            "suggested-healer refs."
+        ),
+        when_not_to_use=(
+            "Do not use it to actually run a verifier — that path is still "
+            "internal to verifier_authority (and reachable via "
+            "praxis_bugs action=resolve). This is a read-only catalog query."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "List enabled verifiers",
+                {"enabled": True, "limit": 50},
+            ),
+            _example(
+                "Include disabled rows",
+                {"enabled": False, "limit": 100},
+            ),
+        ],
+    ),
     "praxis_virtual_lab_state_read": _tool(
         surface="operations",
         tier="advanced",
