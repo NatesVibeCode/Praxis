@@ -495,19 +495,19 @@ export function Button({
   );
 }
 
-// ── FrameCard ──────────────────────────────────────────────────
+// ── PanelCard ──────────────────────────────────────────────────
 // Slot-based panel shell. Use for sidebar panels, workflow cards,
 // quadrant frames, anywhere a bordered card with a labelled header
 // is needed. The tone prop adds a left-edge accent ribbon.
-export type FrameCardTone = 'default' | 'ok' | 'warn' | 'err' | 'live';
+export type PanelCardTone = 'default' | 'ok' | 'warn' | 'err' | 'live';
 
-export interface FrameCardProps {
+export interface PanelCardProps {
   eyebrow?: ReactNode;
   title?: ReactNode;
   count?: ReactNode;
   action?: ReactNode;
   footer?: ReactNode;
-  tone?: FrameCardTone;
+  tone?: PanelCardTone;
   className?: string;
   style?: CSSProperties;
   bodyClassName?: string;
@@ -515,7 +515,7 @@ export interface FrameCardProps {
   children?: ReactNode;
 }
 
-export function FrameCard({
+export function PanelCard({
   eyebrow,
   title,
   count,
@@ -527,7 +527,7 @@ export function FrameCard({
   bodyClassName,
   tight,
   children,
-}: FrameCardProps) {
+}: PanelCardProps) {
   const cls = className ? `prx-card ${className}` : 'prx-card';
   const hasHead = eyebrow !== undefined || title !== undefined || count !== undefined || action !== undefined;
   const bodyCls = ['prx-card__body', tight ? 'prx-card__body--tight' : '', bodyClassName ?? '']
@@ -538,7 +538,7 @@ export function FrameCard({
       className={cls}
       style={style}
       data-tone={tone === 'default' ? undefined : tone}
-      data-testid="prx-frame-card"
+      data-testid="prx-panel-card"
     >
       {hasHead && (
         <div className="prx-card__head">
@@ -556,6 +556,159 @@ export function FrameCard({
       )}
       {children !== undefined && <div className={bodyCls}>{children}</div>}
       {footer !== undefined && <div className="prx-card__foot">{footer}</div>}
+    </div>
+  );
+}
+
+// ── MetricTile ─────────────────────────────────────────────────
+// Bare metric tile for at-a-glance dashboard metrics.
+// label / value / detail / action stacked. NO border, NO bg-tint.
+// This is the canonical primitive for overview metrics — never compose
+// ReceiptCard for at-a-glance numbers (its key/value rows are wrong here).
+export type MetricTileTone = 'default' | 'ok' | 'warn' | 'err';
+
+export interface MetricTileProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+  label: ReactNode;
+  value: ReactNode;
+  detail?: ReactNode;
+  action?: ReactNode;
+  tone?: MetricTileTone;
+}
+
+export function MetricTile({
+  label,
+  value,
+  detail,
+  action,
+  tone = 'default',
+  className = '',
+  type,
+  ...rest
+}: MetricTileProps) {
+  const cls = className ? `prx-tile ${className}` : 'prx-tile';
+  return (
+    <button
+      type={type ?? 'button'}
+      className={cls}
+      data-tone={tone === 'default' ? undefined : tone}
+      data-testid="prx-tile"
+      {...rest}
+    >
+      <span className="prx-tile__label">{label}</span>
+      <span className="prx-tile__value">{value}</span>
+      {detail !== undefined && <span className="prx-tile__detail">{detail}</span>}
+      {action !== undefined && <span className="prx-tile__action">{action}</span>}
+    </button>
+  );
+}
+
+// ── ListPanel ──────────────────────────────────────────────────
+// Bare side / list panel: kicker + title + count badge + body.
+// NO border, NO bg-tint, NO rim. The structure is type-only.
+// Use for sidebar groups (Toolbelt Review, Recent Runs, etc.).
+// NEVER use PanelCard for these — that adds a rim that doesn't earn its keep.
+export interface ListPanelProps {
+  eyebrow?: ReactNode;
+  title: ReactNode;
+  count?: ReactNode;
+  action?: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+  children?: ReactNode;
+}
+
+export function ListPanel({
+  eyebrow,
+  title,
+  count,
+  action,
+  className = '',
+  style,
+  children,
+}: ListPanelProps) {
+  const cls = className ? `prx-list-panel ${className}` : 'prx-list-panel';
+  return (
+    <section className={cls} style={style} data-testid="prx-list-panel">
+      <header className="prx-list-panel__head">
+        <div className="prx-list-panel__head-copy">
+          {eyebrow !== undefined && <span className="prx-list-panel__eyebrow">{eyebrow}</span>}
+          <span className="prx-list-panel__title">{title}</span>
+        </div>
+        {(count !== undefined || action !== undefined) && (
+          <div className="prx-list-panel__head-tail">
+            {count !== undefined && <span className="prx-list-panel__count">{count}</span>}
+            {action}
+          </div>
+        )}
+      </header>
+      <div className="prx-list-panel__body">{children}</div>
+    </section>
+  );
+}
+
+// ── StatusRow ──────────────────────────────────────────────────
+// Single row in a list: LedDot + (title + detail) + meta.
+// NO border per-row. Hover-able if onClick provided, static otherwise.
+// Use for sidebar list rows (review items, recent runs, opportunities).
+export type StatusRowTone = 'live' | 'ok' | 'err' | 'idle';
+
+export interface StatusRowProps {
+  tone?: StatusRowTone;
+  title: ReactNode;
+  detail?: ReactNode;
+  detailMono?: boolean;
+  meta?: ReactNode;
+  onClick?: () => void;
+  className?: string;
+  ariaLabel?: string;
+}
+
+export function StatusRow({
+  tone = 'idle',
+  title,
+  detail,
+  detailMono,
+  meta,
+  onClick,
+  className = '',
+  ariaLabel,
+}: StatusRowProps) {
+  const cls = ['prx-status-row', onClick ? '' : 'prx-status-row--static', className]
+    .filter(Boolean)
+    .join(' ');
+  const detailCls = detailMono
+    ? 'prx-status-row__detail prx-status-row__detail--mono'
+    : 'prx-status-row__detail';
+  const body = (
+    <>
+      <LedDot tone={tone} />
+      <span className="prx-status-row__body">
+        <span className="prx-status-row__title">{title}</span>
+        {detail !== undefined && <span className={detailCls}>{detail}</span>}
+      </span>
+      {meta !== undefined && <span className="prx-status-row__meta">{meta}</span>}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={cls}
+        onClick={onClick}
+        aria-label={typeof ariaLabel === 'string' ? ariaLabel : undefined}
+        data-testid="prx-status-row"
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div
+      className={cls}
+      aria-label={typeof ariaLabel === 'string' ? ariaLabel : undefined}
+      data-testid="prx-status-row"
+    >
+      {body}
     </div>
   );
 }

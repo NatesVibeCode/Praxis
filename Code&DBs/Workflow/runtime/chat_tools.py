@@ -319,6 +319,97 @@ CHAT_TOOLS: list[dict[str, Any]] = [
             "required": [],
         },
     },
+    {
+        "name": "file_bug",
+        "description": (
+            "File a new bug in Praxis.db. Use when you discover a real defect — "
+            "wrong behavior, missing capability, broken assumption — that should "
+            "live as durable authority instead of evaporating in chat. "
+            "Default allow_duplicate=false: the dedup guard rejects strong "
+            "duplicates; only set true when the bug is intentionally distinct "
+            "from existing ones. Severity P0 (outage) | P1 (high impact) | P2 "
+            "(default) | P3 (low)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short bug title (required)"},
+                "description": {"type": "string", "description": "Longer-form description, repro steps, evidence"},
+                "severity": {"type": "string", "enum": ["P0", "P1", "P2", "P3"], "description": "Default P2"},
+                "category": {"type": "string", "description": "BugCategory enum value (default OTHER)"},
+                "decision_ref": {"type": "string", "description": "Optional decision_key linking the bug to authority"},
+                "discovered_in_run_id": {"type": "string", "description": "Run id where the bug was observed"},
+                "discovered_in_receipt_id": {"type": "string", "description": "Receipt id evidence"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "allow_duplicate": {"type": "boolean", "description": "Default false. Set true only when intentionally distinct from existing bugs."},
+                "filed_by": {"type": "string", "description": "Filer ref (default chat.workspace)"},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "propose_roadmap_item",
+        "description": (
+            "Propose a new roadmap item or evolve an existing one. Default "
+            "action='preview' + dry_run=true: surfaces the predicted write "
+            "without committing. To commit, re-run with dry_run=false. "
+            "Actions: preview | update | retire | re-parent. "
+            "update/retire/re-parent require roadmap_item_id; re-parent also "
+            "requires parent_roadmap_item_id."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["preview", "update", "retire", "re-parent", "reparent"], "description": "Default 'preview'"},
+                "dry_run": {"type": "boolean", "description": "Default true for preview; set false to commit on update/retire/re-parent"},
+                "title": {"type": "string"},
+                "intent_brief": {"type": "string", "description": "Brief statement of intent / objective"},
+                "template": {"type": "string", "description": "Default 'single_capability'"},
+                "priority": {"type": "string"},
+                "parent_roadmap_item_id": {"type": "string", "description": "Required for re-parent"},
+                "slug": {"type": "string"},
+                "depends_on": {"type": "array", "items": {"type": "string"}},
+                "source_bug_id": {"type": "string"},
+                "decision_ref": {"type": "string"},
+                "item_kind": {"type": "string"},
+                "lifecycle": {"type": "string", "description": "Auto-set to 'retired' for action=retire"},
+                "tier": {"type": "string"},
+                "outcome_gate": {"type": "string"},
+                "proof_kind": {"type": "string"},
+                "roadmap_item_id": {"type": "string", "description": "Required for action in {update, retire, re-parent}"},
+                "phase_order": {"type": "string"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "propose_decision",
+        "description": (
+            "Record a new operator decision in operator_decisions. NO PREVIEW "
+            "MODE — this writes immediately. Surface the proposed decision in "
+            "prose first; call this only after the operator confirms. "
+            "Defaults: decided_by='chat.workspace', decision_source='operator', "
+            "decision_status='decided'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "decision_key": {"type": "string", "description": "Unique slug for the decision (required)"},
+                "decision_kind": {"type": "string", "description": "e.g. 'architecture_policy', 'cutover_gate' (required)"},
+                "title": {"type": "string", "description": "Short title (required)"},
+                "rationale": {"type": "string", "description": "Why this decision (required)"},
+                "decided_by": {"type": "string", "description": "Default 'chat.workspace'"},
+                "decision_source": {"type": "string", "description": "Default 'operator'"},
+                "decision_status": {"type": "string", "description": "Default 'decided'"},
+                "effective_from": {"type": "string", "description": "ISO datetime; default now"},
+                "effective_to": {"type": "string", "description": "ISO datetime; default null (permanent)"},
+                "decision_scope_kind": {"type": "string"},
+                "decision_scope_ref": {"type": "string"},
+                "scope_clamp": {"type": "object"},
+            },
+            "required": ["decision_key", "decision_kind", "title", "rationale"],
+        },
+    },
 ]
 
 
@@ -558,6 +649,25 @@ def execute_tool(
         return _dispatch_op(pg_conn, "agent_principal.describe", dict(arguments or {}))
     elif name == "praxis_tool_gap_list":
         return _dispatch_op(pg_conn, "agent_tool_gap.list", dict(arguments or {}))
+    elif name == "file_bug":
+        # Default filed_by + allow_duplicate so the chat agent can call
+        # this with just (title) and have sane behaviour.
+        args = dict(arguments or {})
+        args.setdefault("filed_by", "chat.workspace")
+        args.setdefault("allow_duplicate", False)
+        return _dispatch_op(pg_conn, "bug.file", args)
+    elif name == "propose_roadmap_item":
+        # Default to preview + dry_run so the agent never commits silently.
+        args = dict(arguments or {})
+        args.setdefault("action", "preview")
+        args.setdefault("dry_run", True)
+        return _dispatch_op(pg_conn, "operator.roadmap_write", args)
+    elif name == "propose_decision":
+        args = dict(arguments or {})
+        args.setdefault("decided_by", "chat.workspace")
+        args.setdefault("decision_source", "operator")
+        args.setdefault("decision_status", "decided")
+        return _dispatch_op(pg_conn, "operator.decision_record", args)
     raise ValueError(f"Unknown tool: {name}")
 
 

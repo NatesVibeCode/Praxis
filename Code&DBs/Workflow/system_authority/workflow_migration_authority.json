@@ -421,7 +421,8 @@
     "405_materialize_remaining_compile_remnants.sql",
     "406_data_dictionary_lineage_capability_edge_kinds.sql",
     "407_rename_agent_principals_to_agent_registry.sql",
-    "408_register_workflow_solution_operations.sql"
+    "408_register_workflow_solution_operations.sql",
+    "409_agent_wake_dedup_event_id.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -11591,6 +11592,16 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.workflow_solution.status"
       }
+    ],
+    "409_agent_wake_dedup_event_id.sql": [
+      {
+        "object_type": "index",
+        "object_name": "idx_agent_wakes_payload_event_dedup"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.agent_wakes.dedup_key.event_id_inclusive"
+      }
     ]
   },
   "policy_buckets": {
@@ -12016,7 +12027,8 @@
       "405_materialize_remaining_compile_remnants.sql",
       "406_data_dictionary_lineage_capability_edge_kinds.sql",
       "407_rename_agent_principals_to_agent_registry.sql",
-      "408_register_workflow_solution_operations.sql"
+      "408_register_workflow_solution_operations.sql",
+      "409_agent_wake_dedup_event_id.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

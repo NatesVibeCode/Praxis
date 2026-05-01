@@ -334,6 +334,7 @@ def test_agent_delegate_parent_not_found():
         parent_agent_ref="agent.missing",
         child_task="search_emails",
         child_intent="Find emails about X",
+        caller_ref="agent.missing",  # caller-binding proof (BUG-1E7ED995)
     )
     result = handle_agent_delegate(cmd, _Subsystems(conn))
     assert result["ok"] is False
@@ -361,10 +362,40 @@ def test_agent_delegate_parent_inactive():
         parent_agent_ref="agent.exec.nate",
         child_task="x",
         child_intent="y",
+        caller_ref="agent.exec.nate",  # caller-binding proof
     )
     result = handle_agent_delegate(cmd, _Subsystems(conn))
     assert result["ok"] is False
     assert result["error_code"] == "agent_principal.parent_inactive"
+
+
+def test_agent_delegate_unverified_caller_is_rejected():
+    """BUG-1E7ED995: a direct catalog caller without caller_ref / token /
+    operator override cannot delegate under another agent's identity."""
+    conn = _Conn(scripted=[])
+    cmd = AgentDelegateCommand(
+        parent_agent_ref="agent.exec.nate",
+        child_task="x",
+        child_intent="y",
+        # No caller_ref, no workflow_token, no operator_override_decision_ref
+    )
+    result = handle_agent_delegate(cmd, _Subsystems(conn))
+    assert result["ok"] is False
+    assert result["error_code"] == "agent_principal.parent_caller_unverified"
+
+
+def test_agent_delegate_caller_ref_mismatch_is_rejected():
+    """BUG-1E7ED995: caller_ref must equal parent_agent_ref to pass."""
+    conn = _Conn(scripted=[])
+    cmd = AgentDelegateCommand(
+        parent_agent_ref="agent.exec.nate",
+        child_task="x",
+        child_intent="y",
+        caller_ref="agent.someone.else",  # mismatch
+    )
+    result = handle_agent_delegate(cmd, _Subsystems(conn))
+    assert result["ok"] is False
+    assert result["error_code"] == "agent_principal.parent_caller_unverified"
 
 
 def test_agent_delegate_default_network_policy_is_praxis_only():

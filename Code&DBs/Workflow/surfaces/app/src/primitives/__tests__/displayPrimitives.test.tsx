@@ -6,18 +6,21 @@ import {
   Bargraph,
   Button,
   DiffBlock,
-  FrameCard,
   GateBadge,
   Gauge,
   KbdCluster,
   LedDot,
+  ListPanel,
   ManifestTree,
+  MetricTile,
+  PanelCard,
   RadioPillGroup,
   ReceiptCard,
   Runlog,
   SectionStrip,
   SourceChip,
   Sparkline,
+  StatusRow,
   TableFilterInput,
   TokenChip,
 } from '../DisplayPrimitives';
@@ -162,9 +165,9 @@ describe('display primitives render canonical prx-* shapes', () => {
     expect(btn).not.toHaveAttribute('data-active');
   });
 
-  test('FrameCard renders eyebrow / title / count / action / footer slots', () => {
+  test('PanelCard renders eyebrow / title / count / action / footer slots', () => {
     render(
-      <FrameCard
+      <PanelCard
         eyebrow="Materialize"
         title="Toolbelt Review"
         count={5}
@@ -173,9 +176,9 @@ describe('display primitives render canonical prx-* shapes', () => {
         tone="warn"
       >
         <span data-testid="frame-body">body</span>
-      </FrameCard>,
+      </PanelCard>,
     );
-    const card = screen.getByTestId('prx-frame-card');
+    const card = screen.getByTestId('prx-panel-card');
     expect(card).toHaveClass('prx-card');
     expect(card).toHaveAttribute('data-tone', 'warn');
     expect(card.querySelector('.prx-card__head .eyebrow')).toHaveTextContent('Materialize');
@@ -186,10 +189,81 @@ describe('display primitives render canonical prx-* shapes', () => {
     expect(screen.getByTestId('frame-foot')).toBeInTheDocument();
   });
 
-  test('FrameCard hides head when no head props provided', () => {
-    render(<FrameCard><span>just body</span></FrameCard>);
-    const card = screen.getByTestId('prx-frame-card');
+  test('PanelCard hides head when no head props provided', () => {
+    render(<PanelCard><span>just body</span></PanelCard>);
+    const card = screen.getByTestId('prx-panel-card');
     expect(card.querySelector('.prx-card__head')).not.toBeInTheDocument();
+  });
+
+  test('MetricTile renders prx-tile with label/value/detail/action and tone', () => {
+    const handler = jest.fn();
+    render(
+      <MetricTile
+        label="Workflow Inventory"
+        value="99 workflows"
+        detail="1 live · 2 saved · 96 draft"
+        action="Open builder →"
+        tone="ok"
+        onClick={handler}
+      />,
+    );
+    const tile = screen.getByTestId('prx-tile');
+    expect(tile).toHaveClass('prx-tile');
+    expect(tile).toHaveAttribute('data-tone', 'ok');
+    expect(tile.querySelector('.prx-tile__label')).toHaveTextContent('Workflow Inventory');
+    expect(tile.querySelector('.prx-tile__value')).toHaveTextContent('99 workflows');
+    expect(tile.querySelector('.prx-tile__detail')).toHaveTextContent('1 live · 2 saved · 96 draft');
+    expect(tile.querySelector('.prx-tile__action')).toHaveTextContent('Open builder');
+    fireEvent.click(tile);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  test('ListPanel renders prx-list-panel with eyebrow / title / count / action / body — NO border', () => {
+    render(
+      <ListPanel
+        eyebrow="Materialize"
+        title="Toolbelt Review"
+        count={5}
+        action={<Button size="sm" tone="ghost">Add</Button>}
+      >
+        <span data-testid="lp-body">rows go here</span>
+      </ListPanel>,
+    );
+    const panel = screen.getByTestId('prx-list-panel');
+    expect(panel).toHaveClass('prx-list-panel');
+    expect(panel.querySelector('.prx-list-panel__eyebrow')).toHaveTextContent('Materialize');
+    expect(panel.querySelector('.prx-list-panel__title')).toHaveTextContent('Toolbelt Review');
+    expect(panel.querySelector('.prx-list-panel__count')).toHaveTextContent('5');
+    expect(panel.querySelector('.prx-list-panel__head-tail [data-testid="prx-button"]')).toBeInTheDocument();
+    expect(screen.getByTestId('lp-body')).toBeInTheDocument();
+  });
+
+  test('StatusRow renders LedDot + title + detail + meta and is clickable when onClick provided', () => {
+    const handler = jest.fn();
+    render(
+      <StatusRow
+        tone="err"
+        title="Workflow.Run.abc"
+        detail="failed - no job receipts yet"
+        meta="1h ago"
+        onClick={handler}
+      />,
+    );
+    const row = screen.getByTestId('prx-status-row');
+    expect(row).toHaveClass('prx-status-row');
+    expect(row.querySelector('[data-testid="prx-led-dot"]')).toHaveAttribute('data-tone', 'err');
+    expect(row.querySelector('.prx-status-row__title')).toHaveTextContent('Workflow.Run.abc');
+    expect(row.querySelector('.prx-status-row__detail')).toHaveTextContent('failed');
+    expect(row.querySelector('.prx-status-row__meta')).toHaveTextContent('1h ago');
+    fireEvent.click(row);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  test('StatusRow renders as static div when no onClick', () => {
+    render(<StatusRow tone="idle" title="static row" />);
+    const row = screen.getByTestId('prx-status-row');
+    expect(row.tagName).toBe('DIV');
+    expect(row).toHaveClass('prx-status-row--static');
   });
 
   test('SourceChip renders prx-source-chip with tone/active attrs and fires onClick', () => {

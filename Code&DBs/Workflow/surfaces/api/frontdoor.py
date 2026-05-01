@@ -24,6 +24,10 @@ from policy.domain import AdmissionDecisionRecord
 from registry.domain import RegistryResolver
 from runtime.admission_repair import repair_or_seed_submission_evidence
 from runtime.execution import RuntimeOrchestrator
+from runtime.execution_packet_authority import (
+    PacketInspectionUnavailable,
+    resolve_packet_inspection,
+)
 from runtime.instance import (
     NativeWorkflowInstance,
     resolve_native_instance,
@@ -780,54 +784,23 @@ class NativeWorkflowFrontdoor:
         finally:
             await conn.close()
 
-        packet_inspection = _packet_inspection_from_row_value(row)
-        packet_inspection_source = "missing"
-        if packet_inspection is not None:
-            packet_inspection_source = "materialized"
-        if packet_row is not None:
-            packets = packet_row.get("packets")
-            if isinstance(packets, str):
-                try:
-                    packets = json.loads(packets)
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    packets = []
-            if (
-                packet_inspection is None
-                and isinstance(packets, Sequence)
-                and not isinstance(packets, (str, bytes, bytearray))
-                and packets
-            ):
-                try:
-                    from runtime.execution_packet_authority import inspect_execution_packets
-                except Exception as exc:
-                    raise NativeFrontdoorError(
-                        "frontdoor.packet_inspection_unavailable",
-                        "workflow run manifest inspection helpers are unavailable",
-                        details={
-                            "stage": "import",
-                            "run_id": run_id,
-                            "error_type": type(exc).__name__,
-                            "error_message": str(exc),
-                        },
-                    ) from exc
-                try:
-                    packet_inspection = inspect_execution_packets(
-                        packets,
-                        run_row=dict(row),
-                    )
-                    if packet_inspection is not None:
-                        packet_inspection_source = "derived"
-                except Exception as exc:
-                    raise NativeFrontdoorError(
-                        "frontdoor.packet_inspection_unavailable",
-                        "workflow run manifest inspection derivation failed",
-                        details={
-                            "stage": "derive",
-                            "run_id": run_id,
-                            "error_type": type(exc).__name__,
-                            "error_message": str(exc),
-                        },
-                    ) from exc
+        try:
+            packet_inspection, packet_inspection_source = resolve_packet_inspection(
+                run_row=dict(row),
+                packets=packet_row.get("packets") if packet_row is not None else [],
+            )
+        except PacketInspectionUnavailable as exc:
+            details = {
+                "stage": exc.stage,
+                "run_id": run_id,
+                "error_type": type(exc.error).__name__ if exc.error is not None else type(exc).__name__,
+                "error_message": str(exc.error) if exc.error is not None else str(exc),
+            }
+            raise NativeFrontdoorError(
+                "frontdoor.packet_inspection_unavailable",
+                str(exc),
+                details=details,
+            ) from exc
 
         return (
             dict(row),

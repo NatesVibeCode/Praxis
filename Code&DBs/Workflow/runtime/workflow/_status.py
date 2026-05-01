@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 from runtime.failure_projection import project_failure_classification
 from runtime.idempotency import canonical_hash, check_idempotency, record_idempotency
+from runtime.execution_packet_authority import (
+    load_workflow_run_packet_inspection,
+    PacketInspectionUnavailable,
+)
 
 from ._shared import (
     _ACTIVE_JOB_STATUSES,
@@ -25,7 +29,6 @@ from ._workflow_state import (
 )
 from ._claiming import _submission_state_by_job_label
 from ._context_building import (
-    _shadow_packet_inspection_from_rows,
     _terminal_failure_classification,
 )
 
@@ -241,13 +244,25 @@ def _attach_packet_inspection(
     run_id: str,
     run_row: dict[str, Any],
 ) -> None:
-    packet_inspection = _shadow_packet_inspection_from_rows(
-        conn,
-        run_id=run_id,
-        run_row=run_row,
-    )
-    if packet_inspection is not None:
-        run_row["packet_inspection"] = packet_inspection
+    try:
+        packet_inspection, source = load_workflow_run_packet_inspection(
+            conn,
+            run_id=run_id,
+            run_row=run_row,
+            persist_if_derived=True,
+        )
+    except PacketInspectionUnavailable as exc:
+        run_row["packet_inspection_error"] = {
+            "reason_code": "packet_inspection.unavailable",
+            "stage": exc.stage,
+            "error_type": type(exc.error).__name__ if exc.error is not None else None,
+            "error_message": str(exc.error) if exc.error is not None else str(exc),
+        }
+        return
+    if packet_inspection is None:
+        return
+    run_row["packet_inspection"] = packet_inspection
+    run_row["packet_inspection_source"] = source
 
 
 def _attach_cancellation_provenance(

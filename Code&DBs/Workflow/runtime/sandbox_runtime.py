@@ -1640,6 +1640,23 @@ class DockerLocalSandboxProvider:
             docker_cmd.extend(["-e", f"{key}={value}"])
         if session.network_policy == "disabled":
             docker_cmd.append("--network=none")
+        elif session.network_policy == "praxis_only":
+            # Phase B cage enforcement (BUG-E6CF8C82).
+            # praxis_only clamps egress to the Praxis MCP bridge and any
+            # admitted provider/proxy routes attached to the named docker
+            # network. Configured via PRAXIS_ONLY_DOCKER_NETWORK on the
+            # worker container; without that env var we fail closed
+            # (--network=none) so absence of configuration is denial,
+            # not open egress. See architecture-policy::business-agent
+            # -substrate::praxis-only-egress-is-distinct-from-network
+            # -disabled.
+            praxis_only_network = str(
+                os.environ.get("PRAXIS_ONLY_DOCKER_NETWORK", "")
+            ).strip()
+            if praxis_only_network:
+                docker_cmd.extend(["--network", praxis_only_network])
+            else:
+                docker_cmd.append("--network=none")
 
         # Live-edit overlay for the `praxis` shell-tool shim. When
         # PRAXIS_HOST_WORKSPACE_ROOT is set, we bind-mount the source file

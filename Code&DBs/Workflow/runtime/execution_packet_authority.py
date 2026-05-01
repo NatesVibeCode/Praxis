@@ -8,6 +8,21 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
+class PacketInspectionUnavailable(RuntimeError):
+    """Raised when packet inspection cannot be resolved from authority inputs."""
+
+    def __init__(
+        self,
+        stage: str,
+        message: str,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.error = error
+
+
 def _json_clone(value: object) -> object:
     return json.loads(json.dumps(value, sort_keys=True, default=str))
 
@@ -208,6 +223,114 @@ def packet_inspection_from_row(row: Mapping[str, Any] | None) -> dict[str, Any] 
     return inspection or None
 
 
+def _packet_payloads(value: object) -> list[dict[str, Any]]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return []
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    packets: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        payload = item.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                payload = None
+        if isinstance(payload, Mapping):
+            packets.append(dict(payload))
+        else:
+            packets.append(dict(item))
+    return packets
+
+
+def resolve_packet_inspection(
+    *,
+    run_row: Mapping[str, Any] | None,
+    packets: object,
+) -> tuple[dict[str, Any] | None, str]:
+    """Resolve packet inspection through one authority-owned path."""
+
+    materialized = packet_inspection_from_row(run_row)
+    if materialized is not None:
+        return materialized, "materialized"
+
+    packet_payloads = _packet_payloads(packets)
+    if not packet_payloads:
+        return None, "missing"
+    try:
+        return inspect_execution_packets(packet_payloads, run_row=run_row), "derived"
+    except Exception as exc:  # noqa: BLE001 - preserve stage for callers.
+        raise PacketInspectionUnavailable(
+            "derive",
+            "workflow run packet inspection derivation failed",
+            error=exc,
+        ) from exc
+
+
+def load_workflow_run_packet_inspection(
+    conn: Any,
+    *,
+    run_id: str,
+    run_row: Mapping[str, Any] | None = None,
+    persist_if_derived: bool = False,
+) -> tuple[dict[str, Any] | None, str]:
+    """Load packet inspection for one run, optionally repairing the projection."""
+
+    effective_run_row: Mapping[str, Any] | None = run_row
+    if effective_run_row is None:
+        run_rows = conn.execute(
+            """
+            SELECT run_id,
+                   workflow_id,
+                   request_id,
+                   workflow_definition_id,
+                   current_state,
+                   request_envelope,
+                   requested_at,
+                   admitted_at,
+                   started_at,
+                   finished_at,
+                   last_event_id,
+                   packet_inspection
+              FROM workflow_runs
+             WHERE run_id = $1
+             LIMIT 1
+            """,
+            run_id,
+        )
+        if not run_rows:
+            return None, "missing"
+        effective_run_row = dict(run_rows[0])
+
+    packet_rows = conn.execute(
+        """
+        SELECT payload
+          FROM execution_packets
+         WHERE run_id = $1
+         ORDER BY created_at ASC, execution_packet_id ASC
+        """,
+        run_id,
+    )
+    packets = [dict(row) for row in packet_rows or [] if isinstance(row, Mapping)]
+    inspection, source = resolve_packet_inspection(
+        run_row=effective_run_row,
+        packets=packets,
+    )
+    if persist_if_derived and source == "derived":
+        conn.execute(
+            "UPDATE workflow_runs SET packet_inspection = $2::jsonb WHERE run_id = $1",
+            run_id,
+            json.dumps(inspection, sort_keys=True, default=str),
+        )
+        source = "materialized_after_repair"
+    return inspection, source
+
+
 def inspect_execution_packets(
     packets: Sequence[Mapping[str, Any]] | None,
     *,
@@ -344,40 +467,11 @@ def rebuild_workflow_run_packet_inspection(
     *,
     run_id: str,
 ) -> dict[str, Any] | None:
-    run_rows = conn.execute(
-        """
-        SELECT run_id,
-               workflow_id,
-               request_id,
-               workflow_definition_id,
-               current_state,
-               request_envelope,
-               requested_at,
-               admitted_at,
-               started_at,
-               finished_at,
-               last_event_id,
-               packet_inspection
-          FROM workflow_runs
-         WHERE run_id = $1
-         LIMIT 1
-        """,
-        run_id,
+    inspection, _source = load_workflow_run_packet_inspection(
+        conn,
+        run_id=run_id,
+        persist_if_derived=False,
     )
-    if not run_rows:
-        return None
-    run_row = dict(run_rows[0])
-    packet_rows = conn.execute(
-        """
-        SELECT payload
-          FROM execution_packets
-         WHERE run_id = $1
-         ORDER BY created_at ASC, execution_packet_id ASC
-        """,
-        run_id,
-    )
-    packets = [dict(row.get("payload")) for row in packet_rows or [] if isinstance(row.get("payload"), Mapping)]
-    inspection = inspect_execution_packets(packets, run_row=run_row) if packets else None
     conn.execute(
         "UPDATE workflow_runs SET packet_inspection = $2::jsonb WHERE run_id = $1",
         run_id,
@@ -457,7 +551,10 @@ __all__ = [
     "build_execution_packet_lineage_payload",
     "finalize_execution_packet",
     "inspect_execution_packets",
+    "load_workflow_run_packet_inspection",
+    "PacketInspectionUnavailable",
     "packet_inspection_from_row",
     "rebuild_workflow_run_packet_inspection",
+    "resolve_packet_inspection",
     "resolve_execution_packet_revisions",
 ]

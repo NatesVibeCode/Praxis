@@ -59,6 +59,20 @@ def _pg_conn(subsystems: Any) -> Any:
     return getter() if callable(getter) else None
 
 
+def _solution_authority_payload() -> dict[str, str]:
+    return {
+        "authority": "workflow_solution",
+        "storage_authority": "workflow_chain",
+    }
+
+
+def _legacy_group_id(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text
+
+
 def _workflow_run_payload(run: dict[str, Any]) -> dict[str, Any]:
     return {
         "run_id": run.get("run_id"),
@@ -77,18 +91,132 @@ def _workflow_run_payload(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _solution_workflows(state: dict[str, Any]) -> list[dict[str, Any]]:
+    groups = [
+        dict(group)
+        for group in (state.get("waves") or [])
+        if isinstance(group, dict)
+    ]
+    workflows_by_group: dict[str, list[dict[str, Any]]] = {}
+    for group in groups:
+        group_id = _legacy_group_id(group.get("wave_id"))
+        if not group_id:
+            continue
+        workflows_by_group[group_id] = [
+            _workflow_run_payload(dict(run))
+            for run in (group.get("runs") or [])
+            if isinstance(run, dict)
+        ]
+
+    workflows: list[dict[str, Any]] = []
+    for group in groups:
+        group_id = _legacy_group_id(group.get("wave_id"))
+        if not group_id:
+            continue
+        depends_on_workflow_ids: list[str] = []
+        for depends_on_group_id in group.get("depends_on") or []:
+            normalized_depends_on_group_id = _legacy_group_id(depends_on_group_id)
+            for workflow in workflows_by_group.get(normalized_depends_on_group_id or "", []):
+                workflow_id = str(workflow.get("workflow_id") or "").strip()
+                if workflow_id and workflow_id not in depends_on_workflow_ids:
+                    depends_on_workflow_ids.append(workflow_id)
+        blocked_by_workflow_ids: list[str] = []
+        blocked_by_group_id = _legacy_group_id(group.get("blocked_by"))
+        if blocked_by_group_id:
+            for workflow in workflows_by_group.get(blocked_by_group_id, []):
+                workflow_id = str(workflow.get("workflow_id") or "").strip()
+                if workflow_id and workflow_id not in blocked_by_workflow_ids:
+                    blocked_by_workflow_ids.append(workflow_id)
+
+        for workflow in workflows_by_group.get(group_id, []):
+            workflow["solution_group_status"] = group.get("status")
+            workflow["depends_on_workflow_ids"] = depends_on_workflow_ids
+            workflow["blocked_by_workflow_ids"] = blocked_by_workflow_ids
+            workflows.append(workflow)
+    return workflows
+
+
+def _workflow_ids(workflows: list[dict[str, Any]]) -> list[str]:
+    ids: list[str] = []
+    for workflow in workflows:
+        workflow_id = str(workflow.get("workflow_id") or "").strip()
+        if workflow_id and workflow_id not in ids:
+            ids.append(workflow_id)
+    return ids
+
+
+def _active_run_ids(workflows: list[dict[str, Any]]) -> list[str]:
+    ids: list[str] = []
+    for workflow in workflows:
+        run_id = str(workflow.get("run_id") or "").strip()
+        if (
+            run_id
+            and run_id not in ids
+            and str(workflow.get("run_status") or "") in {"queued", "running"}
+        ):
+            ids.append(run_id)
+    return ids
+
+
+def _current_workflow_ids(state: dict[str, Any], workflows: list[dict[str, Any]]) -> list[str]:
+    current_group_id = _legacy_group_id(state.get("current_wave"))
+    if not current_group_id:
+        return []
+    group_runs = []
+    for group in (state.get("waves") or []):
+        if not isinstance(group, dict):
+            continue
+        if _legacy_group_id(group.get("wave_id")) != current_group_id:
+            continue
+        group_runs = [
+            _workflow_run_payload(dict(run))
+            for run in (group.get("runs") or [])
+            if isinstance(run, dict)
+        ]
+        break
+    current_ids = _workflow_ids(group_runs)
+    if current_ids:
+        return current_ids
+    return [
+        workflow_id
+        for workflow_id in _workflow_ids(workflows)
+        if any(
+            str(workflow.get("workflow_id") or "").strip() == workflow_id
+            and str(workflow.get("run_status") or "") in {"queued", "running"}
+            for workflow in workflows
+        )
+    ]
+
+
+def _workflow_count_completed(workflows: list[dict[str, Any]]) -> int:
+    return sum(1 for workflow in workflows if str(workflow.get("run_status") or "") == "succeeded")
+
+
 def _phase_payload(phase: dict[str, Any]) -> dict[str, Any]:
     workflows = [
         _workflow_run_payload(dict(run))
         for run in (phase.get("runs") or [])
         if isinstance(run, dict)
     ]
+    workflow_ids = [
+        str(workflow.get("run_id")).strip()
+        for workflow in workflows
+        if str(workflow.get("run_id") or "").strip()
+    ]
+    active_workflow_ids = [
+        str(workflow.get("run_id")).strip()
+        for workflow in workflows
+        if str(workflow.get("run_id") or "").strip()
+        and str(workflow.get("run_status") or "") in {"queued", "running"}
+    ]
     return {
-        "phase_id": phase.get("wave_id"),
+        "phase_id": _legacy_group_id(phase.get("wave_id")),
         "status": phase.get("status"),
         "depends_on": list(phase.get("depends_on") or []),
-        "blocked_by": phase.get("blocked_by"),
+        "blocked_by": _legacy_group_id(phase.get("blocked_by")),
         "workflows": workflows,
+        "workflow_ids": workflow_ids,
+        "active_workflow_ids": active_workflow_ids,
         "workflow_count": len(workflows),
         "started_at": phase.get("started_at"),
         "completed_at": phase.get("completed_at"),
@@ -97,25 +225,21 @@ def _phase_payload(phase: dict[str, Any]) -> dict[str, Any]:
 
 
 def _solution_payload(state: dict[str, Any]) -> dict[str, Any]:
-    phases = [
-        _phase_payload(dict(phase))
-        for phase in (state.get("waves") or [])
-        if isinstance(phase, dict)
-    ]
-    completed = sum(1 for phase in phases if str(phase.get("status") or "") == "succeeded")
+    workflows = _solution_workflows(state)
     return {
         "solution_id": state.get("chain_id"),
-        "backing_chain_id": state.get("chain_id"),
-        "authority": "workflow_chain",
+        **_solution_authority_payload(),
         "name": state.get("program"),
         "status": state.get("status"),
-        "current_phase": state.get("current_wave"),
+        "current_workflow_ids": _current_workflow_ids(state, workflows),
+        "workflow_ids": _workflow_ids(workflows),
+        "active_run_ids": _active_run_ids(workflows),
         "coordination_path": state.get("coordination_path"),
         "why": state.get("why"),
         "mode": state.get("mode"),
-        "phases": phases,
-        "phases_total": len(phases),
-        "phases_completed": completed,
+        "workflows": workflows,
+        "workflows_total": len(workflows),
+        "workflows_completed": _workflow_count_completed(workflows),
         "created_at": state.get("created_at"),
         "updated_at": state.get("updated_at"),
         "started_at": state.get("started_at"),
@@ -128,11 +252,9 @@ def _solution_payload(state: dict[str, Any]) -> dict[str, Any]:
 def _solution_summary(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "solution_id": row.get("chain_id"),
-        "backing_chain_id": row.get("chain_id"),
-        "authority": "workflow_chain",
+        **_solution_authority_payload(),
         "name": row.get("program"),
         "status": row.get("status"),
-        "current_phase": row.get("current_wave_id"),
         "coordination_path": row.get("coordination_path"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
@@ -174,7 +296,7 @@ def handle_query_workflow_solution_status(
         "solutions": solutions,
         "count": len(solutions),
         "limit": query.limit,
-        "authority": "workflow_chain",
+        **_solution_authority_payload(),
     }
 
 

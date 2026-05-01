@@ -25,6 +25,8 @@ from runtime.receipt_store import proof_metrics
 from runtime.scope_resolver import resolve_scope
 from runtime.execution_packet_authority import (
     inspect_execution_packets,
+    load_workflow_run_packet_inspection,
+    PacketInspectionUnavailable,
     packet_inspection_from_row,
     resolve_execution_packet_revisions,
 )
@@ -299,39 +301,14 @@ def _shadow_packet_inspection_from_rows(
     run_id: str,
     run_row: dict,
 ) -> dict | None:
-    materialized = packet_inspection_from_row(run_row)
-    if materialized is not None:
-        return materialized
     try:
-        packet_rows = conn.execute(
-            """
-            SELECT COALESCE(
-                jsonb_agg(payload ORDER BY created_at, execution_packet_id),
-                '[]'::jsonb
-            ) AS packets
-            FROM execution_packets
-            WHERE run_id = $1
-            """,
-            run_id,
+        inspection, _source = load_workflow_run_packet_inspection(
+            conn,
+            run_id=run_id,
+            run_row=run_row,
         )
-    except Exception:
-        return None
-
-    if not packet_rows:
-        return None
-
-    packets = packet_rows[0].get("packets")
-    if isinstance(packets, str):
-        try:
-            packets = json.loads(packets)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return None
-    if not isinstance(packets, list) or not packets:
-        return None
-
-    try:
-        return inspect_execution_packets(packets, run_row=run_row)
-    except Exception:
+        return inspection
+    except (PacketInspectionUnavailable, Exception):
         return None
 
 

@@ -264,6 +264,218 @@
   background: rgba(0, 0, 0, 0.18);
 }
 
+/* ── prx-tile ────────────────────────────────────────────────── *
+ * Bare metric tile: label / value / detail / action stacked.
+ * NO border, NO bg-tint. Hover adds a hairline focus ring only.
+ * Use for at-a-glance dashboard metrics.
+ */
+.prx-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 124px;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.prx-tile:hover {
+  border-color: rgba(243, 238, 228, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+}
+.prx-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.prx-tile__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-tile__value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+}
+.prx-tile[data-tone="ok"] .prx-tile__value { color: var(--success); }
+.prx-tile[data-tone="warn"] .prx-tile__value { color: var(--warning); }
+.prx-tile[data-tone="err"] .prx-tile__value { color: var(--danger); }
+.prx-tile__detail {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.prx-tile__action {
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  transition: color 140ms ease;
+}
+.prx-tile:hover .prx-tile__action { color: var(--accent); }
+
+.prx-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px;
+}
+
+/* ── prx-list-panel ──────────────────────────────────────────── *
+ * Bare side / list panel: kicker + title + count badge + body.
+ * NO border, NO bg-tint, NO rim. The structure is type-only.
+ * Use for sidebar groups (Toolbelt Review, Recent Runs, etc.).
+ */
+.prx-list-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+.prx-list-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.prx-list-panel__head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prx-list-panel__eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.prx-list-panel__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-list-panel__head-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.prx-list-panel__count {
+  min-width: 26px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.prx-list-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── prx-status-row ──────────────────────────────────────────── *
+ * Single row in a list: led-dot + (title + detail) + meta.
+ * NO border per-row. Hover adds a faint bg.
+ * Use for sidebar list rows (review items, runs, opportunities).
+ */
+.prx-status-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: background 140ms ease;
+}
+.prx-status-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.prx-status-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.prx-status-row[aria-disabled="true"],
+.prx-status-row--static {
+  cursor: default;
+}
+.prx-status-row--static:hover {
+  background: transparent;
+}
+.prx-status-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prx-status-row__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-status-row__detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.prx-status-row__detail--mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.prx-status-row__meta {
+  align-self: start;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* ── prx-source-chip ─────────────────────────────────────────── *
  * Source-option pill with palette-tone dot. Replaces the
  * inline-color-hex chips in SourceOptionPills and surface tabs.

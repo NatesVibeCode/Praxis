@@ -17,19 +17,16 @@ def _solutionize_submit_response(result: dict[str, Any]) -> dict[str, Any]:
     """Translate workflow-chain submit output into Solution language."""
 
     payload = dict(result)
-    chain_id = payload.get("chain_id")
+    chain_id = payload.pop("chain_id", None)
     if chain_id:
         payload["solution_id"] = chain_id
-        payload["backing_chain_id"] = chain_id
+        payload["storage_authority"] = "workflow_chain"
     if "program" in payload:
         payload["solution_name"] = payload.get("program")
-    if "current_wave" in payload:
-        payload["current_phase"] = payload.pop("current_wave")
-    if "waves_total" in payload:
-        payload["phases_total"] = payload.pop("waves_total")
-    if "waves_completed" in payload:
-        payload["phases_completed"] = payload.pop("waves_completed")
-    payload["authority"] = "workflow_chain"
+    payload.pop("current_wave", None)
+    payload.pop("waves_total", None)
+    payload.pop("waves_completed", None)
+    payload["authority"] = "workflow_solution"
     payload["object_kind"] = "workflow_solution"
     return payload
 
@@ -72,13 +69,9 @@ def tool_praxis_solution(params: dict, _progress_emitter=None) -> dict:
 
     if action in _STATUS_ACTIONS:
         status_payload: dict[str, Any] = {}
-        for key in ("solution_id", "chain_id", "limit"):
+        for key in ("solution_id", "limit"):
             if key in payload:
                 status_payload[key] = payload[key]
-        if action in {"show", "status"} and "solution_id" not in status_payload:
-            chain_id = str(payload.get("chain_id") or "").strip()
-            if chain_id:
-                status_payload["solution_id"] = chain_id
         if _progress_emitter:
             _progress_emitter.emit(progress=0, total=1, message=f"Reading Solution {action}")
         result = execute_operation_from_env(
@@ -130,10 +123,6 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "solution_id": {
                         "type": "string",
                         "description": "Solution identifier for status/show.",
-                    },
-                    "chain_id": {
-                        "type": "string",
-                        "description": "Internal backing chain id accepted for status/show.",
                     },
                     "adopt_active": {
                         "type": "boolean",

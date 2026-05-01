@@ -7,7 +7,15 @@ from dataclasses import dataclass
 from typing import Any
 
 _VALID_AUTH_MOUNT_POLICIES = frozenset({"none", "provider_scoped", "all"})
-_VALID_NETWORK_POLICIES = frozenset({"disabled", "provider_only", "enabled"})
+# 'praxis_only' is the cage for delegated agent workers — distinct from
+# 'disabled' (which also cuts off Praxis MCP) and 'provider_only' (which
+# is not a hard egress guarantee). See
+# architecture-policy::business-agent-substrate::praxis-only-egress-is
+# -distinct-from-network-disabled. Closes BUG-E6CF8C82 (validator
+# rejected praxis_only as an unknown value).
+_VALID_NETWORK_POLICIES = frozenset(
+    {"disabled", "provider_only", "praxis_only", "enabled"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +26,16 @@ class CLIExecutionPolicy:
     @property
     def network_enabled(self) -> bool:
         return self.network_policy != "disabled"
+
+    @property
+    def praxis_only(self) -> bool:
+        """True when egress is clamped to the Praxis MCP bridge + admitted
+        provider/proxy routes — no open web. Workers reach the MCP bridge
+        and registered provider endpoints only. Sandbox runtime maps this
+        to a docker network configured via PRAXIS_ONLY_DOCKER_NETWORK; if
+        that env var is absent the policy fails closed (--network=none).
+        """
+        return self.network_policy == "praxis_only"
 
 
 def provider_cli_needs_network(profile: object | None) -> bool:

@@ -3,21 +3,23 @@ import { MoonWorkflowSilhouette } from './MoonWorkflowSilhouette';
 import { isAbortError } from '../shared/request';
 import {
   Button,
-  FrameCard,
-  LedDot,
+  EmptyStateExplainer,
+  ListPanel,
+  MetricTile,
+  PanelCard,
   ReceiptCard,
-  type StatusRailItem,
+  StatusRow,
+  type StatusRowTone,
 } from '../primitives';
-import type { LedTone } from '../primitives-prx';
 
-function ledToneFromTone(tone: 'healthy' | 'warning' | 'danger' | 'neutral'): LedTone {
+function rowToneFromTone(tone: 'healthy' | 'warning' | 'danger' | 'neutral'): StatusRowTone {
   if (tone === 'healthy') return 'ok';
   if (tone === 'warning') return 'live';
   if (tone === 'danger') return 'err';
   return 'idle';
 }
 
-function ledToneFromRunStatus(status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'): LedTone {
+function rowToneFromRunStatus(status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'): StatusRowTone {
   if (status === 'succeeded') return 'ok';
   if (status === 'failed') return 'err';
   if (status === 'running') return 'live';
@@ -152,13 +154,6 @@ interface ToolbeltReviewItem {
   detail: string;
   meta: string;
   onClick?: () => void;
-}
-
-function statusTone(tone: 'neutral' | 'healthy' | 'warning' | 'danger'): StatusRailItem['tone'] {
-  if (tone === 'healthy') return 'ok';
-  if (tone === 'warning') return 'warn';
-  if (tone === 'danger') return 'err';
-  return 'dim';
 }
 
 function useDashboardSnapshot() {
@@ -299,7 +294,7 @@ function WorkflowCard({
   const silhouetteNodeCount = hasRun ? 3 : 2;
 
   return (
-    <FrameCard
+    <PanelCard
       eyebrow={
         <span className="wf-card__eyebrow-row">
           <MoonWorkflowSilhouette
@@ -349,7 +344,7 @@ function WorkflowCard({
           <strong>{timeAgo(wf.last_invoked_at)}</strong>
         </div>
       </div>
-    </FrameCard>
+    </PanelCard>
   );
 }
 
@@ -376,17 +371,16 @@ function WorkflowSectionBlock({
 }) {
   return (
     <section className={`dash-section dash-section--${section.tone}`}>
-      <div className="dash-section__header">
-        <div>
-          <div className="dash-section__eyebrow">{section.eyebrow}</div>
-          <h2 className="dash-section__title">{section.title}</h2>
-          <p className="dash-section__copy">{section.description}</p>
-        </div>
-        <div className="dash-section__count">{loading ? '...' : section.count}</div>
-      </div>
+      <ListPanel
+        eyebrow={section.eyebrow}
+        title={section.title}
+        count={loading ? '…' : section.count}
+      >
+        <p className="dash-section__copy">{section.description}</p>
+      </ListPanel>
 
       {loading && section.count === 0 ? (
-        <div className="dash-section__loading">Refreshing workflow inventory...</div>
+        <div className="dash-section__loading">Refreshing workflow inventory…</div>
       ) : section.count > 0 ? (
         <div className="dash-section__grid">
           {section.workflows.map((workflow) => (
@@ -401,13 +395,12 @@ function WorkflowSectionBlock({
           ))}
         </div>
       ) : (
-        <div className="dash-empty">
-          <div className="dash-empty__title">{section.emptyTitle}</div>
-          <div className="dash-empty__copy">{section.emptyCopy}</div>
-          <button type="button" className="dash-empty__action" onClick={onPrimaryAction}>
-            {primaryActionLabel}
-          </button>
-        </div>
+        <EmptyStateExplainer
+          title={section.emptyTitle}
+          why={section.emptyCopy}
+          actionLabel={primaryActionLabel}
+          onAction={onPrimaryAction}
+        />
       )}
     </section>
   );
@@ -571,32 +564,6 @@ export function Dashboard({
       : summary.queue.status === 'ok'
         ? 'healthy'
         : 'neutral';
-  const stateSpine: Array<{ label: string; value: string; tone: 'neutral' | 'healthy' | 'warning' | 'danger' }> = [
-    {
-      label: 'State',
-      value: loading ? '...' : health.label,
-      tone: health.tone,
-    },
-    {
-      label: 'Queue',
-      value: loading
-        ? '...'
-        : summary.queue.error
-          ? 'Probe error'
-          : `${summary.queue.depth} waiting`,
-      tone: queueTone,
-    },
-    {
-      label: 'Runs',
-      value: loading ? '...' : `${summary.active_runs} active`,
-      tone: summary.active_runs > 0 ? 'warning' : 'neutral',
-    },
-  ];
-  const statusRailItems: StatusRailItem[] = stateSpine.map((row) => ({
-    label: row.label,
-    value: row.value,
-    tone: statusTone(row.tone),
-  }));
   const hasWorkflows = summary.workflow_counts.total > 0;
   const heroTitle = hasWorkflows
     ? 'Continue work'
@@ -774,62 +741,54 @@ export function Dashboard({
               )}
             </div>
 
-            <div className="dash-overview-grid" aria-label="Dashboard authority and actions">
+            <div className="prx-tile-grid" aria-label="Dashboard authority and actions">
               {overviewCards.map((card) => (
-                <button
+                <MetricTile
                   key={card.id}
-                  type="button"
-                  className="dash-tile"
+                  label={card.title}
+                  value={card.value}
+                  detail={card.detail}
+                  action={`${card.action} →`}
                   onClick={card.onClick}
                   aria-label={`${card.title}: ${card.value}`}
-                >
-                  <span className="dash-tile__label">{card.title}</span>
-                  <span className="dash-tile__value">{card.value}</span>
-                  <span className="dash-tile__detail">{card.detail}</span>
-                  <span className="dash-tile__action">{card.action} →</span>
-                </button>
+                />
               ))}
             </div>
           </section>
 
-          <section className="dash-run-instrument">
-            <div className="dash-receipts">
+          <div className="dash-receipts">
+            <ReceiptCard
+              state="sealed"
+              title="workflow.inventory"
+              meta="hydrated"
+              fields={[
+                { key: 'live', value: summary.workflow_counts.live },
+                { key: 'saved', value: summary.workflow_counts.saved },
+                { key: 'drafts', value: summary.workflow_counts.draft },
+                { key: 'result', value: 'hydrated · visible' },
+              ]}
+              seal={`${sealedRunCount} sealed`}
+            />
+            <button
+              type="button"
+              className="dash-receipt-button"
+              onClick={onOpenCosts}
+              title="View token spend (stays under Overview)"
+            >
               <ReceiptCard
-                className="dash-receipt-card dash-receipt-card--allow"
-                state="sealed"
-                title="workflow.inventory"
-                meta="hydrated"
+                state={health.tone === 'danger' ? 'refused' : 'verify'}
+                title="dashboard.health"
+                meta="verifier"
                 fields={[
-                  { key: 'live', value: summary.workflow_counts.live },
-                  { key: 'saved', value: summary.workflow_counts.saved },
-                  { key: 'drafts', value: summary.workflow_counts.draft },
-                  { key: 'result', value: 'hydrated · visible' },
+                  { key: 'pass', value: passRateLabel },
+                  { key: 'runs', value: summary.runs_24h },
+                  { key: 'spend', value: spendLabel },
+                  { key: 'state', value: health.label },
                 ]}
-                seal={`${sealedRunCount} sealed`}
+                seal="view spend"
               />
-
-              <button
-                type="button"
-                className="dash-receipt-button"
-                onClick={onOpenCosts}
-                title="View token spend (stays under Overview)"
-              >
-                <ReceiptCard
-                  className="dash-receipt-card dash-receipt-card--verify"
-                  state={health.tone === 'danger' ? 'refused' : 'verify'}
-                  title="dashboard.health"
-                  meta="verifier"
-                  fields={[
-                    { key: 'pass', value: passRateLabel },
-                    { key: 'runs', value: summary.runs_24h },
-                    { key: 'spend', value: spendLabel },
-                    { key: 'state', value: health.label },
-                  ]}
-                  seal="view spend"
-                />
-              </button>
-            </div>
-          </section>
+            </button>
+          </div>
 
 
           <div className="dash-board">
@@ -850,109 +809,58 @@ export function Dashboard({
                   />
                 ))
               ) : (
-                <section className="dash-section dash-start-panel">
-                  <div className="dash-section__header">
-                    <div>
-                      <h2 className="dash-section__title">Next step</h2>
-                      <p className="dash-section__copy">Pick the way you want to start. The contract and receipt surfaces stay attached.</p>
-                    </div>
+                <ListPanel eyebrow="Next step" title="Pick the way you want to start">
+                  <div className="prx-button-row">
+                    <Button size="lg" tone="ghost" onClick={onDescribe}>Describe job</Button>
+                    <Button size="lg" tone="ghost" onClick={onNewWorkflow}>Blank builder</Button>
+                    <Button size="lg" tone="ghost" onClick={onChat}>Chat</Button>
+                    <Button size="lg" tone="ghost" onClick={() => instanceFileRef.current?.click()}>Add file</Button>
                   </div>
-                  <div className="dash-start-panel__grid">
-                    <Button size="lg" tone="ghost" className="dash-start-panel__action" onClick={onDescribe}>
-                      <span>Describe job</span>
-                      <strong>Plain language into contract</strong>
-                    </Button>
-                    <Button size="lg" tone="ghost" className="dash-start-panel__action" onClick={onNewWorkflow}>
-                      <span>Blank builder</span>
-                      <strong>Wire the graph by hand</strong>
-                    </Button>
-                    <Button size="lg" tone="ghost" className="dash-start-panel__action" onClick={onChat}>
-                      <span>Chat</span>
-                      <strong>Shape the first lane beside the app</strong>
-                    </Button>
-                    <Button size="lg" tone="ghost" className="dash-start-panel__action" onClick={() => instanceFileRef.current?.click()}>
-                      <span>Add file</span>
-                      <strong>Attach context before the run</strong>
-                    </Button>
-                  </div>
-                </section>
+                </ListPanel>
               )}
             </div>
 
             <aside className="dash-board__rail">
-              <FrameCard
+              <ListPanel
                 eyebrow="Materialize"
                 title="Toolbelt Review"
                 count={loading ? '…' : toolbeltReviewItems.length}
               >
-                <div className="dash-review-list">
-                  {toolbeltReviewItems.map((item) => {
-                    const body = (
-                      <>
-                        <LedDot tone={ledToneFromTone(item.tone)} />
-                        <span className="dash-review-item__body">
-                          <strong>{item.title}</strong>
-                          <span>{item.detail}</span>
-                        </span>
-                        <em>{item.meta}</em>
-                      </>
-                    );
-                    if (item.onClick) {
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="dash-review-item"
-                          onClick={item.onClick}
-                        >
-                          {body}
-                        </button>
-                      );
-                    }
-                    return (
-                      <div key={item.id} className="dash-review-item dash-review-item--static">
-                        {body}
-                      </div>
-                    );
-                  })}
-                </div>
-              </FrameCard>
+                {toolbeltReviewItems.map((item) => (
+                  <StatusRow
+                    key={item.id}
+                    tone={rowToneFromTone(item.tone)}
+                    title={item.title}
+                    detail={item.detail}
+                    meta={item.meta}
+                    onClick={item.onClick}
+                  />
+                ))}
+              </ListPanel>
 
-              <FrameCard eyebrow="Recent execution" title="Recent Runs">
+              <ListPanel eyebrow="Recent execution" title="Recent Runs">
                 {visibleRuns.length > 0 ? (
-                  <div className="dash-run-list">
-                    {visibleRuns.slice(0, 8).map((run) => (
-                      <button
-                        key={run.run_id}
-                        type="button"
-                        className="dash-run"
-                        onClick={() => onViewRun(run.run_id)}
-                      >
-                        <LedDot tone={ledToneFromRunStatus(run.status)} />
-                        <div className="dash-run__body">
-                          <div className="dash-run__title">
-                            {runDisplayName(run)}
-                          </div>
-                          <div className="dash-run__meta">
-                            <span>{run.status}</span>
-                            <span>{run.total_jobs > 0 ? `${run.completed_jobs}/${run.total_jobs} jobs` : 'Awaiting jobs'}</span>
-                            <span>{run.created_at ? timeAgo(run.created_at) : 'Queued now'}</span>
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                  visibleRuns.slice(0, 8).map((run) => (
+                    <StatusRow
+                      key={run.run_id}
+                      tone={rowToneFromRunStatus(run.status)}
+                      title={runDisplayName(run)}
+                      detail={`${run.status} · ${run.total_jobs > 0 ? `${run.completed_jobs}/${run.total_jobs} jobs` : 'Awaiting jobs'}`}
+                      meta={run.created_at ? timeAgo(run.created_at) : 'Queued now'}
+                      onClick={() => onViewRun(run.run_id)}
+                    />
+                  ))
                 ) : (
-                  <div className="dash-empty dash-empty--compact">
-                    <div className="dash-empty__title">No recent runs</div>
-                    <div className="dash-empty__copy">
-                      Trigger a workflow and the latest executions will appear here with one-click inspection.
-                    </div>
-                  </div>
+                  <EmptyStateExplainer
+                    title="No recent runs"
+                    why="Trigger a workflow and the latest executions appear here with one-click inspection."
+                    actionLabel="Open Moon"
+                    onAction={onNewWorkflow}
+                  />
                 )}
-              </FrameCard>
+              </ListPanel>
 
-              <FrameCard
+              <ListPanel
                 eyebrow="Attached context"
                 title="Knowledge Base"
                 action={
@@ -962,81 +870,73 @@ export function Dashboard({
                 }
               >
                 {instanceFiles.length > 0 ? (
-                  <div className="dash-file-list">
-                    {instanceFiles.map((file) => (
-                      <div key={file.id} className="dash-file">
-                        <div className="dash-file__name">{file.filename}</div>
-                        <Button
-                          size="sm"
-                          tone="danger"
-                          onClick={() => deleteInstanceFile(file.id)}
-                        >
+                  instanceFiles.map((file) => (
+                    <StatusRow
+                      key={file.id}
+                      tone="idle"
+                      title={file.filename}
+                      meta={
+                        <Button size="sm" tone="danger" onClick={() => deleteInstanceFile(file.id)}>
                           Remove
                         </Button>
-                      </div>
-                    ))}
-                  </div>
+                      }
+                    />
+                  ))
                 ) : instanceFilesError ? (
-                  <div className="dash-empty dash-empty--compact dash-empty--danger" role="alert">
-                    <div className="dash-empty__title">File inventory unavailable</div>
-                    <div className="dash-empty__copy">
-                      {instanceFilesError}
-                    </div>
-                  </div>
+                  <EmptyStateExplainer
+                    title="File inventory unavailable"
+                    why={instanceFilesError}
+                    actionLabel="Retry"
+                    onAction={() => instanceFileRef.current?.click()}
+                  />
                 ) : (
-                  <div className="dash-empty dash-empty--compact">
-                    <div className="dash-empty__title">No files attached</div>
-                    <div className="dash-empty__copy">
-                      Upload briefs, notes, or source files so the workspace can reason over them during execution.
-                    </div>
-                  </div>
+                  <EmptyStateExplainer
+                    title="No files attached"
+                    why="Upload briefs, notes, or source files so the workspace can reason over them during execution."
+                    actionLabel="Add file"
+                    onAction={() => instanceFileRef.current?.click()}
+                  />
                 )}
-              </FrameCard>
+              </ListPanel>
 
-              <FrameCard
+              <ListPanel
                 eyebrow="Repeated work"
                 title="Tool Opportunities"
                 count={loading ? '…' : (snapshot?.tool_opportunities?.length ?? 0)}
               >
                 {(snapshot?.tool_opportunities?.length ?? 0) > 0 ? (
-                  <div className="dash-review-list">
-                    {(snapshot?.tool_opportunities ?? []).map((opp) => {
-                      const label = toolOpportunityLabel(opp);
-                      const detail = toolOpportunityDetail(opp);
-                      const tone: 'healthy' | 'neutral' = opp.distinct_surfaces > 1 ? 'healthy' : 'neutral';
-                      return (
-                        <button
-                          key={opp.shape_hash}
-                          type="button"
-                          className="dash-review-item"
-                          onClick={onDescribe}
-                          title={`${opp.shape_hash.slice(0, 12)} · ${opp.action_kinds.join(', ')}`}
-                        >
-                          <LedDot tone={ledToneFromTone(tone)} />
-                          <span className="dash-review-item__body">
-                            <strong>{label}</strong>
-                            {detail ? (
-                              <span className="dash-review-item__detail--mono">{detail}</span>
-                            ) : null}
-                          </span>
-                          <em>
-                            {`${opp.occurrence_count}×`}
-                            {opp.distinct_surfaces > 1 ? ` · ${opp.distinct_surfaces} surfaces` : ''}
-                            {opp.last_seen ? ` · ${timeAgo(opp.last_seen)}` : ''}
-                          </em>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  (snapshot?.tool_opportunities ?? []).map((opp) => {
+                    const label = toolOpportunityLabel(opp);
+                    const detail = toolOpportunityDetail(opp);
+                    const tone: 'healthy' | 'neutral' = opp.distinct_surfaces > 1 ? 'healthy' : 'neutral';
+                    const meta = [
+                      `${opp.occurrence_count}×`,
+                      opp.distinct_surfaces > 1 ? `${opp.distinct_surfaces} surfaces` : null,
+                      opp.last_seen ? timeAgo(opp.last_seen) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
+                    return (
+                      <StatusRow
+                        key={opp.shape_hash}
+                        tone={rowToneFromTone(tone)}
+                        title={label}
+                        detail={detail}
+                        detailMono
+                        meta={meta}
+                        onClick={onDescribe}
+                      />
+                    );
+                  })
                 ) : (
-                  <div className="dash-empty dash-empty--compact">
-                    <div className="dash-empty__title">Nothing repeating yet</div>
-                    <div className="dash-empty__copy">
-                      Patterns appear here once the same action shape is captured 3+ times — a signal that it's worth folding into a tool.
-                    </div>
-                  </div>
+                  <EmptyStateExplainer
+                    title="Nothing repeating yet"
+                    why="Patterns appear here once the same action shape is captured 3+ times — a signal that it's worth folding into a tool."
+                    actionLabel="Open builder"
+                    onAction={onDescribe}
+                  />
                 )}
-              </FrameCard>
+              </ListPanel>
             </aside>
           </div>
         </div>

@@ -52,10 +52,14 @@ def test_workflow_solution_status_translates_chain_waves_to_phases(monkeypatch) 
     assert result["ok"] is True
     assert result["view"] == "workflow_solution"
     assert result["solution_id"] == "workflow_chain_123"
+    assert result["authority"] == "workflow_solution"
+    assert result["storage_authority"] == "workflow_chain"
     assert result["current_phase"] == "phase_a"
     assert result["phases_total"] == 1
     assert result["phases"][0]["phase_id"] == "phase_a"
     assert result["phases"][0]["workflows"][0]["run_id"] == "workflow_001"
+    assert result["phases"][0]["workflow_ids"] == ["workflow_001"]
+    assert result["phases"][0]["active_workflow_ids"] == ["workflow_001"]
     assert "waves" not in result
 
 
@@ -83,8 +87,8 @@ def test_workflow_solution_list_returns_solution_summaries(monkeypatch) -> None:
     assert result["solutions"] == [
         {
             "solution_id": "workflow_chain_123",
-            "backing_chain_id": "workflow_chain_123",
-            "authority": "workflow_chain",
+            "authority": "workflow_solution",
+            "storage_authority": "workflow_chain",
             "name": "roadmap_burndown",
             "status": "queued",
             "current_phase": "phase_a",
@@ -132,8 +136,11 @@ def test_praxis_solution_submit_uses_solution_operation(monkeypatch) -> None:
         "requested_by_ref": "praxis_solution.submit",
     }
     assert result["solution_id"] == "workflow_chain_123"
+    assert "chain_id" not in result
     assert result["current_phase"] == "phase_a"
     assert result["phases_total"] == 2
+    assert result["authority"] == "workflow_solution"
+    assert result["storage_authority"] == "workflow_chain"
     assert "current_wave" not in result
     assert "waves_total" not in result
 
@@ -157,3 +164,48 @@ def test_praxis_solution_status_uses_solution_query(monkeypatch) -> None:
     assert captured["operation_name"] == "workflow_solution.status"
     assert captured["payload"] == {"solution_id": "workflow_chain_123"}
     assert result["ok"] is True
+
+
+def test_workflow_solution_normalizes_legacy_wave_refs(monkeypatch) -> None:
+    def _fake_status(_conn, chain_id: str):
+        assert chain_id == "workflow_chain_123"
+        return {
+            "chain_id": "workflow_chain_123",
+            "program": "roadmap_burndown",
+            "status": "running",
+            "current_wave": "wave_1_validation",
+            "coordination_path": "artifacts/workflow/solution.json",
+            "why": "Burn down routing authority work.",
+            "mode": "roadmap_burndown",
+            "waves": [
+                {
+                    "wave_id": "wave_0_triage",
+                    "status": "succeeded",
+                    "depends_on": [],
+                    "blocked_by": None,
+                    "runs": [{"run_id": "workflow_000", "run_status": "succeeded"}],
+                },
+                {
+                    "wave_id": "wave_1_validation",
+                    "status": "running",
+                    "depends_on": ["wave_0_triage"],
+                    "blocked_by": "wave_0_triage",
+                    "runs": [{"run_id": "workflow_001", "run_status": "running"}],
+                },
+            ],
+        }
+
+    monkeypatch.setattr(
+        "runtime.workflow_chain.get_workflow_chain_status",
+        _fake_status,
+    )
+
+    result = workflow_solution.handle_query_workflow_solution_status(
+        workflow_solution.WorkflowSolutionStatusQuery(solution_id="workflow_chain_123"),
+        SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+
+    assert result["current_phase"] == "phase_1_validation"
+    assert result["phases"][1]["phase_id"] == "phase_1_validation"
+    assert result["phases"][1]["depends_on"] == ["phase_0_triage"]
+    assert result["phases"][1]["blocked_by"] == "phase_0_triage"

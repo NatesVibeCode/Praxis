@@ -346,6 +346,15 @@ def compile_agent_context(
             "trigger_kind": trigger_kind,
             "trigger_source_ref": trigger_source_ref,
             "execution_bundle": {
+                # Phase B cage: mcp_tool_names is what the workflow MCP
+                # token minter consumes (runtime.workflow.mcp_bridge.
+                # workflow_mcp_tool_names → mint_workflow_mcp_session_token).
+                # Closes BUG-CE7D35D4 — admitted tools were declared in
+                # access_policy.allowed_tools but the minter ignored that
+                # list. Top-level mcp_tool_names is the executable cage;
+                # access_policy.allowed_tools stays as the audit-readable
+                # declaration.
+                "mcp_tool_names": list(allowed_tools),
                 "access_policy": {
                     "write_scope": list(write_envelope),
                     "network_policy": network_policy,

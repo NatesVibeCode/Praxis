@@ -259,7 +259,7 @@ def handle_request_agent_wake(
                payload, payload_hash, status
            )
            VALUES ($1, $2, $3, $4::jsonb, $5, 'pending')
-           ON CONFLICT (agent_principal_ref, trigger_kind, payload_hash)
+           ON CONFLICT (agent_principal_ref, trigger_kind, payload_hash, (COALESCE(trigger_event_id, 0)))
                WHERE payload_hash IS NOT NULL
                DO NOTHING
            RETURNING wake_id, received_at""",

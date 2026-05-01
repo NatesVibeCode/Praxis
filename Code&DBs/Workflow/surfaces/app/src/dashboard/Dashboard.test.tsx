@@ -309,8 +309,10 @@ describe('Dashboard', () => {
       />,
     );
 
-    const opportunity = await screen.findByTitle(/abc123toolop/);
-    fireEvent.click(opportunity);
-    expect(onDescribe).toHaveBeenCalledTimes(1);
+    // Tool Opportunity rows render via StatusRow primitive; the gateway-op label
+    // for 'workflow.run' humanizes to 'Run'. Click the row.
+    const opportunityRow = await screen.findByRole('button', { name: /Run/ });
+    fireEvent.click(opportunityRow);
+    expect(onDescribe).toHaveBeenCalled();
   });
 });

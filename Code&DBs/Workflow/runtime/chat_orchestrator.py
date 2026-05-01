@@ -264,6 +264,12 @@ class ChatOrchestrator:
         # Persist user message
         user_msg_id = self._persist_message(conversation_id, "user", user_content)
 
+        # If this conversation is pinned to an agent_principal, record a
+        # chat-trigger wake so the action lands in the agent's audit ledger
+        # alongside the synchronous chat reply (Phase A trigger convergence).
+        # Best-effort — never block the chat path.
+        self._maybe_request_agent_wake(conversation_id, user_content)
+
         # Load history
         messages = self._load_history(conversation_id, selection_context)
         resolved_max_tokens = _chat_max_tokens(
@@ -416,6 +422,9 @@ class ChatOrchestrator:
         """
         # Persist user message
         self._persist_message(conversation_id, "user", user_content)
+
+        # Pinned-agent chat-trigger wake (Phase A — same hook as send_message).
+        self._maybe_request_agent_wake(conversation_id, user_content)
 
         # Load history
         messages = self._load_history(conversation_id, selection_context)
@@ -623,6 +632,62 @@ class ChatOrchestrator:
         title = title[0].upper() + title[1:] if title else "Conversation"
 
         self._chat_store.update_title(conversation_id, title)
+
+    def _maybe_request_agent_wake(
+        self,
+        conversation_id: str,
+        user_content: str,
+    ) -> None:
+        """If this conversation is pinned to an agent_principal in
+        agent_registry.default_conversation_id, record a chat-trigger wake
+        through agent_wake.request. Best-effort — never blocks the chat path.
+
+        Phase A trigger convergence: pinned chat creates an agent_wakes row
+        (trigger_kind='chat') so chat / schedule / webhook all produce the
+        same wake shape and the agent's audit ledger is complete.
+        """
+        try:
+            principal_rows = self._pg.execute(
+                """SELECT agent_principal_ref, status
+                   FROM agent_registry
+                   WHERE default_conversation_id = $1
+                   LIMIT 1""",
+                conversation_id,
+            )
+        except Exception:
+            return
+        if not principal_rows:
+            return
+        principal = dict(principal_rows[0])
+        if str(principal.get("status") or "").strip() != "active":
+            return
+
+        from runtime.operations.commands.agent_principals import (
+            RequestAgentWakeCommand,
+            handle_request_agent_wake,
+        )
+
+        class _Subsystems:
+            def __init__(self, conn: Any) -> None:
+                self._conn = conn
+
+            def get_pg_conn(self) -> Any:
+                return self._conn
+
+        try:
+            command = RequestAgentWakeCommand(
+                agent_principal_ref=principal["agent_principal_ref"],
+                trigger_kind="chat",
+                trigger_source_ref=conversation_id,
+                payload={
+                    "conversation_id": conversation_id,
+                    "user_content_preview": user_content[:500],
+                },
+            )
+            handle_request_agent_wake(command, _Subsystems(self._pg))
+        except Exception:
+            # Wake recording is best-effort; chat continues regardless.
+            pass
 
     def _load_history(
         self,
