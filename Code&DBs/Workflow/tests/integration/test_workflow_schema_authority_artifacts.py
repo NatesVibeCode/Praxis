@@ -105,11 +105,11 @@ def test_proof_metrics_compile_authority_reads_readiness_tables_from_schema_auth
         if object_type == "table"
     }
     expected_compile_authority_objects = (
-        "compile_artifacts",
+        "materialize_artifacts",
         "capability_catalog",
         "verify_refs",
         "verification_registry",
-        "compile_index_snapshots",
+        "materialize_index_snapshots",
         "execution_packets",
         "repo_snapshots",
         "verifier_registry",

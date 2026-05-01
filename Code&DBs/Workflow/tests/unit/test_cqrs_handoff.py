@@ -24,7 +24,7 @@ def _publish_command() -> handoff_commands.PublishHandoffArtifactCommand:
 
 def _artifact_record() -> MaterializeArtifactRecord:
     return MaterializeArtifactRecord(
-        compile_artifact_id="compile_artifact.definition.deadbeef",
+        materialize_artifact_id="materialize_artifact.definition.deadbeef",
         artifact_kind="definition",
         artifact_ref="definition-1",
         revision_ref="definition-1",
@@ -42,7 +42,7 @@ def _artifact_record() -> MaterializeArtifactRecord:
 
 def _packet_record() -> MaterializeArtifactRecord:
     return MaterializeArtifactRecord(
-        compile_artifact_id="compile_artifact.packet_lineage.cafebabe",
+        materialize_artifact_id="materialize_artifact.packet_lineage.cafebabe",
         artifact_kind="packet_lineage",
         artifact_ref="packet-1",
         revision_ref="packet-1",
@@ -174,7 +174,7 @@ def test_consume_handoff_commits_checkpoint(monkeypatch: pytest.MonkeyPatch) -> 
 
         def load_compile_artifact_by_revision(self, **kwargs):
             return {
-                "compile_artifact_id": "compile_artifact.plan.deadbeef",
+                "materialize_artifact_id": "materialize_artifact.plan.deadbeef",
                 "artifact_kind": kwargs["artifact_kind"],
                 "artifact_ref": kwargs["revision_ref"],
                 "revision_ref": kwargs["revision_ref"],
@@ -232,7 +232,7 @@ def test_query_handoff_latest_and_lineage(monkeypatch: pytest.MonkeyPatch) -> No
             assert kwargs["artifact_kind"] == "definition"
             return [
                 {
-                    "compile_artifact_id": "artifact-2",
+                    "materialize_artifact_id": "artifact-2",
                     "artifact_kind": "definition",
                     "artifact_ref": "definition-1",
                     "revision_ref": "definition-2",
@@ -249,7 +249,7 @@ def test_query_handoff_latest_and_lineage(monkeypatch: pytest.MonkeyPatch) -> No
             assert kwargs["artifact_kind"] == "definition"
             return [
                 {
-                    "compile_artifact_id": "artifact-1",
+                    "materialize_artifact_id": "artifact-1",
                     "artifact_kind": "definition",
                     "artifact_ref": "definition-1",
                     "revision_ref": "definition-1",
@@ -261,7 +261,7 @@ def test_query_handoff_latest_and_lineage(monkeypatch: pytest.MonkeyPatch) -> No
                     "decision_ref": "decision-1",
                 },
                 {
-                    "compile_artifact_id": "artifact-2",
+                    "materialize_artifact_id": "artifact-2",
                     "artifact_kind": "definition",
                     "artifact_ref": "definition-1",
                     "revision_ref": "definition-2",
@@ -387,7 +387,7 @@ def test_handoff_round_trip_write_and_read(monkeypatch: pytest.MonkeyPatch) -> N
         def record_definition(self, **kwargs):
             payload = dict(kwargs["definition"])
             record = MaterializeArtifactRecord(
-                compile_artifact_id="compile_artifact.definition.definition-1",
+                materialize_artifact_id="materialize_artifact.definition.definition-1",
                 artifact_kind="definition",
                 artifact_ref=payload["definition_revision"],
                 revision_ref=payload["definition_revision"],

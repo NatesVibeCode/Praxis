@@ -10827,7 +10827,12 @@
         "object_name": "tool_opportunities_pending"
       }
     ],
-    "384_chat_picker_full_model_coverage.sql": [],
+    "384_chat_picker_full_model_coverage.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.384_chat_picker_full_model_coverage.sql"
+      }
+    ],
     "386_workflow_context_authority.sql": [
       {
         "object_type": "table",
@@ -10996,7 +11001,12 @@
         "object_name": "touch_synthetic_environments_updated_at"
       }
     ],
-    "389_tool_opportunities_view_pin.sql": [],
+    "389_tool_opportunities_view_pin.sql": [
+      {
+        "object_type": "view",
+        "object_name": "tool_opportunities_pending"
+      }
+    ],
     "390_register_action_fingerprint_record_operation.sql": [
       {
         "object_type": "row",

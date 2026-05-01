@@ -17,11 +17,11 @@ _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
 
 class _ArtifactConn:
     def __init__(self) -> None:
-        self.compile_artifact_rows: list[dict[str, object]] = []
+        self.materialize_artifact_rows: list[dict[str, object]] = []
 
     def execute(self, query: str, *args):
         if "INSERT INTO materialize_artifacts" in query:
-            self.compile_artifact_rows.append(
+            self.materialize_artifact_rows.append(
                 {
                     "materialize_artifact_id": args[0],
                     "artifact_kind": args[1],
@@ -41,7 +41,7 @@ class _ArtifactConn:
             input_fingerprint = args[1]
             return [
                 row
-                for row in self.compile_artifact_rows
+                for row in self.materialize_artifact_rows
                 if row["artifact_kind"] == artifact_kind and row["input_fingerprint"] == input_fingerprint
             ]
         return []
@@ -173,7 +173,7 @@ def test_compile_prose_fails_on_invalid_reusable_definition_artifact(monkeypatch
         conn=conn,
         materialize_index_snapshot=snapshot,
     )
-    conn.compile_artifact_rows[0]["content_hash"] = "not-the-real-hash"
+    conn.materialize_artifact_rows[0]["content_hash"] = "not-the-real-hash"
 
     with pytest.raises(RuntimeError, match="materialize_artifact.reuse_failed"):
         compiler.materialize_prose(
@@ -195,8 +195,8 @@ def test_compile_prose_reuses_definition_artifact_when_db_returns_json_strings(
         conn=conn,
         materialize_index_snapshot=snapshot,
     )
-    conn.compile_artifact_rows[0]["authority_refs"] = json.dumps(conn.compile_artifact_rows[0]["authority_refs"])
-    conn.compile_artifact_rows[0]["payload"] = json.dumps(conn.compile_artifact_rows[0]["payload"])
+    conn.materialize_artifact_rows[0]["authority_refs"] = json.dumps(conn.materialize_artifact_rows[0]["authority_refs"])
+    conn.materialize_artifact_rows[0]["payload"] = json.dumps(conn.materialize_artifact_rows[0]["payload"])
 
     monkeypatch.setattr(
         "runtime.intent_matcher.IntentMatcher",
@@ -250,7 +250,7 @@ def test_plan_definition_skips_invalid_reusable_artifact() -> None:
         "trigger_intent": [],
     }
     planner.plan_definition(definition, title="Alpha", conn=conn)
-    conn.compile_artifact_rows[0]["payload"]["plan_revision"] = "plan_tampered"
+    conn.materialize_artifact_rows[0]["payload"]["plan_revision"] = "plan_tampered"
 
     result = planner.plan_definition(definition, title="Alpha", conn=conn)
 

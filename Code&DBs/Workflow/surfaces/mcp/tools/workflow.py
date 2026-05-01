@@ -3087,7 +3087,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": (
                             "Pipeline selector for materialize. True (default) routes through "
                             "compose_plan_via_llm (synthesis + N-way fork-out, plan_synthesis + "
-                            "plan_fork_author task types). False routes through compile_prose "
+                            "plan_fork_author task types). False routes through materialize_prose "
                             "(compile_synthesize → compile_pill_match → compile_author → "
                             "compile_finalize sub-tasks; runs voting-based binding-gate "
                             "auto-resolution)."

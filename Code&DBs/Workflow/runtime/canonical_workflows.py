@@ -1240,15 +1240,15 @@ def mutate_workflow_build(
                 compose_result=compose_result,
             )
         else:
-            from runtime.materializer import compile_prose
+            from runtime.materializer import materialize_prose
 
-            compile_result = compile_prose(
+            materialize_result = materialize_prose(
                 prose,
                 title=title or None,
                 enable_llm=enable_llm_raw if isinstance(enable_llm_raw, bool) else None,
                 conn=conn,
             )
-            materialized_definition = compile_result.get("definition")
+            materialized_definition = materialize_result.get("definition")
             if not isinstance(materialized_definition, dict):
                 raise WorkflowRuntimeBoundaryError("bootstrap did not produce a definition")
             definition = _json_clone(materialized_definition)

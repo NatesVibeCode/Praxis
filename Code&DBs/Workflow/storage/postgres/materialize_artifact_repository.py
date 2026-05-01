@@ -65,7 +65,7 @@ class PostgresCompileArtifactRepository:
         payload: Mapping[str, Any],
         decision_ref: str,
     ) -> str:
-        normalized_compile_artifact_id = _require_text(
+        normalized_materialize_artifact_id = _require_text(
             materialize_artifact_id,
             field_name="materialize_artifact_id",
         )
@@ -95,7 +95,7 @@ class PostgresCompileArtifactRepository:
                 decision_ref = EXCLUDED.decision_ref,
                 updated_at = now()
             """,
-            normalized_compile_artifact_id,
+            normalized_materialize_artifact_id,
             _require_text(artifact_kind, field_name="artifact_kind"),
             _require_text(artifact_ref, field_name="artifact_ref"),
             _require_text(revision_ref, field_name="revision_ref"),
@@ -112,7 +112,7 @@ class PostgresCompileArtifactRepository:
             ),
             _require_text(decision_ref, field_name="decision_ref"),
         )
-        return normalized_compile_artifact_id
+        return normalized_materialize_artifact_id
 
     def load_compile_artifacts_for_input(
         self,

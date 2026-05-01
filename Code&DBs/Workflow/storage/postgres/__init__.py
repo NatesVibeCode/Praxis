@@ -95,7 +95,7 @@ from .provider_concurrency_repository import (
 )
 from .receipt_repository import PostgresReceiptRepository
 from .evidence_repository import PostgresEvidenceRepository
-from .compile_artifact_repository import PostgresCompileArtifactRepository
+from .materialize_artifact_repository import PostgresCompileArtifactRepository
 from .command_repository import PostgresCommandRepository
 from .debate_metrics_repository import PostgresDebateMetricsRepository
 from .friction_repository import PostgresFrictionRepository

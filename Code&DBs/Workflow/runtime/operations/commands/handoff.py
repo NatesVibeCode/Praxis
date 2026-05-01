@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
-from storage.postgres.compile_artifact_repository import PostgresCompileArtifactRepository
+from storage.postgres.materialize_artifact_repository import PostgresCompileArtifactRepository
 from storage.postgres.subscription_repository import PostgresSubscriptionRepository
 
 

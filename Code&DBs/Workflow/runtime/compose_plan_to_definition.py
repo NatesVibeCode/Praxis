@@ -1,7 +1,7 @@
 """Translator: authored plan_packets → workflow definition for the build canvas.
 
 The Praxis "Describe it" UI compile path historically called
-``runtime.materializer.compile_prose`` which produces a ``definition`` whose
+``runtime.materializer.materialize_prose`` which produces a ``definition`` whose
 ``references`` + ``draft_flow`` are auto-converted to a ``build_graph`` and
 ``binding_ledger`` by ``runtime.build_authority.build_authority_bundle``.
 

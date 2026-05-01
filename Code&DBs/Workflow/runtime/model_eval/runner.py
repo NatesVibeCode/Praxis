@@ -867,7 +867,7 @@ def _persist_case_run(
 
 def _persist_compile_artifacts(conn: Any, result: dict[str, Any]) -> None:
     try:
-        from storage.postgres.compile_artifact_repository import PostgresCompileArtifactRepository
+        from storage.postgres.materialize_artifact_repository import PostgresCompileArtifactRepository
     except Exception:
         return
     repo = PostgresCompileArtifactRepository(conn)
@@ -885,7 +885,7 @@ def _persist_compile_artifacts(conn: Any, result: dict[str, Any]) -> None:
         artifact_ref = f"{artifact_kind}.{content_hash}"
         try:
             repo.upsert_compile_artifact(
-                compile_artifact_id=f"compile_artifact.{artifact_kind}.{content_hash}",
+                materialize_artifact_id=f"materialize_artifact.{artifact_kind}.{content_hash}",
                 artifact_kind=artifact_kind,
                 artifact_ref=artifact_ref,
                 revision_ref=artifact_ref,
@@ -904,7 +904,7 @@ def _persist_compile_artifacts(conn: Any, result: dict[str, Any]) -> None:
             )
         except Exception as exc:  # noqa: BLE001 - migration may not have widened artifact_kind yet.
             result.setdefault("persistence_warnings", []).append(
-                f"compile_artifacts write skipped: {type(exc).__name__}: {exc}"
+                f"materialize_artifacts write skipped: {type(exc).__name__}: {exc}"
             )
 
 
