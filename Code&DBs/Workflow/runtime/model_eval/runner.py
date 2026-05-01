@@ -11,6 +11,12 @@ from typing import Any
 
 from .catalog import build_suite_plan, catalog_version_hash
 from .openrouter import BLOCKED_PROVIDER_SLUGS, OpenRouterError, build_lab_request, chat_completion
+from .pins import (
+    MODEL_EVAL_WORKER_TASK_TYPE,
+    PinnedModelEvalRouteError,
+    pinned_candidate_ref_from_model_config,
+    validate_model_eval_model_config,
+)
 from .validators import validate_task_output
 
 
@@ -125,6 +131,103 @@ def _parse_message(raw: dict[str, Any], *, tool_task: bool) -> tuple[dict[str, A
     return parsed, None
 
 
+def _choice_message(raw: dict[str, Any]) -> dict[str, Any]:
+    choice = ((raw.get("choices") or [{}])[0] or {}) if isinstance(raw, dict) else {}
+    message = choice.get("message") if isinstance(choice, dict) else {}
+    return message if isinstance(message, dict) else {}
+
+
+def _tool_call_arguments(call: dict[str, Any]) -> dict[str, Any]:
+    function = call.get("function") if isinstance(call.get("function"), dict) else {}
+    raw_arguments = function.get("arguments") or call.get("arguments") or {}
+    if isinstance(raw_arguments, dict):
+        return dict(raw_arguments)
+    if isinstance(raw_arguments, str) and raw_arguments.strip():
+        try:
+            parsed = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            return {"raw_arguments": raw_arguments}
+        return dict(parsed) if isinstance(parsed, dict) else {"value": parsed}
+    return {}
+
+
+def _tool_call_name(call: dict[str, Any]) -> str:
+    function = call.get("function") if isinstance(call.get("function"), dict) else {}
+    return str(function.get("name") or call.get("name") or "").strip()
+
+
+def _dispatch_tool_call(
+    subsystems: Any | None,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if subsystems is None:
+        return {
+            "ok": False,
+            "status": "permission_refused",
+            "error": "tool_execution_loop requires gateway subsystems for tool dispatch",
+        }
+    from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+
+    operation_name = ""
+    requested_mode = "query"
+    payload = dict(arguments)
+    if tool_name == "praxis_search":
+        operation_name = "search.federated"
+        payload.setdefault("query", "model eval authority")
+        payload.setdefault("sources", ["code", "decisions", "knowledge", "bugs"])
+    elif tool_name == "praxis_bugs":
+        operation_name = "search.bugs"
+        payload = {"query": str(arguments.get("query") or "model eval"), "limit": int(arguments.get("limit") or 10)}
+    elif tool_name == "praxis_operator_decisions":
+        operation_name = "operator.decision_list"
+        payload.pop("action", None)
+        payload.setdefault("active_only", True)
+    elif tool_name == "praxis_model_eval":
+        action = str(arguments.get("action") or "plan").strip().lower()
+        operation_name = {
+            "plan": "model_eval_plan",
+            "inspect": "model_eval_inspect",
+            "compare": "model_eval_compare",
+            "export": "model_eval_export",
+        }.get(action, "")
+        if not operation_name:
+            return {
+                "ok": False,
+                "status": "permission_refused",
+                "error": f"model eval tool action {action!r} is not admitted inside tool loop",
+            }
+        payload.pop("action", None)
+    else:
+        return {
+            "ok": False,
+            "status": "permission_refused",
+            "error": f"tool {tool_name!r} has no admitted Model Eval dispatcher",
+        }
+    try:
+        return execute_operation_from_subsystems(
+            subsystems,
+            operation_name=operation_name,
+            payload=payload,
+            requested_mode=requested_mode,
+        )
+    except Exception as exc:  # noqa: BLE001 - failure is eval evidence.
+        return {
+            "ok": False,
+            "status": "tool_error",
+            "operation_name": operation_name,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _truncate_tool_content(value: Any, *, limit: int = 6000) -> str:
+    text = json.dumps(value, sort_keys=True, default=str)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
+
+
 def _write_artifacts(run_dir: Path, payload: dict[str, Any]) -> list[str]:
     written: list[str] = []
     for artifact in payload.get("artifacts") or []:
@@ -203,6 +306,211 @@ def _seed(config_id: str, task_id: str, variant_id: str) -> int:
     return int(digest[:16], 16) % 2_000_000_000
 
 
+def _run_tool_execution_loop(
+    *,
+    task: dict[str, Any],
+    model_config: dict[str, Any],
+    prompt_variant: dict[str, Any],
+    manifest: dict[str, Any],
+    run_dir: Path,
+    system_prompt: str,
+    provider_order: list[str],
+    timeout_seconds: int,
+    dry_run: bool,
+    supports_seed: bool,
+    subsystems: Any | None,
+) -> dict[str, Any]:
+    config_id = str(manifest.get("config_id") or "")
+    task_id = str(manifest.get("task_id") or "")
+    variant_id = str(manifest.get("prompt_variant_id") or "default")
+    tools = task.get("tools") if isinstance(task.get("tools"), list) else []
+    transcript: dict[str, Any] = {
+        "task_id": task_id,
+        "run_mode": "tool_execution_loop",
+        "steps": [],
+    }
+    try:
+        request = build_lab_request(
+            model_slug=str(model_config["model_slug"]),
+            provider_order=provider_order,
+            system_prompt=system_prompt,
+            user_prompt=str(task.get("prompt") or ""),
+            max_tokens=int(task.get("max_tokens") or 3000),
+            temperature=model_config.get("temperature"),
+            reasoning_effort=model_config.get("reasoning_effort"),
+            tools=tools,
+            seed=_seed(config_id, task_id, variant_id) if supports_seed else None,
+        )
+    except OpenRouterError as exc:
+        manifest.update({"ok": False, "status": "privacy_rejected", "error": str(exc), "cost": 0.0})
+        _write_json(run_dir / "_manifest.json", manifest)
+        return manifest
+    messages = list(request.get("messages") or [])
+    manifest["request_hash"] = _stable_hash(request)
+    manifest["request_artifact"] = _content_addressed_json(
+        request,
+        artifact_kind="model_eval.request",
+        logical_path="_request.json",
+    )
+    manifest["request_preview"] = {
+        "agent": manifest.get("agent"),
+        "task_type": MODEL_EVAL_WORKER_TASK_TYPE,
+        "model_eval_candidate_ref": manifest.get("model_eval_candidate_ref"),
+        "model": request.get("model"),
+        "provider": request.get("provider"),
+        "has_tools": bool(request.get("tools")),
+        "max_tokens": request.get("max_tokens") or request.get("max_completion_tokens"),
+        "reasoning": request.get("reasoning"),
+        "seed": request.get("seed"),
+        "supports_seed": supports_seed,
+        "max_steps": int(task.get("max_steps") or 8),
+    }
+    if dry_run:
+        transcript["steps"].append({"kind": "planned", "tools": [_tool_call_name({"function": tool.get("function", {})}) for tool in tools if isinstance(tool, dict)]})
+        manifest.update({"ok": True, "status": "planned", "cost": 0.0, "tool_transcript": transcript})
+        _write_json(run_dir / "_manifest.json", manifest)
+        return manifest
+
+    started = time.perf_counter()
+    total_cost = 0.0
+    raw_responses: list[dict[str, Any]] = []
+    final_payload: dict[str, Any] | None = None
+    max_steps = max(1, min(int(task.get("max_steps") or 8), 12))
+    for step_index in range(max_steps):
+        step_request = dict(request)
+        step_request["messages"] = messages
+        raw = chat_completion(step_request, timeout_seconds=min(timeout_seconds, 30))
+        raw_responses.append(raw)
+        total_cost += float(((raw.get("usage") or {}).get("cost") or 0.0))
+        message = _choice_message(raw)
+        transcript["steps"].append(
+            {
+                "kind": "model_turn",
+                "step": step_index + 1,
+                "served_provider": raw.get("provider"),
+                "served_model": raw.get("model"),
+                "content_present": bool(message.get("content")),
+                "tool_call_count": len(message.get("tool_calls") or []),
+            }
+        )
+        if raw.get("ok") is False or raw.get("error"):
+            manifest.update({"ok": False, "status": "api_error", "error": raw.get("error"), "cost": round(total_cost, 8)})
+            break
+        route_check = _served_provider_check(provider_order, raw.get("provider"))
+        if not route_check.get("ok"):
+            manifest.update({"ok": False, "status": "route_mismatch", "error": route_check.get("detail"), "route_check": route_check, "cost": round(total_cost, 8)})
+            break
+        tool_calls = message.get("tool_calls") or []
+        if tool_calls:
+            messages.append(message)
+            for call in tool_calls:
+                if not isinstance(call, dict):
+                    continue
+                tool_name = _tool_call_name(call)
+                arguments = _tool_call_arguments(call)
+                tool_call_id = str(call.get("id") or f"tool_call_{step_index + 1}")
+                transcript["steps"].append(
+                    {
+                        "kind": "tool_call",
+                        "step": step_index + 1,
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                    }
+                )
+                tool_result = _dispatch_tool_call(
+                    subsystems,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+                receipt = tool_result.get("operation_receipt") if isinstance(tool_result, dict) else None
+                receipt_id = receipt.get("receipt_id") if isinstance(receipt, dict) else None
+                transcript["steps"].append(
+                    {
+                        "kind": "tool_result",
+                        "step": step_index + 1,
+                        "tool_name": tool_name,
+                        "ok": bool(tool_result.get("ok")) if isinstance(tool_result, dict) else False,
+                        "receipt_id": receipt_id,
+                        "operation_name": tool_result.get("operation_name") if isinstance(tool_result, dict) else None,
+                        "error": tool_result.get("error") if isinstance(tool_result, dict) else None,
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": _truncate_tool_content(tool_result),
+                    }
+                )
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            try:
+                parsed = json.loads(content)
+                final_payload = parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                final_payload = None
+        break
+    else:
+        manifest.update({"ok": False, "status": "timeout", "error": "tool execution loop reached max_steps"})
+
+    transcript_artifact = {
+        "path": "tool_transcript.json",
+        "media_type": "application/json",
+        "content": json.dumps(transcript, indent=2, sort_keys=True, default=str),
+    }
+    payload = final_payload if isinstance(final_payload, dict) else {
+        "task_id": task_id,
+        "answer": "tool execution loop transcript recorded",
+        "artifacts": [],
+    }
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, list):
+        artifacts = []
+    artifacts.append(transcript_artifact)
+    payload["artifacts"] = artifacts
+    manifest["duration_s"] = round(time.perf_counter() - started, 3)
+    manifest["latency_ms"] = int(round(float(manifest["duration_s"]) * 1000))
+    manifest["served_provider"] = raw_responses[-1].get("provider") if raw_responses else None
+    manifest["served_model"] = raw_responses[-1].get("model") if raw_responses else None
+    manifest["cost"] = round(total_cost, 8)
+    manifest["raw_response_hash"] = _stable_hash(raw_responses)
+    manifest["raw_response_artifact"] = _content_addressed_json(
+        raw_responses,
+        artifact_kind="model_eval.raw_response",
+        logical_path="_raw.json",
+    )
+    _write_json(run_dir / "_raw.json", {"responses": raw_responses, "transcript": transcript})
+    _write_json(run_dir / "_payload.json", payload)
+    manifest["payload_hash"] = _stable_hash(payload)
+    manifest["payload_artifact"] = _content_addressed_json(
+        payload,
+        artifact_kind="model_eval.payload",
+        logical_path="_payload.json",
+    )
+    if "status" not in manifest:
+        try:
+            written = _write_artifacts(run_dir, payload)
+            artifact_refs = _artifact_refs(payload)
+        except ValueError as exc:
+            manifest.update({"ok": False, "status": "artifact_error", "error": str(exc)})
+        else:
+            verification = validate_task_output(task, payload)
+            manifest.update(
+                {
+                    "ok": bool(verification.get("ok")),
+                    "status": "verified" if verification.get("ok") else "verification_failed",
+                    "score": verification.get("score"),
+                    "verification": verification,
+                    "artifact_paths": written,
+                    "artifact_refs": artifact_refs,
+                    "tool_transcript": transcript,
+                }
+            )
+    _write_json(run_dir / "_manifest.json", manifest)
+    return manifest
+
+
 def _run_one(
     *,
     task: dict[str, Any],
@@ -211,6 +519,7 @@ def _run_one(
     output_root: Path,
     timeout_seconds: int,
     dry_run: bool,
+    subsystems: Any | None = None,
 ) -> dict[str, Any]:
     config_id = str(model_config.get("config_id") or model_config.get("model_slug") or "model")
     task_id = str(task.get("task_id") or "task")
@@ -226,13 +535,18 @@ def _run_one(
         for item in (model_config.get("provider_order") or [])
         if str(item).strip()
     ]
+    pinned_agent: str | None = None
+    candidate_ref = pinned_candidate_ref_from_model_config(model_config)
     manifest: dict[str, Any] = {
         "run_id": run_id,
         "task_id": task_id,
         "task_family": task.get("family"),
         "suite_slug": task.get("suite_slug"),
+        "task_type": MODEL_EVAL_WORKER_TASK_TYPE,
         "config_id": config_id,
         "model_slug": model_config.get("model_slug"),
+        "agent": model_config.get("agent") or model_config.get("agent_slug"),
+        "model_eval_candidate_ref": candidate_ref,
         "provider_order": provider_order,
         "prompt_variant_id": variant_id,
         "run_mode": _run_mode(task),
@@ -248,7 +562,36 @@ def _run_one(
         "catalog_version_hash": catalog_version_hash(),
         "dry_run": dry_run,
     }
+    try:
+        pinned_agent = validate_model_eval_model_config(model_config)
+    except PinnedModelEvalRouteError as exc:
+        status = "privacy_rejected" if "blocked" in str(exc).lower() else "permission_refused"
+        manifest.update(
+            {
+                "ok": False,
+                "status": status,
+                "error": str(exc),
+                "cost": 0.0,
+            }
+        )
+        _write_json(run_dir / "_manifest.json", manifest)
+        return manifest
+    manifest["agent"] = pinned_agent
     supports_seed = bool(model_config.get("supports_seed", True))
+    if _run_mode(task) == "tool_execution_loop":
+        return _run_tool_execution_loop(
+            task=task,
+            model_config=model_config,
+            prompt_variant=prompt_variant,
+            manifest=manifest,
+            run_dir=run_dir,
+            system_prompt=system_prompt,
+            provider_order=provider_order,
+            timeout_seconds=timeout_seconds,
+            dry_run=dry_run,
+            supports_seed=supports_seed,
+            subsystems=subsystems,
+        )
     try:
         request = build_lab_request(
             model_slug=str(model_config["model_slug"]),
@@ -272,6 +615,9 @@ def _run_one(
         logical_path="_request.json",
     )
     manifest["request_preview"] = {
+        "agent": pinned_agent,
+        "task_type": MODEL_EVAL_WORKER_TASK_TYPE,
+        "model_eval_candidate_ref": candidate_ref,
         "model": request.get("model"),
         "provider": request.get("provider"),
         "has_tools": bool(request.get("tools")),
@@ -371,6 +717,7 @@ def run_model_eval_case(
     timeout_seconds: int,
     dry_run: bool,
     trial_number: int = 1,
+    subsystems: Any | None = None,
 ) -> dict[str, Any]:
     result = _run_one(
         task=task,
@@ -379,6 +726,7 @@ def run_model_eval_case(
         output_root=Path(output_root),
         timeout_seconds=timeout_seconds,
         dry_run=dry_run,
+        subsystems=subsystems,
     )
     result["trial_number"] = trial_number
     return result
@@ -743,6 +1091,7 @@ def run_model_eval_matrix(
                                 output_root=output_root,
                                 timeout_seconds=timeout_seconds,
                                 dry_run=dry_run,
+                                subsystems=subsystems,
                             )
                             result["trial_number"] = trial_number
                             result.setdefault("persistence_warnings", []).append(
@@ -769,6 +1118,7 @@ def run_model_eval_matrix(
                             output_root=output_root,
                             timeout_seconds=timeout_seconds,
                             dry_run=dry_run,
+                            subsystems=subsystems,
                         )
                         result["trial_number"] = trial_number
                     results.append(result)
@@ -787,7 +1137,11 @@ def run_model_eval_matrix(
 
     passed = sum(1 for item in results if item.get("ok"))
     summary = {
-        "ok": not plan.get("import_errors") and (dry_run or passed == len(results)),
+        "ok": (
+            not plan.get("import_errors")
+            and not plan.get("model_config_errors")
+            and (dry_run or passed == len(results))
+        ),
         "lab_run_id": lab_run_id,
         "authority": "authority.model_eval",
         "artifact_root": str(output_root),
@@ -806,6 +1160,7 @@ def run_model_eval_matrix(
             "prompt_variant_count": plan["prompt_variant_count"],
             "catalog_version_hash": plan.get("catalog_version_hash"),
             "import_errors": plan["import_errors"],
+            "model_config_errors": plan.get("model_config_errors") or [],
             "consistency_contract": plan["consistency_contract"],
         },
     }

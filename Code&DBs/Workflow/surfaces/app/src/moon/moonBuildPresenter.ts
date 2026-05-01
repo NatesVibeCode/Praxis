@@ -14,7 +14,7 @@ export type GlyphType =
   | 'research' | 'classify' | 'draft' | 'notify' | 'review' | 'tool' | 'blocked'
   | 'analyze' | 'decompose' | 'diff' | 'chat' | 'spec' | 'build' | 'test'
   | 'deploy' | 'data' | 'metric' | 'render' | 'adversarial' | 'validate'
-  | 'idea' | 'summary' | 'webhook' | 'schedule';
+  | 'idea' | 'summary' | 'webhook' | 'schedule' | 'arrow' | 'loop' | 'warning';
 
 /**
  * Type vocabulary: a *token* (word-boundary match) found in a label maps

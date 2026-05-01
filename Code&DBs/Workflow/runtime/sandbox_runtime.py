@@ -751,6 +751,12 @@ class SandboxExecutionResult:
     provider_latency_ms: int
     execution_mode: str
     workspace_root: str
+    execution_target_ref: str = ""
+    execution_target_kind: str = ""
+    execution_profile_ref: str = ""
+    isolation_level: str = ""
+    packaging_kind: str = ""
+    target_resolution_reason: str = ""
     workspace_snapshot_ref: str = ""
     workspace_snapshot_cache_hit: bool = False
     container_cpu_percent: float | None = None
@@ -2182,6 +2188,14 @@ class SandboxRuntime:
                         + ", ".join(sorted(missing_artifacts))
                     )
                 artifact_refs = tuple(persisted_refs or artifact_refs)
+            from runtime.execution_targets import resolution_for_payload
+
+            resolution = resolution_for_payload(
+                execution_transport=result.execution_transport,
+                sandbox_provider=result.sandbox_provider,
+                execution_mode=result.execution_mode,
+                workspace_materialization=hydration_receipt.workspace_materialization,
+            )
             return SandboxExecutionResult(
                 sandbox_session_id=result.sandbox_session_id,
                 sandbox_group_id=result.sandbox_group_id,
@@ -2198,6 +2212,12 @@ class SandboxRuntime:
                 provider_latency_ms=result.provider_latency_ms,
                 execution_mode=result.execution_mode,
                 workspace_root=result.workspace_root,
+                execution_target_ref=resolution.execution_target_ref,
+                execution_target_kind=resolution.execution_target_kind,
+                execution_profile_ref=resolution.execution_profile_ref,
+                isolation_level=resolution.isolation_level,
+                packaging_kind=resolution.packaging_kind,
+                target_resolution_reason=resolution.target_resolution_reason,
                 workspace_snapshot_ref=(
                     hydration_receipt.workspace_snapshot_ref
                     or workspace_snapshot_ref

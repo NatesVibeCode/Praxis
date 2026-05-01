@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 
 import {
@@ -10,10 +10,12 @@ import {
   KbdCluster,
   LedDot,
   ManifestTree,
+  RadioPillGroup,
   ReceiptCard,
   Runlog,
   SectionStrip,
   Sparkline,
+  TableFilterInput,
   TokenChip,
 } from '../DisplayPrimitives';
 
@@ -45,6 +47,33 @@ describe('display primitives render canonical prx-* shapes', () => {
     expect(tree).toHaveClass('prx-tree');
     expect(tree.querySelector('.row .glyph')).toBeInTheDocument();
     expect(tree.querySelector('.row .meta')).toBeInTheDocument();
+  });
+
+  test('RadioPillGroup renders selectable radio pills', () => {
+    const onChange = vi.fn();
+    render(
+      <RadioPillGroup
+        ariaLabel="Atlas view"
+        value="map"
+        onChange={onChange}
+        options={[
+          { value: 'map', label: 'map' },
+          { value: 'contact', label: 'contact' },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('prx-radio-pill-group')).toHaveClass('prx-radio-group');
+    expect(screen.getByText('map')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByText('contact'));
+    expect(onChange).toHaveBeenCalledWith('contact', { value: 'contact', label: 'contact' });
+  });
+
+  test('TableFilterInput renders the canonical table filter shell', () => {
+    render(<TableFilterInput placeholder="filter" value="" onChange={() => {}} />);
+    const input = screen.getByTestId('prx-table-filter');
+    expect(input).toHaveClass('prx-table-filter');
+    expect(input).toHaveAttribute('autocomplete', 'off');
+    expect(input).toHaveAttribute('spellcheck', 'false');
   });
 
   test('Runlog renders prx-runlog rows', () => {

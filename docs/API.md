@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `437`.
+Public route count: `8`. All route count: `443`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -155,6 +155,10 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/documents` | `internal` | - | documents_post |
 | `POST` | `/api/documents/{doc_id}/attach` | `internal` | - | documents_attach_post |
 | `GET` | `/api/events` | `internal` | - | Return recent platform events from the durable event log. |
+| `POST` | `/api/execution/dispatch-choice` | `internal` | `operations` | execution.dispatch_choice.commit |
+| `GET` | `/api/execution/dispatch-options` | `internal` | `operations` | execution.dispatch_options.list |
+| `GET` | `/api/execution/targets` | `internal` | `operations` | execution.targets.list |
+| `GET` | `/api/execution/targets/resolve` | `internal` | `operations` | execution.targets.resolve |
 | `POST` | `/api/experiment_promote_winner` | `internal` | `operations` | experiment_promote_winner |
 | `GET` | `/api/feedback/events` | `internal` | `operations` | feedback.list |
 | `POST` | `/api/feedback/events` | `internal` | `operations` | feedback.record |
@@ -196,11 +200,13 @@ Public route count: `8`. All route count: `437`.
 | `GET` | `/api/metrics` | `internal` | - | Return the core metrics summary for the last N days. |
 | `GET` | `/api/metrics/heatmap` | `internal` | - | Return the failure code x provider heatmap for the last N days. |
 | `GET` | `/api/metrics/surface-usage` | `internal` | - | Return durable frontdoor surface-usage counters for the last N days. |
+| `POST` | `/api/model_eval_benchmark_ingest` | `internal` | `operations` | model_eval_benchmark_ingest |
 | `GET` | `/api/model_eval_compare` | `internal` | `operations` | model_eval_compare |
 | `GET` | `/api/model_eval_export` | `internal` | `operations` | model_eval_export |
 | `GET` | `/api/model_eval_inspect` | `internal` | `operations` | model_eval_inspect |
 | `GET` | `/api/model_eval_plan` | `internal` | `operations` | model_eval_plan |
 | `POST` | `/api/model_eval_promote_proposal` | `internal` | `operations` | model_eval_promote_proposal |
+| `POST` | `/api/model_eval_run_case` | `internal` | `operations` | model_eval_run_case |
 | `POST` | `/api/model_eval_run_matrix` | `internal` | `operations` | model_eval_run_matrix |
 | `GET` | `/api/models` | `internal` | - | models_get |
 | `GET` | `/api/models/market` | `internal` | - | models_market_get |

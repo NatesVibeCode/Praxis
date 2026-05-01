@@ -1,4 +1,4 @@
-import React, { type AriaRole, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
+import React, { type AriaRole, type CSSProperties, type HTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
 import {
   chipProps,
   gateProps,
@@ -50,6 +50,82 @@ export function TokenChip({ children, tone, source, className = '', ...rest }: T
     >
       {children}
     </span>
+  );
+}
+
+export interface RadioPillOption {
+  value: string;
+  label: ReactNode;
+  disabled?: boolean;
+}
+
+export interface RadioPillGroupProps {
+  options: RadioPillOption[];
+  value: string;
+  onChange: (value: string, option: RadioPillOption) => void;
+  ariaLabel?: string;
+  className?: string;
+  style?: CSSProperties;
+}
+
+export function RadioPillGroup({
+  options,
+  value,
+  onChange,
+  ariaLabel,
+  className = '',
+  style,
+}: RadioPillGroupProps) {
+  function activate(option: RadioPillOption) {
+    if (!option.disabled) onChange(option.value, option);
+  }
+
+  return (
+    <div
+      className={className ? `prx-radio-group ${className}` : 'prx-radio-group'}
+      role="radiogroup"
+      aria-label={ariaLabel}
+      style={style}
+      data-testid="prx-radio-pill-group"
+    >
+      {options.map((option) => {
+        const checked = option.value === value;
+        return (
+          <span
+            role="radio"
+            aria-checked={checked}
+            aria-disabled={option.disabled || undefined}
+            className={checked ? 'prx-radio-pill checked' : 'prx-radio-pill'}
+            data-value={option.value}
+            key={option.value}
+            tabIndex={checked ? 0 : -1}
+            onClick={() => activate(option)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                activate(option);
+              }
+            }}
+          >
+            {option.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+export interface TableFilterInputProps extends InputHTMLAttributes<HTMLInputElement> {}
+
+export function TableFilterInput({ className = '', autoComplete = 'off', spellCheck = false, ...props }: TableFilterInputProps) {
+  return (
+    <input
+      {...props}
+      autoComplete={autoComplete}
+      className={className ? `prx-table-filter ${className}` : 'prx-table-filter'}
+      data-testid="prx-table-filter"
+      spellCheck={spellCheck}
+    />
   );
 }
 

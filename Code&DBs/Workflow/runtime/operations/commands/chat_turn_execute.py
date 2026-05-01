@@ -103,6 +103,15 @@ def handle_execute_chat_turn(
         "tool_results": result.get("tool_results", []),
         "model_used": result.get("model_used"),
         "latency_ms": result.get("latency_ms"),
+        "usage": result.get("usage"),
+        "response_model": result.get("response_model"),
+        "execution_target_ref": result.get("execution_target_ref"),
+        "execution_target_kind": result.get("execution_target_kind"),
+        "execution_profile_ref": result.get("execution_profile_ref"),
+        "isolation_level": result.get("isolation_level"),
+        "packaging_kind": result.get("packaging_kind"),
+        "target_resolution_reason": result.get("target_resolution_reason"),
+        "sandbox_provider": result.get("sandbox_provider"),
     }
     if "error" in result:
         payload["error"] = result["error"]

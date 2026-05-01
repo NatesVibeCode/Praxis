@@ -19,6 +19,11 @@ from pydantic import BaseModel, Field, field_validator
 from storage.postgres.task_type_routing_repository import (
     PostgresTaskTypeRoutingRepository,
 )
+from runtime.execution_targets import (
+    attach_candidate_set_hash,
+    candidate_set_hash,
+    enrich_dispatch_candidate,
+)
 
 
 class QueryChatRoutingOptions(BaseModel):
@@ -67,7 +72,7 @@ class QueryChatRoutingOptions(BaseModel):
 
 
 def _row_to_candidate(row: Any) -> dict[str, Any]:
-    return {
+    candidate = {
         "provider_slug": row.get("provider_slug"),
         "model_slug": row.get("model_slug"),
         "transport_type": row.get("transport_type"),
@@ -81,6 +86,7 @@ def _row_to_candidate(row: Any) -> dict[str, Any]:
         "latency_class": row.get("latency_class"),
         "cost_per_m_tokens": row.get("cost_per_m_tokens"),
     }
+    return enrich_dispatch_candidate(candidate)
 
 
 def handle_query_chat_routing_options(
@@ -105,6 +111,9 @@ def handle_query_chat_routing_options(
         )
     )
 
+    candidates = attach_candidate_set_hash(candidates)
+    digest = candidate_set_hash(candidates)
+
     return {
         "ok": True,
         "task_slug": query.task_slug,
@@ -113,6 +122,12 @@ def handle_query_chat_routing_options(
         "include_cli": query.include_cli,
         "candidates": candidates,
         "candidate_count": len(candidates),
+        "candidate_set_hash": digest,
+        "authority": {
+            "operation": "execution.dispatch_options.list",
+            "compatibility_surface": "chat.routing_options.list",
+            "selection_rule": "selected candidate must match candidate_set_hash and remain permitted",
+        },
     }
 
 

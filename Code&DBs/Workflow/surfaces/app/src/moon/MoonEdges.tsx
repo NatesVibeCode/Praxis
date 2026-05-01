@@ -1,5 +1,5 @@
 import React from 'react';
-import type { OrbitEdge, GraphLayout } from './moonBuildPresenter';
+import type { OrbitEdge, GraphLayout, GateState, GlyphType } from './moonBuildPresenter';
 import { MOON_LAYOUT } from './moonLayout';
 
 const EDGE_STEM = 32;
@@ -64,19 +64,17 @@ export function getEdgeGeometry(
   };
 }
 
-/**
- * Line treatment derived from gate family. One source of truth so the canvas
- * and any preview surfaces (e.g. dock explanations) read consistent shapes.
- *
- * - conditional: dashed, white. Reads as "maybe this path." Distinct from
- *   success because it carries routing intent, not a failure outcome.
- * - after_failure: solid, muted coral tint. The only place we allow color
- *   to leak into the canvas — failure earns attention.
- * - after_any: dotted. Reads as "runs regardless" — intentionally the
- *   weakest signal because it adds no guard.
- * - after_success / untyped: solid, inherits flowing-vs-muted color.
- */
-export interface EdgeStyle {
+export type MoonGateTone = 'empty' | 'inert' | 'pending' | 'passed' | 'blocked';
+
+export interface EdgePresentation {
+  /** Short code shown on the canvas chip. */
+  shortLabel: 'OK' | 'THEN' | 'ELSE' | 'COND' | 'FAIL' | 'ANY';
+  /** Human label for inspector/card copy. */
+  routeLabel: string;
+  /** State label, separate from route/family. */
+  stateLabel: string;
+  glyph: GlyphType;
+  tone: MoonGateTone;
   strokeDasharray?: string;
   /** CSS color string or var() reference. */
   color: string;
@@ -84,25 +82,74 @@ export interface EdgeStyle {
   baseWidth: number;
 }
 
-export function edgeStyleFromFamily(edge: OrbitEdge, isFlowing: boolean): EdgeStyle {
+function gateTone(gateState: GateState): MoonGateTone {
+  switch (gateState) {
+    case 'blocked': return 'blocked';
+    case 'passed': return 'passed';
+    case 'proposed': return 'pending';
+    case 'configured': return 'inert';
+    case 'empty':
+    default:
+      return 'empty';
+  }
+}
+
+function gateStateLabel(gateState: GateState): string {
+  switch (gateState) {
+    case 'blocked': return 'Blocked';
+    case 'passed': return 'Passed';
+    case 'proposed': return 'Needs decision';
+    case 'configured': return 'Configured';
+    case 'empty':
+    default:
+      return 'Ungated';
+  }
+}
+
+function stateColor(tone: MoonGateTone, baseColor: string): string {
+  switch (tone) {
+    case 'blocked': return 'var(--moon-state-error, #f85149)';
+    case 'passed': return 'var(--moon-state-success, #3fb950)';
+    case 'pending': return 'var(--moon-state-warning, #d29922)';
+    case 'inert':
+    case 'empty':
+    default:
+      return baseColor;
+  }
+}
+
+/**
+ * One canvas presentation contract for edge lines and gate pods.
+ * Family controls glyph/label/dash. Color controls state only.
+ */
+export function edgePresentation(
+  edge: Pick<OrbitEdge, 'gateFamily' | 'branchReason' | 'gateState' | 'gateLabel'>,
+  isFlowing = false,
+): EdgePresentation {
   const baseColor = isFlowing
     ? 'var(--moon-fg, #ffffff)'
     : 'var(--moon-fg-muted, rgba(232, 232, 232, 0.55))';
+  const tone = gateTone(edge.gateState);
+  const color = stateColor(tone, baseColor);
+  const branchReason = (edge.branchReason || '').trim().toLowerCase();
+
   switch (edge.gateFamily) {
     case 'conditional':
-      return { color: isFlowing ? 'var(--moon-fg, #ffffff)' : baseColor, strokeDasharray: '6 6', baseWidth: 1.15 };
+      if (branchReason === 'then') {
+        return { shortLabel: 'THEN', routeLabel: edge.gateLabel || 'Then path', stateLabel: gateStateLabel(edge.gateState), glyph: 'decompose', tone, color, strokeDasharray: '6 6', baseWidth: 1.15 };
+      }
+      if (branchReason === 'else') {
+        return { shortLabel: 'ELSE', routeLabel: edge.gateLabel || 'Else path', stateLabel: gateStateLabel(edge.gateState), glyph: 'decompose', tone, color, strokeDasharray: '6 6', baseWidth: 1.15 };
+      }
+      return { shortLabel: 'COND', routeLabel: edge.gateLabel || 'Conditional path', stateLabel: gateStateLabel(edge.gateState), glyph: 'decompose', tone, color, strokeDasharray: '6 6', baseWidth: 1.15 };
     case 'after_failure':
-      return {
-        color: 'var(--moon-danger, #ff8a6a)',
-        strokeDasharray: undefined,
-        baseWidth: 1.35,
-      };
+      return { shortLabel: 'FAIL', routeLabel: edge.gateLabel || 'Failure path', stateLabel: gateStateLabel(edge.gateState), glyph: 'warning', tone, color, strokeDasharray: undefined, baseWidth: 1.25 };
     case 'after_any':
-      return { color: baseColor, strokeDasharray: '2 5', baseWidth: 1.05 };
+      return { shortLabel: 'ANY', routeLabel: edge.gateLabel || 'Always path', stateLabel: gateStateLabel(edge.gateState), glyph: 'loop', tone, color, strokeDasharray: '2 5', baseWidth: 1.05 };
     case 'after_success':
-      return { color: isFlowing ? 'var(--moon-fg, #ffffff)' : baseColor, strokeDasharray: undefined, baseWidth: 1.25 };
+      return { shortLabel: 'OK', routeLabel: edge.gateLabel || 'Success path', stateLabel: gateStateLabel(edge.gateState), glyph: 'arrow', tone, color, strokeDasharray: undefined, baseWidth: 1.2 };
     default:
-      return { color: baseColor, strokeDasharray: undefined, baseWidth: 1.15 };
+      return { shortLabel: 'OK', routeLabel: edge.gateLabel || 'Standard path', stateLabel: gateStateLabel(edge.gateState), glyph: 'arrow', tone, color, strokeDasharray: undefined, baseWidth: 1.15 };
   }
 }
 
@@ -140,7 +187,7 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
 
         const isSelected = edge.id === selectedEdgeId;
         const isFlowing = isSelected || edge.isOnDominantPath;
-        const style = edgeStyleFromFamily(edge, isSelected);
+        const style = edgePresentation(edge, isFlowing);
         // When 3+ siblings share a source, thin each blade so the bundle
         // reads as a single fan gesture rather than three competing lines.
         const fanThin = edge.siblingCount >= 3 ? 0.8 : 1;

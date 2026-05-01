@@ -8,6 +8,15 @@ import {
   antipatternHits,
   llmInvocation,
 } from './proofApi';
+import {
+  EvidenceReader,
+  EvidenceStack,
+  StatusRail,
+  TokenChip,
+  type EvidenceItem,
+  type EvidenceKind,
+  type StatusRailItem,
+} from '../primitives';
 
 export interface RunEvidencePanelProps {
   runId: string;
@@ -16,19 +25,6 @@ export interface RunEvidencePanelProps {
   error: string | null;
   onRefresh?: () => void;
 }
-
-const STRENGTH_BG: Record<ProofStrength, string> = {
-  strong: 'var(--surface-success-soft)',
-  medium: 'var(--surface-accent-soft)',
-  weak: 'var(--surface-warning-soft)',
-  missing: 'var(--surface-muted)',
-};
-const STRENGTH_FG: Record<ProofStrength, string> = {
-  strong: 'var(--text-success)',
-  medium: 'var(--text-accent)',
-  weak: 'var(--text-warning)',
-  missing: 'var(--text-muted)',
-};
 
 function formatTokens(n: number | null | undefined): string {
   if (!n || n <= 0) return '0';
@@ -51,39 +47,78 @@ function formatRelative(iso: string | null | undefined): string {
   return `${Math.round(ageSec / 86400)}d ago`;
 }
 
+function strengthTone(strength: ProofStrength): 'ok' | 'read' | 'locked' | 'bad' {
+  if (strength === 'strong') return 'ok';
+  if (strength === 'medium') return 'read';
+  if (strength === 'weak') return 'locked';
+  return 'bad';
+}
+
+function verdictTone(verdict: string): 'ok' | 'warn' | 'err' | 'dim' {
+  if (verdict === 'fired_terminal') return 'ok';
+  if (verdict === 'executing') return 'warn';
+  if (verdict === 'not_fired') return 'dim';
+  if (verdict === 'fired_but_stale') return 'warn';
+  return 'dim';
+}
+
+function confidenceTone(confidence: string): 'ok' | 'warn' | 'err' | 'dim' {
+  if (confidence === 'high') return 'ok';
+  if (confidence === 'medium') return 'warn';
+  if (confidence === 'low') return 'err';
+  return 'dim';
+}
+
+function evidenceKindForSource(source: string): EvidenceKind {
+  const key = source.toLowerCase();
+  if (key.includes('receipt')) return 'receipt';
+  if (key.includes('test') || key.includes('verifier')) return 'test';
+  if (key.includes('bug') || key.includes('antipattern')) return 'bug';
+  if (key.includes('decision') || key.includes('authority')) return 'decision';
+  return 'run';
+}
+
+function evidenceBody(ev: ProofEvidence): string {
+  if (!ev.details) return ev.present ? 'Evidence source reported present.' : 'Evidence source is missing.';
+  return JSON.stringify(ev.details, null, 2);
+}
+
 function StrengthBadge({ strength }: { strength: ProofStrength }) {
   return (
-    <span
+    <TokenChip
       className="run-evidence__strength-badge"
-      style={{
-        background: STRENGTH_BG[strength],
-        color: STRENGTH_FG[strength],
-        padding: '2px 8px',
-        borderRadius: 4,
-        fontSize: '0.75rem',
-        fontWeight: 500,
-        textTransform: 'capitalize',
-      }}
+      source="derived"
+      tone={strengthTone(strength)}
     >
       {strength}
-    </span>
+    </TokenChip>
   );
 }
 
 function LlmInvocationRow({ details }: { details: LlmInvocationDetails }) {
   const silent = details.zero_token_succeeded_jobs > 0 && details.jobs_with_tokens < details.llm_job_count;
+  const items: StatusRailItem[] = [
+    {
+      label: 'tokens',
+      value: `${formatTokens(details.total_token_input)} in / ${formatTokens(details.total_token_output)} out`,
+    },
+    { label: 'cost', value: formatCost(details.total_cost_usd) },
+    {
+      label: 'jobs',
+      value: `${details.jobs_with_tokens}/${details.llm_job_count}`,
+      tone: details.jobs_with_tokens === details.llm_job_count ? 'ok' : 'warn',
+    },
+  ];
+  if (details.zero_token_succeeded_jobs > 0) {
+    items.push({
+      label: 'zero-token',
+      value: details.zero_token_succeeded_jobs,
+      tone: 'warn',
+    });
+  }
   return (
     <div className="run-evidence__llm">
-      <div className="run-evidence__llm-stats" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        <div><strong>{formatTokens(details.total_token_input)}</strong> in / <strong>{formatTokens(details.total_token_output)}</strong> out</div>
-        <div><strong>{formatCost(details.total_cost_usd)}</strong></div>
-        <div>{details.jobs_with_tokens}/{details.llm_job_count} jobs with tokens</div>
-        {details.zero_token_succeeded_jobs > 0 && (
-          <div style={{ color: 'var(--text-warning)' }}>
-            {details.zero_token_succeeded_jobs} zero-token successes
-          </div>
-        )}
-      </div>
+      <StatusRail className="run-evidence__llm-stats" items={items} />
       {silent && (
         <div
           className="run-evidence__llm-banner"
@@ -110,17 +145,11 @@ function LlmInvocationRow({ details }: { details: LlmInvocationDetails }) {
 
 function AntipatternHitChip({ hit }: { hit: AntipatternHit }) {
   return (
-    <div
+    <TokenChip
       className="run-evidence__antipattern-chip"
+      source="derived"
+      tone="bad"
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '4px 10px',
-        background: 'var(--surface-danger-soft)',
-        color: 'var(--text-danger)',
-        borderRadius: 4,
-        fontSize: '0.85rem',
         marginRight: 8,
         marginBottom: 4,
       }}
@@ -129,51 +158,13 @@ function AntipatternHitChip({ hit }: { hit: AntipatternHit }) {
       <span style={{ opacity: 0.85 }}>· {hit.resolved_agent}</span>
       <span style={{ opacity: 0.85 }}>· streak {hit.streak_count}</span>
       {hit.detected_at && <span style={{ opacity: 0.65 }}>· {formatRelative(hit.detected_at)}</span>}
-    </div>
-  );
-}
-
-function EvidenceRow({ ev }: { ev: ProofEvidence }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div
-      className="run-evidence__row"
-      style={{
-        padding: '8px 0',
-        borderBottom: '1px solid var(--surface-divider)',
-      }}
-    >
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <span style={{ width: 14, opacity: 0.7 }}>{ev.present ? '✓' : '✗'}</span>
-        <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>{ev.source}</span>
-        <StrengthBadge strength={ev.proof_strength} />
-        <span style={{ opacity: 0.5, fontSize: '0.75rem' }}>{expanded ? '▾' : '▸'}</span>
-      </div>
-      {expanded && ev.details && (
-        <div
-          style={{
-            marginTop: 6,
-            padding: '8px 10px',
-            background: 'var(--surface-muted)',
-            borderRadius: 4,
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.75rem',
-            whiteSpace: 'pre-wrap',
-            maxHeight: 240,
-            overflow: 'auto',
-          }}
-        >
-          {JSON.stringify(ev.details, null, 2)}
-        </div>
-      )}
-    </div>
+    </TokenChip>
   );
 }
 
 export function RunEvidencePanel({ runId, proof, status, error, onRefresh }: RunEvidencePanelProps) {
+  const [selectedEvidenceIndex, setSelectedEvidenceIndex] = useState(0);
+
   if (status === 'loading' && !proof) {
     return (
       <div className="run-evidence run-evidence--loading">
@@ -201,6 +192,21 @@ export function RunEvidencePanel({ runId, proof, status, error, onRefresh }: Run
 
   const llm = llmInvocation(proof);
   const hits = antipatternHits(proof);
+  const evidenceItems: EvidenceItem[] = proof.evidence.map((ev) => ({
+    kind: evidenceKindForSource(ev.source),
+    title: ev.source,
+    meta: (
+      <>
+        {ev.present ? 'present' : 'missing'} · <StrengthBadge strength={ev.proof_strength} />
+      </>
+    ),
+    body: evidenceBody(ev),
+  }));
+  const safeSelectedEvidenceIndex = Math.min(
+    selectedEvidenceIndex,
+    Math.max(0, proof.evidence.length - 1),
+  );
+  const selectedEvidence = proof.evidence[safeSelectedEvidenceIndex];
 
   return (
     <div className="run-evidence">
@@ -211,9 +217,14 @@ export function RunEvidencePanel({ runId, proof, status, error, onRefresh }: Run
         <div className="run-evidence__title" style={{ fontWeight: 600, fontSize: '1rem' }}>
           Evidence
         </div>
-        <div style={{ opacity: 0.7, fontSize: '0.85rem' }}>
-          verdict: <strong>{proof.verdict}</strong> · confidence: {proof.confidence}
-        </div>
+        <StatusRail
+          className="run-evidence__proof-rail"
+          items={[
+            { label: 'run', value: runId.slice(0, 8), tone: 'dim' },
+            { label: 'verdict', value: proof.verdict, tone: verdictTone(proof.verdict) },
+            { label: 'confidence', value: proof.confidence, tone: confidenceTone(proof.confidence) },
+          ]}
+        />
         {onRefresh && (
           <button
             type="button"
@@ -228,7 +239,7 @@ export function RunEvidencePanel({ runId, proof, status, error, onRefresh }: Run
       {hits.length > 0 && (
         <div className="run-evidence__antipattern-banner" style={{ marginBottom: 12 }}>
           <div style={{ fontWeight: 500, marginBottom: 6 }}>
-            ⚠ Open anti-pattern hits ({hits.length})
+            Open anti-pattern hits ({hits.length})
           </div>
           <div>
             {hits.map((h) => (
@@ -253,19 +264,13 @@ export function RunEvidencePanel({ runId, proof, status, error, onRefresh }: Run
           <div style={{ fontWeight: 500, marginBottom: 4, fontSize: '0.85rem' }}>Missing evidence</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {proof.missing_evidence.map((m) => (
-              <span
+              <TokenChip
                 key={m}
-                style={{
-                  padding: '2px 8px',
-                  background: 'var(--surface-warning-soft)',
-                  color: 'var(--text-warning)',
-                  borderRadius: 4,
-                  fontSize: '0.75rem',
-                  fontFamily: 'var(--font-mono)',
-                }}
+                source="derived"
+                tone="locked"
               >
                 {m}
-              </span>
+              </TokenChip>
             ))}
           </div>
         </div>
@@ -275,9 +280,32 @@ export function RunEvidencePanel({ runId, proof, status, error, onRefresh }: Run
         <div style={{ fontWeight: 500, marginBottom: 6, fontSize: '0.85rem' }}>
           Authority sources ({proof.evidence.length})
         </div>
-        {proof.evidence.map((ev) => (
-          <EvidenceRow key={ev.source} ev={ev} />
-        ))}
+        {evidenceItems.length > 0 ? (
+          <>
+            <EvidenceStack
+              items={evidenceItems}
+              selectedIndex={safeSelectedEvidenceIndex}
+              onSelect={(_item, index) => setSelectedEvidenceIndex(index)}
+            />
+            {selectedEvidence ? (
+              <EvidenceReader
+                cap={selectedEvidence.present ? 'selected evidence' : 'missing evidence'}
+                title={selectedEvidence.source}
+                body={evidenceBody(selectedEvidence)}
+                style={{
+                  marginTop: 8,
+                  maxHeight: 260,
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.75rem',
+                }}
+              />
+            ) : null}
+          </>
+        ) : (
+          <div style={{ opacity: 0.7, fontSize: '0.85rem' }}>No authority sources reported.</div>
+        )}
       </div>
     </div>
   );

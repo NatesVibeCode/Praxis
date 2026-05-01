@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { getEdgeGeometry } from './MoonEdges';
+import { edgePresentation, getEdgeGeometry } from './MoonEdges';
 import { MOON_LAYOUT } from './moonLayout';
 import { COLUMN_SPACING, RANK_SPACING } from './moonBuildPresenter';
-import type { GraphLayout } from './moonBuildPresenter';
+import type { GraphLayout, OrbitEdge } from './moonBuildPresenter';
 
 function layout(nodes: Array<[string, number, number]>): GraphLayout {
   return {
@@ -22,6 +22,21 @@ function layout(nodes: Array<[string, number, number]>): GraphLayout {
     layers: [],
     width: 0,
     height: 0,
+  };
+}
+
+function edge(overrides: Partial<OrbitEdge>): OrbitEdge {
+  return {
+    id: 'edge-1',
+    from: 'a',
+    to: 'b',
+    kind: 'sequence',
+    isOnDominantPath: false,
+    gateState: 'configured',
+    siblingCount: 1,
+    siblingIndex: 0,
+    inLineage: true,
+    ...overrides,
   };
 }
 
@@ -73,5 +88,36 @@ describe('Moon edge geometry', () => {
       endY: MOON_LAYOUT.canvasPad,
     });
     expect(geometry?.path).not.toContain('C');
+  });
+});
+
+describe('Moon edge and gate presentation', () => {
+  it('derives fixed canvas labels from edge release data', () => {
+    expect(edgePresentation(edge({ gateFamily: undefined })).shortLabel).toBe('OK');
+    expect(edgePresentation(edge({ gateFamily: 'conditional', branchReason: 'then' })).shortLabel).toBe('THEN');
+    expect(edgePresentation(edge({ gateFamily: 'conditional', branchReason: 'else' })).shortLabel).toBe('ELSE');
+    expect(edgePresentation(edge({ gateFamily: 'conditional' })).shortLabel).toBe('COND');
+    expect(edgePresentation(edge({ gateFamily: 'after_failure' })).shortLabel).toBe('FAIL');
+    expect(edgePresentation(edge({ gateFamily: 'after_any' })).shortLabel).toBe('ANY');
+  });
+
+  it('uses line pattern and glyph for family instead of failure color', () => {
+    const conditional = edgePresentation(edge({ gateFamily: 'conditional', branchReason: 'then' }));
+    const failure = edgePresentation(edge({ gateFamily: 'after_failure', gateState: 'configured' }));
+    const always = edgePresentation(edge({ gateFamily: 'after_any' }));
+
+    expect(conditional.strokeDasharray).toBe('6 6');
+    expect(conditional.glyph).toBe('decompose');
+    expect(failure.strokeDasharray).toBeUndefined();
+    expect(failure.glyph).toBe('warning');
+    expect(failure.color).not.toContain('--moon-state-error');
+    expect(always.strokeDasharray).toBe('2 5');
+    expect(always.glyph).toBe('loop');
+  });
+
+  it('uses canonical color only for gate state', () => {
+    expect(edgePresentation(edge({ gateFamily: 'after_failure', gateState: 'blocked' })).color).toContain('--moon-state-error');
+    expect(edgePresentation(edge({ gateFamily: 'conditional', gateState: 'proposed' })).color).toContain('--moon-state-warning');
+    expect(edgePresentation(edge({ gateFamily: 'after_any', gateState: 'passed' })).color).toContain('--moon-state-success');
   });
 });

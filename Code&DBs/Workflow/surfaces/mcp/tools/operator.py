@@ -294,6 +294,7 @@ def tool_praxis_execution_proof(params: dict) -> dict:
             "event_id": params.get("event_id"),
             "correlation_id": params.get("correlation_id"),
             "bug_id": params.get("bug_id"),
+            "dispatch_choice_ref": params.get("dispatch_choice_ref"),
             "stale_after_seconds": stale_after_seconds,
             "include_trace": include_trace,
         },
@@ -1671,11 +1672,85 @@ def tool_praxis_chat_routing_options_list(params: dict) -> dict:
     else:
         include_disabled = bool(raw_disabled)
 
+    raw_include_cli = params.get("include_cli") if params else True
+    if isinstance(raw_include_cli, str):
+        include_cli = raw_include_cli.strip().lower() in _OPERATOR_BOOLEAN_TRUE
+    else:
+        include_cli = bool(raw_include_cli)
+
     return _execute_catalog_tool(
         operation_name="chat.routing_options.list",
         payload={
             "task_slug": task_slug,
             "include_disabled": include_disabled,
+            "include_cli": include_cli,
+        },
+    )
+
+
+def tool_praxis_execution_targets_list(params: dict) -> dict:
+    """List first-class execution targets and profiles."""
+
+    operation_name = "execution.targets.list"
+    try:
+        include_disabled = _parse_bool(
+            params.get("include_disabled", False),
+            field_name="include_disabled",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={"include_disabled": include_disabled},
+    )
+
+
+def tool_praxis_dispatch_options_list(params: dict) -> dict:
+    """List selectable dispatch candidates with execution target metadata."""
+
+    operation_name = "execution.dispatch_options.list"
+    try:
+        include_disabled = _parse_bool(
+            params.get("include_disabled", False),
+            field_name="include_disabled",
+        )
+        include_cli = _parse_bool(
+            params.get("include_cli", True),
+            field_name="include_cli",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "task_slug": str(params.get("task_slug") or "auto/chat").strip() or "auto/chat",
+            "workload_kind": str(params.get("workload_kind") or "chat").strip() or "chat",
+            "include_disabled": include_disabled,
+            "include_cli": include_cli,
+        },
+    )
+
+
+def tool_praxis_dispatch_choice_commit(params: dict) -> dict:
+    """Commit one selected dispatch option after candidate-set validation."""
+
+    return _execute_catalog_tool(
+        operation_name="execution.dispatch_choice.commit",
+        payload={
+            "task_slug": str(params.get("task_slug") or "auto/chat").strip() or "auto/chat",
+            "workload_kind": str(params.get("workload_kind") or "chat").strip() or "chat",
+            "candidate_set_hash": str(params.get("candidate_set_hash") or "").strip(),
+            "selected_candidate_ref": str(params.get("selected_candidate_ref") or "").strip() or None,
+            "selected_provider_slug": str(params.get("selected_provider_slug") or "").strip() or None,
+            "selected_model_slug": str(params.get("selected_model_slug") or "").strip() or None,
+            "selected_transport_type": str(params.get("selected_transport_type") or "").strip() or None,
+            "selection_kind": str(params.get("selection_kind") or "explicit_click").strip() or "explicit_click",
+            "selected_by": str(params.get("selected_by") or "operator").strip() or "operator",
+            "surface": str(params.get("surface") or "mcp").strip() or "mcp",
+            "dispatch_ref": str(params.get("dispatch_ref") or "").strip() or None,
+            "conversation_id": str(params.get("conversation_id") or "").strip() or None,
+            "include_cli": params.get("include_cli", True),
+            "ask_all_candidate_refs": params.get("ask_all_candidate_refs") or [],
         },
     )
 
@@ -1760,6 +1835,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": "When true, return disabled candidates with their permitted flag and route_health_score. Default false (enabled only).",
                         "default": False,
                     },
+                    "include_cli": {
+                        "type": "boolean",
+                        "description": "When true, include CLI candidates alongside API candidates. Default true.",
+                        "default": True,
+                    },
                 },
             },
             "cli": {
@@ -1772,6 +1852,117 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     {"title": "Default chat picker view", "input": {}},
                     {"title": "Include disabled candidates", "input": {"include_disabled": True}},
                     {"title": "Different task slug", "input": {"task_slug": "auto/build"}},
+                ],
+            },
+        },
+    ),
+    "praxis_execution_targets_list": (
+        tool_praxis_execution_targets_list,
+        {
+            "kind": "search",
+            "operation_names": ["execution.targets.list"],
+            "description": "List first-class execution targets and profiles from Execution Target Authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include_disabled": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Include non-admitted targets such as process_sandbox.",
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "when_to_use": "Inspect what execution targets and profiles are available before dispatch.",
+                "when_not_to_use": "Do not use it to launch work; it is read-only.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "List admitted targets", "input": {}},
+                    {"title": "Include blocked targets", "input": {"include_disabled": True}},
+                ],
+            },
+        },
+    ),
+    "praxis_dispatch_options_list": (
+        tool_praxis_dispatch_options_list,
+        {
+            "kind": "search",
+            "operation_names": ["execution.dispatch_options.list"],
+            "description": (
+                "List clickable/selectable dispatch candidates with provider/model, transport, "
+                "execution target/profile, disabled reason, and candidate_set_hash."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_slug": {"type": "string", "default": "auto/chat"},
+                    "workload_kind": {"type": "string", "default": "chat"},
+                    "include_disabled": {"type": "boolean", "default": False},
+                    "include_cli": {"type": "boolean", "default": True},
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "when_to_use": "Render or audit a dispatch picker before committing one option.",
+                "when_not_to_use": "Do not use it as proof that a selected option actually ran; pair with dispatch_choice.commit and execution proof.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Chat dispatch options", "input": {"task_slug": "auto/chat"}},
+                ],
+            },
+        },
+    ),
+    "praxis_dispatch_choice_commit": (
+        tool_praxis_dispatch_choice_commit,
+        {
+            "kind": "write",
+            "operation_names": ["execution.dispatch_choice.commit"],
+            "description": (
+                "Commit one selected dispatch option after validating the candidate_set_hash "
+                "and candidate admission state."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["candidate_set_hash"],
+                "properties": {
+                    "task_slug": {"type": "string", "default": "auto/chat"},
+                    "workload_kind": {"type": "string", "default": "chat"},
+                    "candidate_set_hash": {"type": "string"},
+                    "selected_candidate_ref": {"type": "string"},
+                    "selected_provider_slug": {"type": "string"},
+                    "selected_model_slug": {"type": "string"},
+                    "selected_transport_type": {"type": "string"},
+                    "selection_kind": {
+                        "type": "string",
+                        "enum": ["default", "explicit_click", "programmatic_override", "ask_all"],
+                        "default": "explicit_click",
+                    },
+                    "selected_by": {"type": "string", "default": "operator"},
+                    "surface": {"type": "string", "default": "mcp"},
+                    "dispatch_ref": {"type": "string"},
+                    "conversation_id": {"type": "string"},
+                    "include_cli": {"type": "boolean", "default": True},
+                    "ask_all_candidate_refs": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "when_to_use": "Record one operator-selected dispatch option before running it.",
+                "when_not_to_use": "Do not use it to force a disabled or unseen candidate; the command rejects those.",
+                "risks": {"default": "write"},
+                "examples": [
+                    {
+                        "title": "Commit clicked chat option",
+                        "input": {
+                            "candidate_set_hash": "<hash from praxis_dispatch_options_list>",
+                            "selected_candidate_ref": "<candidate ref>",
+                            "selection_kind": "explicit_click",
+                        },
+                    },
                 ],
             },
         },
@@ -1954,6 +2145,10 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "string",
                         "description": "Bug id anchor.",
                     },
+                    "dispatch_choice_ref": {
+                        "type": "string",
+                        "description": "Dispatch choice receipt anchor.",
+                    },
                     "stale_after_seconds": {
                         "type": "integer",
                         "description": "Heartbeat age threshold for current-execution proof.",
@@ -1972,6 +2167,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     {"required": ["event_id"]},
                     {"required": ["correlation_id"]},
                     {"required": ["bug_id"]},
+                    {"required": ["dispatch_choice_ref"]},
                 ],
             },
             "cli": {

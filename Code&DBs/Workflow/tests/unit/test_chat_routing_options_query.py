@@ -151,6 +151,26 @@ def test_surfaces_transport_type_per_candidate() -> None:
     for c in result["candidates"]:
         assert "transport_type" in c
         assert c["transport_type"] in ("API", "CLI")
+        assert c["candidate_ref"]
+        assert c["candidate_set_hash"] == result["candidate_set_hash"]
+        assert c["execution_target_ref"]
+        assert c["execution_profile_ref"]
+
+
+def test_api_candidates_are_control_plane_not_container_auth_mounts() -> None:
+    rows = [
+        _route(provider="openrouter", model="moonshotai/kimi-k2.6", transport="API", rank=3),
+    ]
+    result = handle_query_chat_routing_options(
+        QueryChatRoutingOptions(include_cli=False),
+        _StubSubsystems(rows),
+    )
+    candidate = result["candidates"][0]
+
+    assert candidate["execution_target_ref"] == "execution_target.control_plane_api"
+    assert candidate["execution_target_kind"] == "control_plane_api"
+    assert candidate["sandbox_provider"] == "control_plane"
+    assert candidate["packaging_kind"] == "none"
 
 
 def test_empty_routing_table() -> None:

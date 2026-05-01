@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { APP_CONFIG } from '../config';
-import praxisSymbol from '../assets/praxis-symbol-inverse.svg';
 import { MoonWorkflowSilhouette } from './MoonWorkflowSilhouette';
 import { isAbortError } from '../shared/request';
-import { ReceiptCard } from '../primitives';
+import { ReceiptCard, StatusRail, type StatusRailItem } from '../primitives';
 import './dashboard.css';
 
 interface Workflow {
@@ -133,6 +131,13 @@ interface ToolbeltReviewItem {
   detail: string;
   meta: string;
   onClick?: () => void;
+}
+
+function statusTone(tone: 'neutral' | 'healthy' | 'warning' | 'danger'): StatusRailItem['tone'] {
+  if (tone === 'healthy') return 'ok';
+  if (tone === 'warning') return 'warn';
+  if (tone === 'danger') return 'err';
+  return 'dim';
 }
 
 function useDashboardSnapshot() {
@@ -407,6 +412,7 @@ export function Dashboard({
 }: DashboardProps) {
   const { snapshot, loading, error, refresh } = useDashboardSnapshot();
   const [instanceFiles, setInstanceFiles] = useState<Array<{ id: string; filename: string }>>([]);
+  const [instanceFilesError, setInstanceFilesError] = useState<string | null>(null);
   const instanceFileRef = useRef<HTMLInputElement>(null);
   const workflows = snapshot?.workflows ?? [];
   const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow] as const));
@@ -435,14 +441,25 @@ export function Dashboard({
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/files?scope=instance', { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) => {
+        if (!response.ok) throw new Error(`File inventory returned ${response.status}`);
+        return response.json();
+      })
       .then((data) => {
-        if (data?.files) setInstanceFiles(data.files);
-        else if (Array.isArray(data)) setInstanceFiles(data);
+        if (data?.files) {
+          setInstanceFiles(data.files);
+          setInstanceFilesError(null);
+        } else if (Array.isArray(data)) {
+          setInstanceFiles(data);
+          setInstanceFilesError(null);
+        } else {
+          setInstanceFiles([]);
+          setInstanceFilesError('File inventory returned an unexpected shape.');
+        }
       })
       .catch((error) => {
         if (!isAbortError(error)) {
-          // Silent by design: file inventory is auxiliary dashboard context.
+          setInstanceFilesError(error instanceof Error ? error.message : 'File inventory is unavailable.');
         }
       });
     return () => controller.abort();
@@ -503,9 +520,12 @@ export function Dashboard({
       const data = response.ok ? await response.json() : null;
       if (data?.file?.id && data?.file?.filename) {
         setInstanceFiles((current) => [{ id: data.file.id, filename: data.file.filename }, ...current]);
+        setInstanceFilesError(null);
+      } else {
+        setInstanceFilesError('File upload did not return a saved file record.');
       }
     } catch {
-      // Silent: upload failures should not destabilize the dashboard surface.
+      setInstanceFilesError('File upload failed.');
     } finally {
       event.target.value = '';
     }
@@ -516,9 +536,11 @@ export function Dashboard({
       const response = await fetch(`/api/files/${fileId}`, { method: 'DELETE' });
       if (response.ok) {
         setInstanceFiles((current) => current.filter((file) => file.id !== fileId));
+      } else {
+        setInstanceFilesError('File removal failed.');
       }
     } catch {
-      // Silent by design.
+      setInstanceFilesError('File removal failed.');
     }
   };
 
@@ -527,7 +549,6 @@ export function Dashboard({
       && !run.spec_name?.startsWith('fix_bugs')
       && !run.spec_name?.startsWith('hardening_'),
   );
-  const materializedDate = new Date().toISOString().slice(0, 10);
   const passRateLabel = formatPassRate(summary.pass_rate_24h);
   const spendLabel = formatCurrency(summary.total_cost_24h);
   const sealedRunCount = visibleRuns.filter((run) => run.status === 'succeeded').length;
@@ -538,7 +559,7 @@ export function Dashboard({
       : summary.queue.status === 'ok'
         ? 'healthy'
         : 'neutral';
-  const stateSpine = [
+  const stateSpine: Array<{ label: string; value: string; tone: 'neutral' | 'healthy' | 'warning' | 'danger' }> = [
     {
       label: 'State',
       value: loading ? '...' : health.label,
@@ -559,6 +580,11 @@ export function Dashboard({
       tone: summary.active_runs > 0 ? 'warning' : 'neutral',
     },
   ];
+  const statusRailItems: StatusRailItem[] = stateSpine.map((row) => ({
+    label: row.label,
+    value: row.value,
+    tone: statusTone(row.tone),
+  }));
   const hasWorkflows = summary.workflow_counts.total > 0;
   const heroTitle = hasWorkflows
     ? 'Continue work'
@@ -669,121 +695,59 @@ export function Dashboard({
     });
   }
 
+  const overviewCards = [
+    {
+      id: 'inventory',
+      title: 'Workflow Inventory',
+      source: '/api/dashboard',
+      value: `${summary.workflow_counts.total} workflow${summary.workflow_counts.total === 1 ? '' : 's'}`,
+      detail: `${summary.workflow_counts.live} live - ${summary.workflow_counts.saved} saved - ${summary.workflow_counts.draft} draft`,
+      action: hasWorkflows ? 'Open builder' : 'Start first lane',
+      onClick: hasWorkflows ? onNewWorkflow : onDescribe,
+      tone: 'neutral' as const,
+    },
+    {
+      id: 'health',
+      title: 'Health Receipts',
+      source: 'summary.health',
+      value: health.label,
+      detail: `${passRateLabel} pass rate - ${spendLabel} spend`,
+      action: 'Inspect spend',
+      onClick: onOpenCosts,
+      tone: health.tone,
+    },
+    {
+      id: 'queue',
+      title: 'Execution Queue',
+      source: 'summary.queue',
+      value: `${summary.queue.depth} waiting`,
+      detail: `${summary.queue.pending} pending - ${summary.queue.ready} ready - ${summary.queue.running} running`,
+      action: 'Open operator lane',
+      onClick: onChat,
+      tone: queueTone,
+    },
+    {
+      id: 'files',
+      title: 'Attached Context',
+      source: '/api/files?scope=instance',
+      value: instanceFilesError ? 'Unavailable' : `${instanceFiles.length} file${instanceFiles.length === 1 ? '' : 's'}`,
+      detail: instanceFilesError ?? 'Instance-scoped files available to the workspace',
+      action: 'Add file',
+      onClick: () => instanceFileRef.current?.click(),
+      tone: instanceFilesError ? 'danger' as const : 'neutral' as const,
+    },
+  ];
+
   return (
     <div className="dash-page">
-      <aside className="dash-sidebar">
-        <div className="dash-sidebar__brand">
-          <img className="dash-sidebar__logo" src={praxisSymbol} alt="Praxis symbol" />
-          <div className="dash-sidebar__brand-copy">
-            <span>Command Surface</span>
-            <strong>{APP_CONFIG.name}</strong>
-          </div>
-        </div>
-
-        <div className="dash-sidebar__overview">
-          <div className="dash-sidebar__overview-kicker">State authority</div>
-          <div className="dash-sidebar__overview-title">{APP_CONFIG.engineName}</div>
-          <div className="dash-sidebar__overview-copy">
-            One visible place to launch, inspect, and recover workflow lanes without losing the shape of the system.
-          </div>
-          <div className="dash-sidebar__spine" aria-label="Control state">
-            {stateSpine.map((row) => (
-              <div key={row.label} className="dash-sidebar__spine-row">
-                <span className={`dash-sidebar__spine-dot dash-sidebar__spine-dot--${row.tone}`} />
-                <span className="dash-sidebar__spine-label">{row.label}</span>
-                <strong>{row.value}</strong>
-              </div>
-            ))}
-          </div>
-          <div className="dash-sidebar__overview-grid">
-            <div className="dash-sidebar__overview-stat">
-              <span>Live</span>
-              <strong>{summary.workflow_counts.live}</strong>
-            </div>
-            <div className="dash-sidebar__overview-stat">
-              <span>Saved</span>
-              <strong>{summary.workflow_counts.saved}</strong>
-            </div>
-            <div className="dash-sidebar__overview-stat">
-              <span>Drafts</span>
-              <strong>{summary.workflow_counts.draft}</strong>
-            </div>
-            <div className="dash-sidebar__overview-stat">
-              <span>Files</span>
-              <strong>{instanceFiles.length}</strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="dash-sidebar__stack">
-          {workflowSections[0]?.workflows.length > 0 && (
-            <div className="dash-sidebar__cluster">
-              <div className="dash-sidebar__section">Live lanes</div>
-              {workflowSections[0].workflows.map((workflow) => (
-                <button
-                  key={workflow.id}
-                  className="dash-sidebar__item dash-sidebar__item--live"
-                  onClick={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
-                >
-                  <span className="dash-sidebar__dot dash-sidebar__dot--live" />
-                  <span className="dash-sidebar__title">{workflow.name}</span>
-                  {(workflow.invocation_count ?? 0) > 0 && (
-                    <span className="dash-sidebar__count">{workflow.invocation_count}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {(workflowSections[1]?.workflows.length > 0 || workflowSections[2]?.workflows.length > 0) && (
-            <div className="dash-sidebar__cluster">
-              <div className="dash-sidebar__section">Workbench</div>
-              {[...(workflowSections[1]?.workflows ?? []), ...(workflowSections[2]?.workflows ?? [])].map((workflow) => (
-                <button
-                  key={workflow.id}
-                  className="dash-sidebar__item"
-                  onClick={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
-                >
-                  <span
-                    className={`dash-sidebar__dot ${
-                      (workflow.invocation_count ?? 0) > 0 ? 'dash-sidebar__dot--done' : 'dash-sidebar__dot--draft'
-                    }`}
-                  />
-                  <span className="dash-sidebar__title">{workflow.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="dash-sidebar__actions">
-          <button className="dash-sidebar__action-btn dash-sidebar__action-btn--primary" onClick={onDescribe}>
-            New model
-          </button>
-          <button className="dash-sidebar__action-btn" onClick={onNewWorkflow}>
-            Builder
-          </button>
-        </div>
-
-        <div className="dash-sidebar__bottom">
-          <div className="dash-sidebar__section">Operator lane</div>
-          <button className="dash-sidebar__ask" onClick={onChat}>
-            Ask...
-          </button>
-          <button type="button" className="dash-sidebar__upload" onClick={() => instanceFileRef.current?.click()}>
-            Add file
-          </button>
-          <input ref={instanceFileRef} type="file" hidden onChange={handleInstanceFileUpload} />
-        </div>
-      </aside>
-
       <main className="dash-main">
         <div className="dash-content">
+          <input ref={instanceFileRef} type="file" hidden onChange={handleInstanceFileUpload} />
           <section className="dash-hero">
             <div className="dash-hero__copy">
-              <div className="dash-hero__eyebrow">Workflow command center</div>
               <h1 className="dash-hero__title">{heroTitle}</h1>
               <p className="dash-hero__desc">{heroCopy}</p>
+              <StatusRail items={statusRailItems} className="dash-hero__status" />
 
               <div className="dash-hero__actions">
                 <button type="button" className="dash-hero__primary" onClick={onDescribe}>
@@ -800,13 +764,6 @@ export function Dashboard({
                 </button>
               </div>
 
-              <div className="dash-hero__chips">
-                <span className="dash-chip">{summary.workflow_counts.total} workflows in scope</span>
-                <span className="dash-chip">{summary.workflow_counts.live} live lanes</span>
-                <span className="dash-chip">{instanceFiles.length} knowledge files</span>
-                <span className={`dash-pill dash-pill--${health.tone}`}>{health.label}</span>
-              </div>
-
               {error && (
                 <div className="dash-inline-alert">
                   Live metrics are unavailable right now. The workflow inventory still works, but health data is stale.
@@ -814,98 +771,25 @@ export function Dashboard({
               )}
             </div>
 
-            <div className="dash-hero__rail">
-              <div className="dash-contract-preview">
-                <div className="dash-contract-preview__head">
-                  <span>workflow_contract · tec_workflow_lane</span>
-                  <span>{hasWorkflows ? 'scope · active' : 'scope · draft'}</span>
-                </div>
-                <div className="dash-contract-preview__body">
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">task</div>
-                    <div className="dash-contract-preview__val">
-                      {hasWorkflows ? 'resume or inspect workflow lanes' : 'define first workflow job'}
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">read scope</div>
-                    <div className="dash-contract-preview__val">
-                      <span className="dash-contract-pill dash-contract-pill--read">/workflows</span>
-                      <span className="dash-contract-pill dash-contract-pill--read">/runs</span>
-                      <span className="dash-contract-pill dash-contract-pill--read">/receipts</span>
-                      <span className="dash-contract-pill dash-contract-pill--read">/knowledge</span>
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">write scope</div>
-                    <div className="dash-contract-preview__val">
-                      <span className="dash-contract-pill dash-contract-pill--write">/draft</span>
-                      <span className="dash-contract-pill dash-contract-pill--write">/success_if</span>
-                      <span className="dash-contract-pill dash-contract-pill--write">/failure_if</span>
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row dash-contract-preview__row--locked">
-                    <div className="dash-contract-preview__key">locked</div>
-                    <div className="dash-contract-preview__val">
-                      <span className="dash-contract-pill dash-contract-pill--locked">/destructive.write</span>
-                      <span className="dash-contract-pill dash-contract-pill--locked">/unbounded.spend</span>
-                      <span className="dash-contract-pill dash-contract-pill--locked">/approval.required</span>
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">tools</div>
-                    <div className="dash-contract-preview__val">
-                      <span className="dash-contract-pill">workflow.builder</span>
-                      <span className="dash-contract-pill">verifier.run</span>
-                      <span className="dash-contract-pill">receipts.query</span>
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">approval</div>
-                    <div className="dash-contract-preview__val">human · for any locked.* match</div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">verifier</div>
-                    <div className="dash-contract-preview__val">success_if true · failure_if false · receipts sealed</div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">retry</div>
-                    <div className="dash-contract-preview__val">
-                      requires <span className="dash-contract-code">previous_failure</span> + <span className="dash-contract-code">retry_delta</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="dash-contract-preview__foot">
-                  <span>materialized · {materializedDate}</span>
-                  <span>✓ environment ready</span>
-                </div>
-              </div>
-
+            <div className="dash-overview-grid" aria-label="Dashboard authority and actions">
+              {overviewCards.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  className={`dash-overview-card dash-overview-card--${card.tone}`}
+                  onClick={card.onClick}
+                >
+                  <span className="dash-overview-card__source">{card.source}</span>
+                  <strong>{card.title}</strong>
+                  <span className="dash-overview-card__value">{card.value}</span>
+                  <span className="dash-overview-card__detail">{card.detail}</span>
+                  <em>{card.action}</em>
+                </button>
+              ))}
             </div>
           </section>
 
           <section className="dash-run-instrument">
-            <div className="dash-terminal">
-              <div className="dash-terminal__label">sandbox · overview · plan→execute→verify</div>
-              <span className="dash-terminal__line"><span>$</span> praxis workflow query overview</span>
-              <span className="dash-terminal__line dash-terminal__line--muted">
-                › materializing dashboard snapshot · {summary.workflow_counts.total} workflows in scope
-              </span>
-              <span className="dash-terminal__line">
-                agent · {hasWorkflows ? 'inspect lanes, receipts, and knowledge' : 'awaiting first contract'}
-              </span>
-              <span className="dash-terminal__line dash-terminal__line--ok">
-                ✓ {summary.workflow_counts.live} live · {summary.workflow_counts.saved} saved · {summary.workflow_counts.draft} drafts
-              </span>
-              <span className={`dash-terminal__line ${summary.queue.depth > 0 ? 'dash-terminal__line--warn' : 'dash-terminal__line--ok'}`}>
-                {summary.queue.depth > 0 ? '!' : '✓'} queue · {summary.queue.depth} waiting · {summary.active_runs} active
-              </span>
-              <span className="dash-terminal__line dash-terminal__line--muted">
-                › knowledge · {instanceFiles.length} file{instanceFiles.length === 1 ? '' : 's'} attached
-              </span>
-              <span className="dash-terminal__line"><span>$</span> _</span>
-            </div>
-
             <div className="dash-receipts">
               <div className="dash-receipts__head">
                 <span>receipts</span>
@@ -1103,6 +987,13 @@ export function Dashboard({
                       </div>
                     ))}
                   </div>
+                ) : instanceFilesError ? (
+                  <div className="dash-empty dash-empty--compact dash-empty--danger" role="alert">
+                    <div className="dash-empty__title">File inventory unavailable</div>
+                    <div className="dash-empty__copy">
+                      {instanceFilesError}
+                    </div>
+                  </div>
                 ) : (
                   <div className="dash-empty dash-empty--compact">
                     <div className="dash-empty__title">No files attached</div>
@@ -1131,9 +1022,11 @@ export function Dashboard({
                       const detail = toolOpportunityDetail(opp);
                       const tone = opp.distinct_surfaces > 1 ? 'healthy' : 'neutral';
                       return (
-                        <div
+                        <button
                           key={opp.shape_hash}
-                          className="dash-review-item dash-review-item--static"
+                          type="button"
+                          className="dash-review-item"
+                          onClick={onDescribe}
                           title={`${opp.shape_hash.slice(0, 12)} · ${opp.action_kinds.join(', ')}`}
                         >
                           <span className={`dash-review-item__dot dash-review-item__dot--${tone}`} />
@@ -1148,7 +1041,7 @@ export function Dashboard({
                             {opp.distinct_surfaces > 1 ? ` · ${opp.distinct_surfaces} surfaces` : ''}
                             {opp.last_seen ? ` · ${timeAgo(opp.last_seen)}` : ''}
                           </em>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>

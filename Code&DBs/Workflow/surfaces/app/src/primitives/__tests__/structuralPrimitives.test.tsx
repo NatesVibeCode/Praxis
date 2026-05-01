@@ -10,6 +10,7 @@ import {
   ClaimGrid,
   DagFlow,
   EmptyStateExplainer,
+  EventChain,
   EvidenceReader,
   EvidenceStack,
   FreshnessStamp,
@@ -118,6 +119,19 @@ describe('structural primitives render canonical prx-* shells', () => {
     expect(screen.getByTestId('prx-evidence-reader')).toHaveClass('prx-evidence-reader');
     expect(screen.getByTestId('prx-verifier-grid')).toHaveClass('prx-verifier-grid');
     expect(screen.getByTestId('prx-verifier-slot')).toHaveAttribute('data-state', 'passed');
+  });
+
+  test('EventChain renders authority event threads', () => {
+    render(
+      <EventChain
+        items={[
+          { label: 'plan.composed', value: '12:04:18', what: 'handler compose_plan_from_intent' },
+          { label: 'typed_gap.created', value: '12:04:19', what: 'verifier missing', tone: 'warn' },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('prx-event-chain')).toHaveClass('prx-chain');
+    expect(screen.getByText('typed_gap.created').closest('.ev')).toHaveAttribute('data-tone', 'warn');
   });
 
   test('LegalMovesRail and LegalReader render legal move surfaces', () => {

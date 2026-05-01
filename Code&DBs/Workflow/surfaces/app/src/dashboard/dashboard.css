@@ -2686,3 +2686,120 @@ button.dash-hero-card__stat--link:focus-visible {
     font-size: 20px;
   }
 }
+
+/* Dashboard phase 1: real authority cards, no mocked contract/terminal chrome. */
+.dash-hero__status {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
+.dash-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--dash-border-soft);
+  border-radius: 14px;
+  background: var(--dash-border-faint);
+  box-shadow: var(--card-shadow);
+}
+
+.dash-overview-card {
+  display: grid;
+  gap: 8px;
+  min-height: 164px;
+  padding: 18px;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-card);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 160ms ease, filter 160ms ease;
+}
+
+.dash-overview-card:hover {
+  background: var(--bg-alt);
+  filter: brightness(1.05);
+}
+
+.dash-overview-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.dash-overview-card__source,
+.dash-overview-card em {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.dash-overview-card strong {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.dash-overview-card__value {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.dash-overview-card__detail {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.dash-overview-card--healthy .dash-overview-card__value {
+  color: var(--success);
+}
+
+.dash-overview-card--warning .dash-overview-card__value {
+  color: var(--warning);
+}
+
+.dash-overview-card--danger .dash-overview-card__value {
+  color: var(--danger);
+}
+
+.dash-run-instrument {
+  grid-template-columns: 1fr;
+}
+
+.dash-receipts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dash-receipts__head {
+  grid-column: 1 / -1;
+}
+
+.dash-empty--danger {
+  border-color: rgba(248, 81, 73, 0.28);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.dash-empty--danger .dash-empty__title {
+  color: var(--danger);
+}
+
+@media (max-width: 980px) {
+  .dash-overview-grid,
+  .dash-receipts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .dash-overview-grid,
+  .dash-receipts {
+    grid-template-columns: 1fr;
+  }
+}

@@ -762,6 +762,37 @@ export function ReceiptDiff({
   );
 }
 
+export interface EventChainItem {
+  label: ReactNode;
+  value?: ReactNode;
+  what: ReactNode;
+  footer?: ReactNode;
+  tone?: 'warn' | 'err';
+}
+
+export interface EventChainProps {
+  items: EventChainItem[];
+  className?: string;
+  style?: CSSProperties;
+}
+
+export function EventChain({ items, className = '', style }: EventChainProps) {
+  return (
+    <div className={className ? `prx-chain ${className}` : 'prx-chain'} style={style} data-testid="prx-event-chain">
+      {items.map((item, index) => (
+        <div className="ev" data-tone={item.tone} key={index}>
+          <div className="hd">
+            <span>{item.label}</span>
+            {item.value !== undefined ? <span>{item.value}</span> : null}
+          </div>
+          <div className="what">{item.what}</div>
+          {item.footer !== undefined ? <div className="ft">{item.footer}</div> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export interface NodeBandProps {
   receives: ReactNode[];
   icon: ReactNode;

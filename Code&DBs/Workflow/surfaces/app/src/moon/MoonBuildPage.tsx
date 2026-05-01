@@ -22,7 +22,7 @@ import { MoonRunPanel } from './MoonRunPanel';
 import { MoonRunOverlay } from './MoonRunOverlay';
 import { MoonDragGhost } from './MoonDragGhost';
 import { MoonOutcomeContract } from './MoonOutcomeContract';
-import { MoonEdges, getEdgeGeometry } from './MoonEdges';
+import { MoonEdges, edgePresentation, getEdgeGeometry } from './MoonEdges';
 import { useMoonDrag } from './useMoonDrag';
 import { loadCatalog, getCatalog } from './catalog';
 import type { CatalogItem } from './catalog';
@@ -461,8 +461,6 @@ function moonVisibleSnapshot(
   return snapshot;
 }
 
-type GatePodTone = 'empty' | 'core' | 'later' | 'legacy';
-
 const MOON_MIN_SCALE = 0.5;
 const MOON_MAX_SCALE = 2.5;
 
@@ -473,34 +471,6 @@ function clampScale(value: number): number {
 
 function finiteCoordinate(value: number): number {
   return Number.isFinite(value) ? value : 0;
-}
-
-function gatePodTone(edge: OrbitEdge, item?: CatalogItem | null): GatePodTone {
-  if (!edge.gateFamily) return 'empty';
-  const policy = item ? getCatalogSurfacePolicy(item) : null;
-  if (policy?.tier === 'primary') return 'core';
-  if (policy?.tier === 'advanced') return 'later';
-  return 'legacy';
-}
-
-function gatePodLabel(edge: OrbitEdge, item?: CatalogItem | null): string {
-  if (!edge.gateFamily) return 'Add gate';
-  return edge.gateLabel || item?.label || 'Gate';
-}
-
-/**
- * Glyph that reads the gate family at a glance. Keeps the canvas legible when
- * multiple branches leave a node — eye picks out which branch is the failure
- * path versus the condition versus the always path without reading labels.
- */
-function gatePodGlyphType(edge: OrbitEdge): import('./moonBuildPresenter').GlyphType {
-  switch (edge.gateFamily) {
-    case 'conditional': return 'decompose';
-    case 'after_failure': return 'blocked';
-    case 'after_any': return 'summary';
-    case 'after_success': return 'validate';
-    default: return 'gate';
-  }
 }
 
 function nodeCardClass(node: OrbitNode, isSelected: boolean, isDragOver: boolean): string {
@@ -2385,24 +2355,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     () => new Map(viewModel.nodes.map((node) => [node.id, node] as const)),
     [viewModel.nodes],
   );
-  const gateCatalogByFamily = useMemo(() => {
-    const byFamily = new Map<string, CatalogItem>();
-    for (const item of catalog) {
-      if (item.dropKind === 'edge' && item.gateFamily) byFamily.set(item.gateFamily, item);
-    }
-    return byFamily;
-  }, [catalog]);
-  const primaryGateModels = useMemo(() => {
-    return catalog
-      .filter(item => item.family === 'control' && item.status === 'ready')
-      .map(item => ({
-        item,
-        truth: getCatalogTruth(item),
-        policy: getCatalogSurfacePolicy(item),
-      }))
-      .filter(({ policy }) => policy.tier === 'primary');
-  }, [catalog]);
-
   // Selected edge for gate config in Detail dock
   const selectedEdge = state.selectedEdgeId
     ? viewModel.edges.find(e => e.id === state.selectedEdgeId) || null
@@ -2452,9 +2404,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     const geometry = getEdgeGeometry(edge, viewModel.layout);
     if (!geometry) return [];
 
-    const gateItem = edge.gateFamily ? gateCatalogByFamily.get(edge.gateFamily) || null : null;
-    const gateTruth = gateItem ? getCatalogTruth(gateItem) : null;
-    const gatePolicy = gateItem ? getCatalogSurfacePolicy(gateItem) : null;
+    const presentation = edgePresentation(edge, edge.isOnDominantPath);
 
     return [{
       centerX: geometry.centerX,
@@ -2463,16 +2413,12 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       endY: geometry.endY,
       edge,
       fromLabel: nodeById.get(edge.from)?.title || edge.from,
-      gateItem,
-      gatePolicy,
-      gateTruth,
-      label: gatePodLabel(edge, gateItem),
+      presentation,
       startX: geometry.startX,
       startY: geometry.startY,
       toLabel: nodeById.get(edge.to)?.title || edge.to,
-      tone: gatePodTone(edge, gateItem),
     }];
-  }), [gateCatalogByFamily, nodeById, state.viewMode, viewModel.edges, viewModel.layout]);
+  }), [nodeById, state.viewMode, viewModel.edges, viewModel.layout]);
   const appendPosition = useMemo(
     () => getMoonAppendPosition(viewModel.layout),
     [viewModel.layout],
@@ -2842,28 +2788,25 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     const isSelected = control.edge.id === state.selectedEdgeId;
                     const isDragOver = previewEdgeId === control.edge.id;
                     const isEmpty = !control.edge.gateFamily;
-                    const isConditional = control.edge.gateFamily === 'conditional';
-                    const summary = isEmpty
-                      ? 'Pick a gate type to guard this connection.'
-                      : control.gatePolicy?.detail || control.gateTruth?.detail || 'This connection already carries gate metadata.';
-                    const title = isConditional
-                      ? `${control.label} path`
-                      : control.label;
+                    const presentation = control.presentation;
+                    const title = isEmpty ? presentation.routeLabel : `${presentation.shortLabel} ${presentation.routeLabel}`;
+                    const gateAriaLabel = isEmpty
+                      ? `Add gate between ${control.fromLabel} and ${control.toLabel}`
+                      : `Select ${presentation.shortLabel} gate between ${control.fromLabel} and ${control.toLabel}`;
 
                     // Focus-lineage dim: edge gate pods outside the selected
-                    // lineage drop to near-invisible so their "On success /
-                    // On any / Else path" labels stop shouting when the user
-                    // is inspecting a different branch. inLineage defaults
+                    // lineage drop back so attention collapses to the branch
+                    // the user is inspecting. inLineage defaults
                     // true at rest, so nothing dims until a node is selected.
                     const gateOpacity = isSelected
                       ? 1
                       : control.edge.inLineage
-                        ? (control.edge.gateFamily ? 0.82 : 0.2)
+                        ? (control.edge.gateFamily ? 0.9 : 0.24)
                         : 0.12;
                     return (
                       <div
                         key={control.edge.id}
-                        className={`moon-graph-gate moon-graph-gate--${control.tone}${isSelected ? ' moon-graph-gate--selected' : ''}${isDragOver ? ' moon-graph-gate--drag-over' : ''}${control.edge.gateFamily ? ` moon-graph-gate--family-${control.edge.gateFamily}` : ''}`}
+                        className={`moon-graph-gate moon-graph-gate--${presentation.tone}${isSelected ? ' moon-graph-gate--selected' : ''}${isDragOver ? ' moon-graph-gate--drag-over' : ''}${control.edge.gateFamily ? ` moon-graph-gate--family-${control.edge.gateFamily}` : ''}`}
                         style={{
                           left: control.centerX,
                           top: control.centerY,
@@ -2878,74 +2821,29 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                             type="button"
                             className="moon-graph-gate__trigger"
                             onClick={() => handleSelectEdge(control.edge.id)}
-                            aria-label={`Select gate between ${control.fromLabel} and ${control.toLabel}`}
+                            aria-label={gateAriaLabel}
                           >
                           <span
                             className={`moon-graph-gate__icon${isEmpty ? ' moon-graph-gate__icon--plus' : ''}`}
                             aria-hidden="true"
                           >
-                            {isEmpty ? '+' : <MoonGlyph type={control.gateItem?.icon || gatePodGlyphType(control.edge)} size={12} color="currentColor" />}
+                            {isEmpty ? '+' : <MoonGlyph type={presentation.glyph} size={12} color="currentColor" />}
                           </span>
-                          <span className="moon-graph-gate__trigger-label">{control.label}</span>
+                          {!isEmpty && <span className="moon-graph-gate__trigger-label">{presentation.shortLabel}</span>}
                         </button>
 
                         {isSelected && (
                           <div className="moon-graph-gate__card">
                             <div className="moon-graph-gate__meta">
-                              <span className="moon-surface-badge">
-                                {isEmpty ? 'Ungated' : control.gatePolicy?.badge || 'Gate'}
+                              <span className={`moon-surface-badge moon-surface-badge--${presentation.tone}`}>
+                                {presentation.stateLabel}
                               </span>
-                              {control.gateTruth && (
-                                <span className={`moon-truth-badge moon-truth-badge--${control.gateTruth.category}`}>
-                                  {control.gateTruth.badge}
-                                </span>
-                              )}
                             </div>
+                            <div className="moon-graph-gate__route-label">{presentation.shortLabel}</div>
                             <div className="moon-graph-gate__title">{title}</div>
                             <div className="moon-graph-gate__path">
-                              {control.fromLabel} to {control.toLabel}
+                              {control.fromLabel}{' -> '}{control.toLabel}
                             </div>
-                            <div className="moon-graph-gate__summary">{summary}</div>
-
-                            {primaryGateModels.length > 0 && (
-                              <div className="moon-graph-gate__actions">
-                                <label className="moon-dock-form__label" htmlFor={`moon-gate-family-${control.edge.id}`}>Type</label>
-                                <select
-                                  id={`moon-gate-family-${control.edge.id}`}
-                                  className="moon-dock-form__select"
-                                  value={control.edge.gateFamily || ''}
-                                  onChange={e => {
-                                    const family = e.target.value;
-                                    if (family) void handleApplyGate(control.edge.id, family);
-                                  }}
-                                >
-                                  <option value="" disabled>{isEmpty ? 'Choose a gate' : 'Choose gate type'}</option>
-                                  {primaryGateModels.map(({ item }) => (
-                                    <option key={item.id} value={item.gateFamily}>{item.label}</option>
-                                  ))}
-                                </select>
-                                <label className="moon-dock-form__label" htmlFor={`moon-gate-detail-${control.edge.id}`}>Detail</label>
-                                <select
-                                  id={`moon-gate-detail-${control.edge.id}`}
-                                  className="moon-dock-form__select"
-                                  value={control.gateItem?.id || ''}
-                                  onChange={e => {
-                                    const picked = primaryGateModels.find(({ item }) => item.id === e.target.value);
-                                    if (picked?.item.gateFamily) void handleApplyGate(control.edge.id, picked.item.gateFamily);
-                                  }}
-                                  disabled={!control.edge.gateFamily}
-                                >
-                                  <option value="" disabled>Pick a type first</option>
-                                  {primaryGateModels
-                                    .filter(({ item }) => item.gateFamily === control.edge.gateFamily)
-                                    .map(({ item, truth, policy }) => (
-                                      <option key={item.id} value={item.id}>
-                                        {policy.badge} - {truth.badge}
-                                      </option>
-                                    ))}
-                                </select>
-                              </div>
-                            )}
 
                             <button
                               type="button"

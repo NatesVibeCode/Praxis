@@ -30,6 +30,7 @@ from adapters.llm_client import (
     call_llm_streaming,
 )
 from runtime.chat_store import ChatStore
+from runtime.execution_targets import resolve_target_for_transport
 
 _log = logging.getLogger(__name__)
 
@@ -290,6 +291,9 @@ class ChatOrchestrator:
                 "tool_results": [],
                 "model_used": model_used,
                 "latency_ms": latency_ms,
+                **resolve_target_for_transport(
+                    transport_type="CLI",
+                ).to_dict(),
             }
 
         # Tool loop
@@ -365,6 +369,11 @@ class ChatOrchestrator:
                 "tool_results": all_tool_results,
                 "model_used": model_used,
                 "latency_ms": response.latency_ms,
+                "usage": response.usage,
+                "response_model": response.model,
+                **resolve_target_for_transport(
+                    transport_type="API",
+                ).to_dict(),
             }
 
         # Max iterations reached
@@ -378,6 +387,9 @@ class ChatOrchestrator:
                 else None
             ),
             "latency_ms": 0,
+            **resolve_target_for_transport(
+                transport_type="API",
+            ).to_dict(),
         }
 
     # ------------------------------------------------------------------
@@ -426,7 +438,14 @@ class ChatOrchestrator:
             )
             self._chat_store.touch_updated_at(conversation_id)
             yield {"event": "text_delta", "data": {"text": assistant_content}}
-            yield {"event": "done", "data": {"message_id": msg_id, "model_used": model_used, "tool_results_count": 0}}
+            yield {"event": "done", "data": {
+                "message_id": msg_id,
+                "model_used": model_used,
+                "tool_results_count": 0,
+                **resolve_target_for_transport(
+                    transport_type="CLI",
+                ).to_dict(),
+            }}
             return
 
         # Resolve HTTP model lane
@@ -439,6 +458,8 @@ class ChatOrchestrator:
         all_tool_results: list[dict] = []
         full_text = ""
         iteration = 0
+        latest_usage: dict[str, Any] = {}
+        stop_reason: str | None = None
 
         while iteration < _MAX_TOOL_ITERATIONS:
             iteration += 1
@@ -494,6 +515,9 @@ class ChatOrchestrator:
 
                 elif event["type"] == "message_stop":
                     stop_reason = event.get("stop_reason")
+                    usage = event.get("usage")
+                    if isinstance(usage, dict):
+                        latest_usage = usage
 
                 elif event["type"] == "error":
                     yield {"event": "error", "data": {"message": event["message"]}}
@@ -535,6 +559,11 @@ class ChatOrchestrator:
             "message_id": msg_id,
             "model_used": f"{provider}/{model}",
             "tool_results_count": len(all_tool_results),
+            "usage": latest_usage,
+            "stop_reason": stop_reason,
+            **resolve_target_for_transport(
+                transport_type="API",
+            ).to_dict(),
         }}
 
     # ------------------------------------------------------------------

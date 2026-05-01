@@ -406,7 +406,9 @@
     "389_tool_opportunities_view_pin.sql",
     "390_register_action_fingerprint_record_operation.sql",
     "391_register_model_eval_operations.sql",
-    "392_model_eval_case_runs_and_scorecards.sql"
+    "392_model_eval_case_runs_and_scorecards.sql",
+    "393_register_model_eval_benchmark_ingest.sql",
+    "394_execution_target_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -11162,6 +11164,154 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.model_eval_run_case"
       }
+    ],
+    "393_register_model_eval_benchmark_ingest.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.model_eval_benchmark_ingested_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.model_eval.benchmark.ingested"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.model_eval_benchmark_ingest"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.model_eval_benchmark_ingest"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.model_eval_benchmark_ingest"
+      }
+    ],
+    "394_execution_target_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.execution_target"
+      },
+      {
+        "object_type": "table",
+        "object_name": "registry_execution_target_authority"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_registry_execution_target_kind"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_registry_execution_target_transport"
+      },
+      {
+        "object_type": "table",
+        "object_name": "registry_execution_profile_authority"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_registry_execution_profile_target"
+      },
+      {
+        "object_type": "table",
+        "object_name": "execution_dispatch_choices"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_execution_dispatch_choices_lookup"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_execution_dispatch_choices_candidate_hash"
+      },
+      {
+        "object_type": "view",
+        "object_name": "registry_sandbox_profile_execution_projection"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.registry_execution_target_authority"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.registry_execution_profile_authority"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.execution_dispatch_choices"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.registry_sandbox_profile_execution_projection"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.registry_execution_target_authority"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.registry_execution_profile_authority"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.execution_dispatch_choices"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.view.public.registry_sandbox_profile_execution_projection"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.execution.dispatch_choice.committed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.execution.targets.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.execution.targets.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.execution.targets.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.execution.targets.resolve"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.execution.targets.resolve"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.execution.targets.resolve"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.execution.dispatch_options.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.execution.dispatch_options.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.execution.dispatch_options.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.execution.dispatch_choice.commit"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.execution.dispatch_choice.commit"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.execution.dispatch_choice.commit"
+      }
     ]
   },
   "policy_buckets": {
@@ -11572,7 +11722,9 @@
       "389_tool_opportunities_view_pin.sql",
       "390_register_action_fingerprint_record_operation.sql",
       "391_register_model_eval_operations.sql",
-      "392_model_eval_case_runs_and_scorecards.sql"
+      "392_model_eval_case_runs_and_scorecards.sql",
+      "393_register_model_eval_benchmark_ingest.sql",
+      "394_execution_target_authority.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -11763,6 +11915,9 @@
     ]
   },
   "bootstrap_prerequisites": {
+    "393_register_model_eval_benchmark_ingest.sql": [
+      "391_register_model_eval_operations.sql"
+    ],
     "392_model_eval_case_runs_and_scorecards.sql": [
       "391_register_model_eval_operations.sql"
     ]

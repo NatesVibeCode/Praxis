@@ -1,0 +1,54 @@
+{
+  "name": "overview_dashboard_phase1",
+  "queue_id": "overview_dashboard_phase1_001",
+  "phase": "build",
+  "outcome_goal": "Phase 1 of the Overview Dashboard rebuild: delete fictional blocks (contract preview, terminal, hidden sidebar scaffolding), surface BUG-0AEFD1A1 file-inventory failure visibly, make Tool Opportunities clickable. Update Dashboard.test.tsx to assert these invariants, run vitest.",
+  "decision_ref": "architecture_policy.surfaces_app_overview.dashboard_contract",
+  "workdir": "/Users/nate/Praxis",
+  "jobs": [
+    {
+      "label": "phase1_dashboard_source_edit",
+      "agent": "openrouter/moonshotai/kimi-k2.6",
+      "task_type": "build",
+      "depends_on": [],
+      "description": "Delete fictional blocks from Dashboard.tsx, surface /api/files failure as visible degraded state, make Tool Opportunities rows clickable.",
+      "outcome_goal": "Dashboard.tsx no longer contains the hardcoded contract preview, fake terminal block, or hidden sidebar scaffolding. The /api/files?scope=instance fetch surfaces failure as a visible 'Inventory unavailable' state in the Knowledge Base panel. Every Tool Opportunity row is a clickable button (onClick → onChat).",
+      "prompt": "You are editing the Praxis Overview Dashboard component to enforce its filed authority contract (decision_key: architecture_policy.surfaces_app_overview.dashboard_contract).\n\nFile to edit: Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx\n\nMake exactly these changes:\n\n1. DELETE the hardcoded contract preview block.\n   - The JSX block `<div className=\"dash-contract-preview\">…</div>` (currently around lines 818–882) is hardcoded fiction. Remove it AND the wrapping `<div className=\"dash-hero__rail\">…</div>` since that wrapper exists only to host the fiction.\n\n2. DELETE the fake terminal block.\n   - The JSX block `<div className=\"dash-terminal\">…</div>` (currently around lines 888–907) outputs static fake CLI text. Remove it.\n   - If the surrounding `<section className=\"dash-run-instrument\">` becomes a single-child wrapper after this removal, simplify but keep the receipts cards intact.\n\n3. DELETE hidden sidebar scaffolding.\n   - Remove the `<div className=\"dash-sidebar__brand\">…</div>` block (CSS already hides it via `display: none`).\n   - Remove the `<div className=\"dash-sidebar__stack\">…</div>` block (CSS already hides it).\n   - Remove the `<div className=\"dash-sidebar__overview-copy\">…</div>` element (CSS already hides it).\n   - Do NOT touch the visible parts of the sidebar (overview spine, overview-grid, actions, bottom row).\n\n4. SURFACE the file-inventory failure (BUG-0AEFD1A1 visibility fix).\n   - The `useEffect` fetching `/api/files?scope=instance` (around lines 435–449) currently has a silent catch (\"Silent by design…\"). Replace with visible degraded state.\n   - Add a `filesStatus` state: `'loading' | 'ok' | 'error'`. Initialize to `'loading'`, set to `'ok'` on a successful 2xx response, `'error'` on non-2xx or thrown error (still ignore AbortError).\n   - In the Knowledge Base panel (find the `<h2 className=\"dash-panel__title\">Knowledge Base</h2>` heading), the rendering becomes:\n     - if `filesStatus === 'error'`: render a `dash-empty dash-empty--compact` block with title `Inventory unavailable` and copy `The /api/files?scope=instance endpoint did not respond. Upload still works, but the existing file list could not be loaded.`\n     - if `filesStatus === 'loading'` AND `instanceFiles.length === 0`: show a `dash-empty dash-empty--compact` with title `Loading inventory…` and copy `Reading attached files from the instance scope.`\n     - if `filesStatus === 'ok'` AND `instanceFiles.length === 0`: keep the existing `No files attached` empty state\n     - otherwise: render the file list (existing behavior)\n   - Keep the `Add file` action visible regardless of state.\n\n5. TOOL OPPORTUNITIES: every row clickable.\n   - Each rendered opportunity in the `dash-review-list` under Tool Opportunities (around lines 1126–1162) currently uses `dash-review-item--static`. Replace each with a `<button type=\"button\" className=\"dash-review-item\">` whose `onClick` calls `onChat()` (the existing prop). Preserve the existing `title` attribute (shape_hash + action_kinds tooltip).\n\nConstraints:\n- Do NOT modify the `/api/dashboard` payload, the snapshot hook, callback prop signatures, or any CSS file.\n- Keep TypeScript strict. No `any` casts. No new dependencies. No new imports unless needed for the filesStatus state.\n- Do NOT add narrating comments — the contract row in operator_decisions is the durable record.\n- Preserve all other behavior (existing tests must continue to pass after the test-update job).",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/dashboard.css",
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.test.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/primitives/index.ts"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx"
+      ],
+      "verify_refs": [
+        "dashboard-no-fictional-contract-preview",
+        "dashboard-file-inventory-visible-degraded-state",
+        "dashboard-tool-opportunities-clickable"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -L 'dash-contract-preview\\|dash-terminal\\|dash-sidebar__brand\\|dash-sidebar__stack\\|dash-sidebar__overview-copy\\|Silent by design' 'Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx' >/dev/null && grep -q 'Inventory unavailable' 'Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx' && grep -q 'filesStatus' 'Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx'"
+    },
+    {
+      "label": "phase1_dashboard_test_update",
+      "agent": "openrouter/moonshotai/kimi-k2.6",
+      "task_type": "build",
+      "depends_on": ["phase1_dashboard_source_edit"],
+      "description": "Update Dashboard.test.tsx to lock in the contract enforced by the source edit.",
+      "outcome_goal": "Dashboard.test.tsx no longer asserts deleted markup. New tests cover: file-inventory failure surfaces visibly, every Tool Opportunity row is clickable, no fictional contract/terminal copy in DOM, four-tone color law (healthy/warning/danger/neutral pill classes).",
+      "prompt": "Update Dashboard.test.tsx so it locks in the contract enforced by the prior phase1_dashboard_source_edit job.\n\nFile to edit: Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.test.tsx\n\nDo all of the following:\n\n1. Drop any expectations that depend on the deleted markup. Remove or modify any assertion on text matching `workflow_contract`, `tec_workflow_lane`, `materialized`, `sandbox · overview`, `praxis workflow query overview`, `dash-terminal`, `dash-contract-preview`, or any string from the deleted contract-preview / terminal / hidden-sidebar blocks.\n\n2. Add a new test: `surfaces /api/files failure as visible degraded state, not silent zero`.\n   - Mock fetch so `/api/files?scope=instance` returns 400 (or rejects with non-Abort error).\n   - Mock `/api/dashboard` to return a valid snapshot.\n   - Render `<Dashboard …callbacks />`.\n   - Assert text `Inventory unavailable` is in the document.\n   - Assert text `No files attached` is NOT in the document.\n\n3. Add a new test: `every Tool Opportunity row is clickable`.\n   - Mock `/api/dashboard` to include at least two `tool_opportunities` items.\n   - Render the dashboard.\n   - Query all rendered review items inside the Tool Opportunities panel and assert each is a `<button>` element with a defined `onClick`.\n\n4. Add a new test: `does not render fictional contract or terminal copy`.\n   - Render with any valid snapshot.\n   - Assert that none of `workflow_contract`, `tec_workflow_lane`, `praxis workflow query overview`, `dash-terminal`, `dash-contract-preview` appear in the DOM.\n\n5. Add a new test: `tone classes obey four-tone color law`.\n   - Render with `summary.health.tone = 'healthy'` and assert `dash-pill--healthy` is present.\n   - Re-render with `tone: 'warning'` and assert `dash-pill--warning`.\n   - Re-render with `tone: 'danger'` and assert `dash-pill--danger`.\n   - Re-render with `tone: 'neutral'` and assert `dash-pill--neutral`.\n   - These four tones are the only canonical ones; the test fails if a fifth class is introduced.\n\nKeep existing tests that still pass. Use the existing `vi.fn()` fetch mock pattern in this file. Do not add new dependencies.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.test.tsx"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.test.tsx"
+      ],
+      "verify_refs": [
+        "dashboard-vitest-contract"
+      ],
+      "verify_command": "cd /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app && npx vitest run src/dashboard/Dashboard.test.tsx --reporter=verbose --run 2>&1 | tail -50"
+    }
+  ]
+}

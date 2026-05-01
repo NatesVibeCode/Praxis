@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { vi } from 'vitest';
 
@@ -135,6 +135,90 @@ describe('Dashboard', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
+    const onDescribe = vi.fn();
+
+    render(
+      <Dashboard
+        onEditWorkflow={() => undefined}
+        onEditModel={() => undefined}
+        onViewRun={() => undefined}
+        onNewWorkflow={() => undefined}
+        onChat={() => undefined}
+        onDescribe={onDescribe}
+        onOpenCosts={() => undefined}
+      />,
+    );
+
+    await screen.findByText(/3 workflows in scope/);
+    expect(screen.getByText('1 live - 1 saved - 1 draft')).toBeInTheDocument();
+    expect(screen.getByText('/api/dashboard')).toBeInTheDocument();
+    expect(screen.getAllByText('Healthy').length).toBeGreaterThan(0);
+    expect(screen.getByText('dashboard.health')).toBeInTheDocument();
+    expect(screen.getByText('$14.25')).toBeInTheDocument();
+    expect(screen.getByText('Toolbelt Review')).toBeInTheDocument();
+    expect(screen.getByText('Execution queue')).toBeInTheDocument();
+    expect(screen.queryByText('workflow_contract · tec_workflow_lane')).not.toBeInTheDocument();
+    expect(screen.queryByText('$ praxis workflow query overview')).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(urls).toContain('/api/dashboard');
+      expect(urls).toContain('/api/files?scope=instance');
+      expect(urls).not.toContain('/api/workflows');
+      expect(urls).not.toContain('/api/status');
+      expect(urls).not.toContain('/api/leaderboard');
+    });
+  });
+
+  test('surfaces instance file inventory failure instead of silently rendering zero files', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/dashboard') {
+        return jsonResponse({
+          generated_at: '2026-04-14T12:00:00+00:00',
+          summary: {
+            workflow_counts: { total: 0, live: 0, saved: 0, draft: 0 },
+            health: {
+              readiness: 'healthy',
+              label: 'Healthy',
+              tone: 'healthy',
+              copy: 'Ready.',
+            },
+            runs_24h: 0,
+            active_runs: 0,
+            pass_rate_24h: null,
+            total_cost_24h: 0,
+            top_agent: null,
+            models_online: 0,
+            queue: {
+              depth: 0,
+              status: 'ok',
+              utilization_pct: 0,
+              pending: 0,
+              ready: 0,
+              claimed: 0,
+              running: 0,
+              error: null,
+            },
+          },
+          sections: [
+            { key: 'live', count: 0, workflow_ids: [] },
+            { key: 'saved', count: 0, workflow_ids: [] },
+            { key: 'draft', count: 0, workflow_ids: [] },
+          ],
+          workflows: [],
+          recent_runs: [],
+          tool_opportunities: [],
+        });
+      }
+      if (url === '/api/files?scope=instance') {
+        return jsonResponse({ error: 'bad scope' }, 400);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
     render(
       <Dashboard
         onEditWorkflow={() => undefined}
@@ -147,21 +231,87 @@ describe('Dashboard', () => {
       />,
     );
 
-    await screen.findByText('3 workflows in scope');
-    expect(screen.getByText('1 live lanes')).toBeInTheDocument();
-    expect(screen.getAllByText('Healthy').length).toBeGreaterThan(0);
-    expect(screen.getByText('dashboard.health')).toBeInTheDocument();
-    expect(screen.getByText('$14.25')).toBeInTheDocument();
-    expect(screen.getByText('Toolbelt Review')).toBeInTheDocument();
-    expect(screen.getByText('Execution queue')).toBeInTheDocument();
+    expect(await screen.findByText('File inventory unavailable')).toBeInTheDocument();
+    expect(screen.getAllByText('File inventory returned 400').length).toBeGreaterThan(0);
+    expect(screen.queryByText('No files attached')).not.toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      const urls = fetchMock.mock.calls.map(([url]) => String(url));
-      expect(urls).toContain('/api/dashboard');
-      expect(urls).toContain('/api/files?scope=instance');
-      expect(urls).not.toContain('/api/workflows');
-      expect(urls).not.toContain('/api/status');
-      expect(urls).not.toContain('/api/leaderboard');
+  test('routes tool opportunities to the workflow composer instead of rendering them as static decoration', async () => {
+    const onDescribe = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/dashboard') {
+        return jsonResponse({
+          generated_at: '2026-04-14T12:00:00+00:00',
+          summary: {
+            workflow_counts: { total: 0, live: 0, saved: 0, draft: 0 },
+            health: {
+              readiness: 'healthy',
+              label: 'Healthy',
+              tone: 'healthy',
+              copy: 'Ready.',
+            },
+            runs_24h: 0,
+            active_runs: 0,
+            pass_rate_24h: null,
+            total_cost_24h: 0,
+            top_agent: null,
+            models_online: 0,
+            queue: {
+              depth: 0,
+              status: 'ok',
+              utilization_pct: 0,
+              pending: 0,
+              ready: 0,
+              claimed: 0,
+              running: 0,
+              error: null,
+            },
+          },
+          sections: [
+            { key: 'live', count: 0, workflow_ids: [] },
+            { key: 'saved', count: 0, workflow_ids: [] },
+            { key: 'draft', count: 0, workflow_ids: [] },
+          ],
+          workflows: [],
+          recent_runs: [],
+          tool_opportunities: [
+            {
+              shape_hash: 'abc123toolopportunity',
+              decision_key: 'decision.example',
+              occurrence_count: 3,
+              distinct_surfaces: 2,
+              action_kinds: ['gateway_op'],
+              operation_names: ['workflow.run'],
+              sample_commands: [],
+              sample_path_shapes: [],
+              last_seen: '2026-04-14T11:50:00+00:00',
+            },
+          ],
+        });
+      }
+      if (url === '/api/files?scope=instance') {
+        return jsonResponse({ files: [] });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
     });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    render(
+      <Dashboard
+        onEditWorkflow={() => undefined}
+        onEditModel={() => undefined}
+        onViewRun={() => undefined}
+        onNewWorkflow={() => undefined}
+        onChat={() => undefined}
+        onDescribe={onDescribe}
+        onOpenCosts={() => undefined}
+      />,
+    );
+
+    const opportunity = await screen.findByTitle(/abc123toolop/);
+    fireEvent.click(opportunity);
+    expect(onDescribe).toHaveBeenCalledTimes(1);
   });
 });

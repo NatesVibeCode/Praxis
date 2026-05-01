@@ -254,6 +254,9 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow remediation-plan` | `praxis_remediation_plan` | `stable` | - | `read` | - |
 | `praxis workflow runtime-truth` | `praxis_runtime_truth_snapshot` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_chat_routing_options_list` | `praxis_chat_routing_options_list` | `stable` | - | `read` | - |
+| `praxis workflow tools call praxis_dispatch_choice_commit` | `praxis_dispatch_choice_commit` | `stable` | - | `write` | - |
+| `praxis workflow tools call praxis_dispatch_options_list` | `praxis_dispatch_options_list` | `stable` | - | `read` | - |
+| `praxis workflow tools call praxis_execution_targets_list` | `praxis_execution_targets_list` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_execution_truth` | `praxis_execution_truth` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_model_access_control_matrix` | `praxis_model_access_control_matrix` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_provider_route_truth` | `praxis_provider_route_truth` | `stable` | - | `read` | - |
@@ -343,7 +346,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
-| `praxis workflow model-eval` | `praxis_model_eval` | `advanced` | action: plan, run, inspect, compare, promote, export | `read`, `write` | - |
+| `praxis workflow model-eval` | `praxis_model_eval` | `advanced` | action: plan, run, inspect, compare, promote, export, benchmark_ingest | `read`, `write` | - |
 | `praxis workflow moon` | `praxis_moon` | `advanced` | action: get_build, compose, suggest_next, mutate_field, launch | `launch`, `read`, `write` | - |
 | `praxis workflow synthetic-data-generate` | `praxis_synthetic_data_generate` | `advanced` | - | `write` | - |
 | `praxis workflow synthetic-data-read` | `praxis_synthetic_data_read` | `advanced` | action: list_datasets, describe_dataset, list_records | `read` | - |

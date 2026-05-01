@@ -1,0 +1,32 @@
+{
+  "name": "Execution Target Authority proof queue",
+  "workflow_id": "workflow.execution_target_authority_proof",
+  "read_scope": [
+    "Code&DBs/Workflow/runtime/execution_targets.py",
+    "Code&DBs/Workflow/runtime/operations/queries/execution_targets.py",
+    "Code&DBs/Workflow/runtime/operations/commands/execution_dispatch_choice.py",
+    "Code&DBs/Workflow/runtime/operations/queries/chat_routing_options.py",
+    "Code&DBs/Workflow/runtime/chat_orchestrator.py",
+    "Code&DBs/Workflow/runtime/sandbox_runtime.py",
+    "Code&DBs/Workflow/runtime/workflow/execution_backends.py",
+    "Code&DBs/Workflow/surfaces/app/src/dashboard/StrategyConsole.tsx",
+    "Code&DBs/Workflow/surfaces/app/src/workspace/useChat.ts",
+    "Code&DBs/Databases/migrations/workflow/394_execution_target_authority.sql"
+  ],
+  "write_scope": [
+    "Code&DBs/Workflow/tests/unit/test_execution_targets.py",
+    "Code&DBs/Workflow/tests/unit/test_chat_routing_options_query.py",
+    "Code&DBs/Workflow/tests/integration/test_openrouter_api_proof.py",
+    "Code&DBs/Workflow/surfaces/app/src/dashboard/StrategyConsole.test.tsx"
+  ],
+  "jobs": [
+    {
+      "label": "proof",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "general",
+      "submission_required": false,
+      "workdir": ".",
+      "prompt": "Validate that execution target authority and dispatch choice proof remain queryable."
+    }
+  ]
+}

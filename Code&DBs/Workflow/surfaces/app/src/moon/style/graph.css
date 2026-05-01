@@ -258,7 +258,7 @@
 
 .moon-graph-node--state-blocked .moon-graph-node__terminal-value--cadence,
 .moon-graph-node--state-run-failed .moon-graph-node__terminal-value--cadence {
-  color: var(--moon-danger);
+  color: var(--moon-state-error);
 }
 
 .moon-graph-node__dots {
@@ -292,7 +292,7 @@
 
 .moon-graph-node--state-blocked .moon-graph-node__status-dot,
 .moon-graph-node--state-run-failed .moon-graph-node__status-dot {
-  background: var(--moon-danger);
+  background: var(--moon-state-error);
   box-shadow: 0 0 10px rgba(248, 81, 73, 0.34);
 }
 
@@ -393,18 +393,10 @@
   box-shadow: var(--moon-shadow-line-soft);
 }
 
-/* Family tints on the gate pod — keeps failure vs success instantly legible
-   even when the pod is collapsed. Coral for failure (the only color we leak
-   onto the canvas). */
+/* Family reads through shape, dash, glyph, and label. Color is reserved for
+   state only: pending, passed, blocked. */
 .moon-graph-gate--family-after_failure .moon-graph-gate__trigger {
-  border-color: var(--moon-danger);
-  color: var(--moon-danger);
-}
-.moon-graph-gate--family-after_failure .moon-graph-gate__icon {
-  color: var(--moon-danger);
-}
-.moon-graph-gate--family-after_success .moon-graph-gate__trigger {
-  border-color: var(--moon-accent-a30);
+  border-style: double;
 }
 .moon-graph-gate--family-after_any .moon-graph-gate__trigger {
   border-style: dotted;
@@ -520,10 +512,9 @@
   line-height: 1.4;
 }
 
-/* Family accents on the menu options — a thin left-border tint so the eye
-   sees "these two are different kinds of branch" at a glance. */
-.moon-node-branch-pod__option--after_success { border-left: 2px solid var(--moon-accent); padding-left: 8px; }
-.moon-node-branch-pod__option--after_failure { border-left: 2px solid var(--moon-danger); padding-left: 8px; }
+/* Family accents on the menu options use shape, not extra color semantics. */
+.moon-node-branch-pod__option--after_success { border-left: 2px solid var(--moon-fg); padding-left: 8px; }
+.moon-node-branch-pod__option--after_failure { border-left: 3px double var(--moon-fg); padding-left: 7px; }
 .moon-node-branch-pod__option--conditional   { border-left: 2px dashed var(--moon-fg); padding-left: 8px; }
 .moon-node-branch-pod__option--after_any     { border-left: 2px dotted var(--moon-fg-muted); padding-left: 8px; }
 
@@ -542,32 +533,32 @@
 }
 
 .moon-graph-gate__trigger {
-  min-width: 28px;
-  min-height: 28px;
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  min-width: 64px;
+  min-height: 30px;
+  width: 64px;
+  height: 30px;
+  padding: 0 8px;
   border-radius: 999px;
   border: 1px solid var(--moon-glass-border);
   background: var(--moon-glass-bg);
   backdrop-filter: blur(8px);
-  color: var(--moon-fg-dim);
+  color: var(--moon-fg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 5px;
   font: inherit;
-  font-size: var(--moon-font-size-xs);
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;
   box-shadow: var(--moon-shadow-line-soft);
-  transition: all 200ms ease;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
 }
 
 .moon-graph-gate__trigger-label {
-  display: none;
+  display: inline;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -593,28 +584,29 @@
 .moon-graph-gate__trigger:hover,
 .moon-graph-gate--selected .moon-graph-gate__trigger,
 .moon-graph-gate--drag-over .moon-graph-gate__trigger {
-  min-width: 128px;
-  width: auto;
-  height: auto;
-  min-height: 40px;
-  padding: 8px 18px;
   transform: translateY(-1px);
-  border-color: var(--moon-accent);
-  color: var(--moon-fg);
-  box-shadow: var(--moon-shadow-accent-line-mid);
+  border-color: rgba(243, 238, 228, 0.38);
+  box-shadow: var(--moon-shadow-line-mid);
   z-index: 5;
 }
 
-.moon-graph-gate__trigger:hover .moon-graph-gate__trigger-label,
-.moon-graph-gate--selected .moon-graph-gate__trigger-label,
-.moon-graph-gate--drag-over .moon-graph-gate__trigger-label {
-  display: inline;
+.moon-graph-gate--selected .moon-graph-gate__trigger {
+  background: rgba(243, 238, 228, 0.055);
+  outline: 1px solid rgba(243, 238, 228, 0.16);
+  outline-offset: 2px;
 }
 
 .moon-graph-gate--empty .moon-graph-gate__trigger {
+  min-width: 30px;
+  width: 30px;
+  padding: 0;
   border-style: dashed;
   color: var(--moon-glow);
   opacity: 0.15;
+}
+
+.moon-graph-gate--empty .moon-graph-gate__trigger-label {
+  display: none;
 }
 
 .moon-graph-gate--empty .moon-graph-gate__trigger:hover,
@@ -623,9 +615,22 @@
   opacity: 1;
 }
 
-.moon-graph-gate--core .moon-graph-gate__trigger {
-  border-color: var(--moon-accent-a30);
-  color: var(--moon-accent);
+.moon-graph-gate--pending .moon-graph-gate__trigger {
+  border-color: rgba(210, 153, 34, 0.42);
+  color: var(--moon-state-warning);
+  background: rgba(210, 153, 34, 0.08);
+}
+
+.moon-graph-gate--passed .moon-graph-gate__trigger {
+  border-color: rgba(63, 185, 80, 0.36);
+  color: var(--moon-state-success);
+  background: rgba(63, 185, 80, 0.07);
+}
+
+.moon-graph-gate--blocked .moon-graph-gate__trigger {
+  border-color: rgba(248, 81, 73, 0.42);
+  color: var(--moon-state-error);
+  background: rgba(248, 81, 73, 0.08);
 }
 
 .moon-graph-gate__card {
@@ -646,6 +651,43 @@
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+}
+
+.moon-graph-gate .moon-surface-badge {
+  border-color: var(--moon-white-a12);
+  color: var(--moon-fg);
+  box-shadow: none;
+}
+
+.moon-graph-gate .moon-surface-badge--pending {
+  border-color: rgba(210, 153, 34, 0.36);
+  color: var(--moon-state-warning);
+  background: rgba(210, 153, 34, 0.08);
+}
+
+.moon-graph-gate .moon-surface-badge--passed {
+  border-color: rgba(63, 185, 80, 0.32);
+  color: var(--moon-state-success);
+  background: rgba(63, 185, 80, 0.08);
+}
+
+.moon-graph-gate .moon-surface-badge--blocked {
+  border-color: rgba(248, 81, 73, 0.38);
+  color: var(--moon-state-error);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.moon-graph-gate__route-label {
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--moon-white-a12);
+  color: var(--moon-fg);
+  font-family: var(--moon-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
 }
 
 .moon-graph-gate__title {

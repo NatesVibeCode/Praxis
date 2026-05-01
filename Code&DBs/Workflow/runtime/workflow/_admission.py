@@ -1154,6 +1154,44 @@ def _preview_route_payload(job: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _model_eval_worker_contract_error(job: Mapping[str, object]) -> str | None:
+    task_type = str(job.get("task_type") or "").strip()
+    if task_type != "model_eval_worker":
+        return None
+    try:
+        from runtime.model_eval.pins import (
+            PinnedModelEvalRouteError,
+            validate_model_eval_model_config,
+            validate_pinned_agent_slug,
+        )
+    except Exception as exc:  # pragma: no cover - import failure should fail closed.
+        return f"model_eval_worker pin validator unavailable: {exc}"
+
+    agent_slug = str(job.get("agent") or "").strip()
+    try:
+        validate_pinned_agent_slug(agent_slug)
+    except PinnedModelEvalRouteError as exc:
+        return str(exc)
+
+    candidate_ref = str(job.get("model_eval_candidate_ref") or "").strip()
+    model_config = job.get("model_config")
+    if not candidate_ref and not isinstance(model_config, Mapping):
+        return "model_eval_worker requires model_eval_candidate_ref or full model_config"
+    if isinstance(model_config, Mapping):
+        config_payload = dict(model_config)
+        config_agent = str(
+            config_payload.get("agent") or config_payload.get("agent_slug") or ""
+        ).strip()
+        if config_agent and config_agent != agent_slug:
+            return "model_eval_worker job.agent must match model_config.agent"
+        config_payload.setdefault("agent", agent_slug)
+        try:
+            validate_model_eval_model_config(config_payload)
+        except PinnedModelEvalRouteError as exc:
+            return str(exc)
+    return None
+
+
 def preview_workflow_execution(
     conn: SyncPostgresConnection,
     *,
@@ -1214,10 +1252,22 @@ def preview_workflow_execution(
 
     spec_verify_refs = _normalize_paths(raw_snapshot.get("verify_refs"))
     warnings: list[str] = []
+    model_eval_worker_errors = [
+        f"{str(job.get('label') or 'job').strip() or 'job'}: {error}"
+        for job in spec.jobs
+        for error in [_model_eval_worker_contract_error(job)]
+        if error
+    ]
+    warnings.extend(model_eval_worker_errors)
+    routable_jobs = [
+        job
+        for job in spec.jobs
+        if str(job.get("task_type") or "").strip() != "model_eval_worker"
+    ]
 
     auto_llm_jobs = [
         str(job.get("label") or job.get("agent") or "").strip()
-        for job in spec.jobs
+        for job in routable_jobs
         if str(job.get("agent") or "auto/build").strip().startswith("auto/")
         and str(job.get("adapter_type") or "").strip().lower()
         in {"", "cli_llm", "llm_task"}
@@ -1228,12 +1278,12 @@ def preview_workflow_execution(
             "resolve auto/* routes in preview; refusing to route against "
             "the global provider candidate catalog"
         )
-    else:
+    elif routable_jobs:
         try:
             from runtime.task_type_router import TaskTypeRouter
 
             TaskTypeRouter(conn).resolve_spec_jobs(
-                spec.jobs,
+                routable_jobs,
                 runtime_profile_ref=runtime_profile_ref or None,
             )
         except Exception as exc:
@@ -1248,6 +1298,14 @@ def preview_workflow_execution(
     for index, job in enumerate(spec.jobs):
         label = str(job.get("label") or f"job_{index}")
         route_payload = _preview_route_payload(job)
+        worker_contract_error = _model_eval_worker_contract_error(job)
+        if worker_contract_error:
+            route_payload.update(
+                {
+                    "route_status": "rejected",
+                    "route_reason": f"model_eval_worker contract rejected: {worker_contract_error}",
+                }
+            )
         route_reason = str(route_payload.get("route_reason") or "").strip()
         if route_reason:
             warnings.append(f"{label}: {route_reason}")
@@ -1867,21 +1925,34 @@ def _do_submit_workflow(
     """
     now = datetime.now(timezone.utc)
     runtime_profile_ref = _runtime_profile_ref_from_spec(spec, conn=conn)
+    for job in spec.jobs:
+        contract_error = _model_eval_worker_contract_error(job)
+        if contract_error:
+            label = str(job.get("label") or "job").strip() or "job"
+            raise RuntimeError(
+                f"model_eval_worker job {label!r} rejected: {contract_error}"
+            )
 
     # Resolve auto/ agent slugs via task_type_router
-    try:
-        from runtime.task_type_router import TaskTypeRouter
-        router = TaskTypeRouter(conn)
-        router.resolve_spec_jobs(
-            spec.jobs,
-            runtime_profile_ref=runtime_profile_ref or None,
-        )
-    except Exception as exc:
-        if runtime_profile_ref:
-            raise RuntimeError(
-                f"workflow submit failed closed for runtime profile {runtime_profile_ref!r}: {exc}",
-            ) from exc
-        logger.error("Task type routing failed: %s", exc)
+    routable_jobs = [
+        job
+        for job in spec.jobs
+        if str(job.get("task_type") or "").strip() != "model_eval_worker"
+    ]
+    if routable_jobs:
+        try:
+            from runtime.task_type_router import TaskTypeRouter
+            router = TaskTypeRouter(conn)
+            router.resolve_spec_jobs(
+                routable_jobs,
+                runtime_profile_ref=runtime_profile_ref or None,
+            )
+        except Exception as exc:
+            if runtime_profile_ref:
+                raise RuntimeError(
+                    f"workflow submit failed closed for runtime profile {runtime_profile_ref!r}: {exc}",
+                ) from exc
+            logger.error("Task type routing failed: %s", exc)
 
     raw_snapshot = spec._raw.copy()
     if "jobs" in raw_snapshot:
@@ -1958,13 +2029,14 @@ def _do_submit_workflow(
             failover_chain = list(route_plan.chain)
         if not failover_chain:
             failover_chain = [agent_slug]
-        _enforce_effective_provider_job_catalog(
-            conn,
-            runtime_profile_ref=runtime_profile_ref,
-            route_task_type=route_task_type,
-            failover_chain=[str(item).strip() for item in failover_chain if str(item).strip()],
-            job_label=str(label),
-        )
+        if route_task_type != "model_eval_worker":
+            _enforce_effective_provider_job_catalog(
+                conn,
+                runtime_profile_ref=runtime_profile_ref,
+                route_task_type=route_task_type,
+                failover_chain=[str(item).strip() for item in failover_chain if str(item).strip()],
+                job_label=str(label),
+            )
 
         initial_status = "pending" if depends_on else "ready"
         max_attempts = int(job.get("max_attempts", 3) or 3)

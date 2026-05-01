@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 177 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 180 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -69,7 +69,10 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_daily_heartbeat` | `operations` | `advanced` | `workflow heartbeat` | `write` | - | Run one daily-heartbeat probe cycle on demand and persist the results to heartbeat_runs + heartbeat_probe_snapshots through CQRS authority. Probes cover provider CLI usage (claude/codex/gemini latency + token counts), connector liveness (catalog health), credential expiry (keychain/env API keys + OAuth tokens), and MCP server liveness (stdio initialize handshake). |
 | `praxis_dataset` | `operations` | `stable` | `workflow dataset` | `read`, `write` | - | Praxis dataset refinery: turn evidence-linked execution receipts into curated, lineage-preserving training and eval data for specialist SLMs (slm/review first). |
 | `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | - | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
+| `praxis_dispatch_choice_commit` | `operations` | `stable` | - | `write` | - | Commit one selected dispatch option after validating the candidate_set_hash and candidate admission state. |
+| `praxis_dispatch_options_list` | `operations` | `stable` | - | `read` | - | List clickable/selectable dispatch candidates with provider/model, transport, execution target/profile, disabled reason, and candidate_set_hash. |
 | `praxis_evolve_operation_field` | `operations` | `advanced` | `workflow evolve-operation-field` | `read` | - | Plan-only wizard for adding a new field to an existing CQRS operation's input model. |
+| `praxis_execution_targets_list` | `operations` | `stable` | - | `read` | - | List first-class execution targets and profiles from Execution Target Authority. |
 | `praxis_execution_truth` | `operations` | `stable` | - | `read` | - | Read a composed execution-truth packet. Combines status snapshot, optional run views, and optional causal trace through gateway-dispatched child queries so green-looking state is checked against independent proof. |
 | `praxis_firecheck` | `operations` | `stable` | `workflow firecheck` | `read` | - | Preflight whether workflow work can actually fire now. Returns can_fire, typed blockers, and remediation plans so submitted state is not mistaken for runtime proof. |
 | `praxis_health` | `operations` | `stable` | `workflow health` | `read` | - | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, memory graph health, and projection freshness (event-log cursors + process-cache refresh lag) with SLA alerts and a read-side circuit-breaker verdict. |
@@ -175,7 +178,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_decompose_intent` | `workflow` | `stable` | `workflow decompose` | `read` | - | Layer 2 (Decompose) of the planning stack: split prose intent into ordered steps by parsing explicit step markers (numbered lists, bulleted lists, or first/then/finally ordering). Deterministic — does NOT do free-prose semantic decomposition. |
 | `praxis_generate_plan` | `workflow` | `stable` | `workflow generate-plan` | `read`, `write` | - | Shared CQRS plan-generation front door. action='generate_plan' recognizes messy prose, matches spans to authority, returns suggestions and gaps, and does not mutate state. action='materialize_plan' creates or updates a draft workflow through the canonical workflow build mutation. |
 | `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | - | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
-| `praxis_model_eval` | `workflow` | `advanced` | `workflow model-eval` | `read`, `write` | - | Plan, run, inspect, compare, promote, or export model/job/prompt evaluation matrices. Imports canonical Workflow specs as fixed fixtures and varies model/provider/prompt/effort/tool/swarm configuration under strict privacy gates. |
+| `praxis_model_eval` | `workflow` | `advanced` | `workflow model-eval` | `read`, `write` | - | Plan, run, inspect, compare, promote, export, or ingest public benchmark priors for model/job/prompt evaluation matrices. Imports canonical Workflow specs as fixed fixtures and varies model/provider/prompt/effort/tool/swarm configuration under strict privacy gates. |
 | `praxis_moon` | `workflow` | `advanced` | `workflow moon` | `launch`, `read`, `write` | - | Workflow graph-authoring co-pilot exposed through the legacy praxis_moon tool name. Five actions over the same workflow build authority, all CQRS-gateway dispatched (each call leaves a receipt + the command actions emit authority events). |
 | `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | - | Q-side of the planning stack: read every plan.* authority_event for one workflow_id in order. Pair with gateway-backed praxis_compose_plan / praxis_launch_plan on the C side. |
 | `praxis_promote_experiment_winner` | `workflow` | `advanced` | - | `write` | - | Promote one compose-experiment leg into the canonical task_type_routing row for that task type. The winning leg's temperature and max_tokens are applied; provider/model changes remain visible only in the returned diff. |
@@ -1506,6 +1509,50 @@ Example input:
 }
 ```
 
+#### `praxis_dispatch_choice_commit`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_dispatch_choice_commit`
+- CLI schema help: `workflow tools describe praxis_dispatch_choice_commit`
+- When to use: Record one operator-selected dispatch option before running it.
+- When not to use: Do not use it to force a disabled or unseen candidate; the command rejects those.
+- Selector: none
+- Required args: `candidate_set_hash`
+
+Example input:
+
+```json
+{
+  "candidate_set_hash": "<hash from praxis_dispatch_options_list>",
+  "selected_candidate_ref": "<candidate ref>",
+  "selection_kind": "explicit_click"
+}
+```
+
+#### `praxis_dispatch_options_list`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_dispatch_options_list`
+- CLI schema help: `workflow tools describe praxis_dispatch_options_list`
+- When to use: Render or audit a dispatch picker before committing one option.
+- When not to use: Do not use it as proof that a selected option actually ran; pair with dispatch_choice.commit and execution proof.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "task_slug": "auto/chat"
+}
+```
+
 #### `praxis_evolve_operation_field`
 
 - Surface: `operations`
@@ -1532,6 +1579,25 @@ Example input:
   "db_table": "operator_decisions",
   "db_column": "decision_provenance"
 }
+```
+
+#### `praxis_execution_targets_list`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_execution_targets_list`
+- CLI schema help: `workflow tools describe praxis_execution_targets_list`
+- When to use: Inspect what execution targets and profiles are available before dispatch.
+- When not to use: Do not use it to launch work; it is read-only.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{}
 ```
 
 #### `praxis_execution_truth`
@@ -4162,7 +4228,7 @@ Example input:
 - When to use: Use for consistent model selection: same Workflow spec, same fixtures, same verifier, varied model/prompt/provider configuration.
 - When not to use: Do not use as a production route mutation surface. The promote action emits a proposal only.
 - Recommended alias: `workflow model-eval`
-- Selector: `action`; default `plan`; values `plan`, `run`, `inspect`, `compare`, `promote`, `export`
+- Selector: `action`; default `plan`; values `plan`, `run`, `inspect`, `compare`, `promote`, `export`, `benchmark_ingest`
 - Required args: (none)
 
 Example input:

@@ -4,6 +4,7 @@ import { vi } from 'vitest';
 
 import { MoonBuildPage } from './MoonBuildPage';
 import type { BuildPayload } from '../shared/types';
+import { withBuildEdgeRelease } from '../shared/edgeRelease';
 
 const moonBuildPageDismissMocks = vi.hoisted(() => ({
   getCatalog: vi.fn(),
@@ -20,7 +21,7 @@ const moonBuildPageDismissMocks = vi.hoisted(() => ({
   undoUiAction: vi.fn(),
 }));
 
-const payload: BuildPayload = {
+const basePayload: BuildPayload = {
   definition: {},
   build_graph: {
     nodes: [
@@ -49,9 +50,11 @@ const payload: BuildPayload = {
   },
 };
 
+let currentPayload: BuildPayload = basePayload;
+
 vi.mock('../shared/hooks/useBuildPayload', () => ({
   useBuildPayload: () => ({
-    payload,
+    payload: currentPayload,
     loading: false,
     error: null,
     mutate: moonBuildPageDismissMocks.mutate,
@@ -114,18 +117,22 @@ vi.mock('./MoonDragGhost', () => ({
   MoonDragGhost: () => null,
 }));
 
-vi.mock('./MoonEdges', () => ({
-  MoonEdges: () => null,
-  getEdgeGeometry: () => ({
-    centerX: 180,
-    centerY: 90,
-    endX: 260,
-    endY: 90,
-    path: 'M0 0',
-    startX: 100,
-    startY: 90,
-  }),
-}));
+vi.mock('./MoonEdges', async () => {
+  const actual = await vi.importActual<typeof import('./MoonEdges')>('./MoonEdges');
+  return {
+    ...actual,
+    MoonEdges: () => null,
+    getEdgeGeometry: () => ({
+      centerX: 180,
+      centerY: 90,
+      endX: 260,
+      endY: 90,
+      path: 'M0 0',
+      startX: 100,
+      startY: 90,
+    }),
+  };
+});
 
 vi.mock('./MoonPopout', () => ({
   MoonPopout: () => null,
@@ -148,6 +155,7 @@ vi.mock('./useMoonDrag', () => ({
 describe('MoonBuildPage edge dismiss', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    currentPayload = basePayload;
     moonBuildPageDismissMocks.getCatalog.mockReturnValue([]);
     moonBuildPageDismissMocks.loadCatalog.mockImplementation(() => new Promise(() => undefined));
   });
@@ -155,7 +163,7 @@ describe('MoonBuildPage edge dismiss', () => {
   test('clicking away dismisses the selected gate card', () => {
     render(<MoonBuildPage workflowId="wf-123" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Select gate between Webhook and Next step' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add gate between Webhook and Next step' }));
 
     expect(screen.getByRole('button', { name: 'Add gate' })).toBeInTheDocument();
 
@@ -167,7 +175,7 @@ describe('MoonBuildPage edge dismiss', () => {
   test('clicking inside the detail dock keeps the selected gate card open', () => {
     render(<MoonBuildPage workflowId="wf-123" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Select gate between Webhook and Next step' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add gate between Webhook and Next step' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add gate' }));
 
     expect(screen.getByTestId('node-detail')).toBeInTheDocument();
@@ -180,12 +188,36 @@ describe('MoonBuildPage edge dismiss', () => {
   test('clicking the desktop detail toggle keeps the selected gate card open', () => {
     render(<MoonBuildPage workflowId="wf-123" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Select gate between Webhook and Next step' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add gate between Webhook and Next step' }));
 
     const detailToggle = screen.getByRole('button', { name: 'Open Inspector dock' });
     fireEvent.mouseDown(detailToggle);
     fireEvent.click(detailToggle);
 
     expect(screen.getByRole('button', { name: 'Add gate' })).toBeInTheDocument();
+  });
+
+  test('configured gate code is visible before hover or selection', () => {
+    currentPayload = {
+      ...basePayload,
+      build_graph: {
+        ...basePayload.build_graph!,
+        edges: [
+          withBuildEdgeRelease(basePayload.build_graph!.edges[0], {
+            family: 'conditional',
+            edge_type: 'conditional',
+            branch_reason: 'then',
+            label: 'Then',
+            release_condition: { field: 'ready', op: 'equals', value: true },
+          }),
+        ],
+      },
+    };
+
+    render(<MoonBuildPage workflowId="wf-123" />);
+
+    const gateButton = screen.getByRole('button', { name: 'Select THEN gate between Webhook and Next step' });
+    expect(gateButton).toHaveTextContent('THEN');
+    expect(screen.queryByText('Then path')).not.toBeInTheDocument();
   });
 });

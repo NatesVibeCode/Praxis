@@ -83,23 +83,48 @@ def _load_scorecards_for_lab_run(subsystems: Any, lab_run_id: str) -> list[dict[
                    AND result_payload->>'lab_run_id' = $1
             )
             SELECT
-                scorecard_id::text,
-                matrix_receipt_id::text,
-                config_id,
-                model_slug,
-                family,
-                trials,
-                pass_count,
-                pass_at_1,
-                mean_score,
-                score_variance,
-                mean_cost_usd,
-                mean_latency_ms,
-                failure_counts_json,
-                created_at
-              FROM model_eval_scorecards
-             WHERE matrix_receipt_id IN (SELECT receipt_id FROM matrix_receipts)
-             ORDER BY family, pass_at_1 DESC, mean_score DESC, mean_cost_usd ASC NULLS LAST
+                sc.scorecard_id::text,
+                sc.matrix_receipt_id::text,
+                sc.config_id,
+                sc.model_slug,
+                MAX(cr.model_config_json->>'agent') AS pinned_agent_slug,
+                MAX(COALESCE(
+                    cr.model_config_json->>'model_eval_candidate_ref',
+                    cr.model_config_json->>'candidate_ref',
+                    cr.model_config_json->>'config_id'
+                )) AS model_eval_candidate_ref,
+                sc.family,
+                sc.trials,
+                sc.pass_count,
+                sc.pass_at_1,
+                sc.mean_score,
+                sc.score_variance,
+                sc.mean_cost_usd,
+                sc.mean_latency_ms,
+                sc.failure_counts_json,
+                sc.created_at
+              FROM model_eval_scorecards sc
+              LEFT JOIN model_eval_case_runs cr
+                ON cr.matrix_receipt_id = sc.matrix_receipt_id
+               AND cr.config_id = sc.config_id
+               AND cr.family = sc.family
+             WHERE sc.matrix_receipt_id IN (SELECT receipt_id FROM matrix_receipts)
+             GROUP BY
+                sc.scorecard_id,
+                sc.matrix_receipt_id,
+                sc.config_id,
+                sc.model_slug,
+                sc.family,
+                sc.trials,
+                sc.pass_count,
+                sc.pass_at_1,
+                sc.mean_score,
+                sc.score_variance,
+                sc.mean_cost_usd,
+                sc.mean_latency_ms,
+                sc.failure_counts_json,
+                sc.created_at
+             ORDER BY sc.family, sc.pass_at_1 DESC, sc.mean_score DESC, sc.mean_cost_usd ASC NULLS LAST
             """,
             lab_run_id,
         )
@@ -130,6 +155,12 @@ def _load_case_runs_for_lab_run(subsystems: Any, lab_run_id: str) -> list[dict[s
                 suite_slug,
                 family,
                 model_config_json,
+                model_config_json->>'agent' AS pinned_agent_slug,
+                COALESCE(
+                    model_config_json->>'model_eval_candidate_ref',
+                    model_config_json->>'candidate_ref',
+                    model_config_json->>'config_id'
+                ) AS model_eval_candidate_ref,
                 prompt_variant_json,
                 provider_requested,
                 provider_served,

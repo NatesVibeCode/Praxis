@@ -39,6 +39,9 @@ const paths: Record<GlyphType, string> = {
   summary:  'M3 4h18v2H3V4zm3 4h12v2H6V8zm0 4h12v2H6v-2zm-3 4h18v2H3v-2zm3 4h12v2H6v-2z',
   webhook:  'M4 11a9 9 0 019 9h-2a7 7 0 00-7-7v-2zm0-4a13 13 0 0113 13h-2A11 11 0 004 9V7zM5.5 17.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z',
   schedule: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16zm.5-13H11v6l4.5 2.7.75-1.23-4.25-2.55z',
+  arrow:    'M4 12h14m-5-5l5 5-5 5',
+  loop:     'M7 7h7a5 5 0 015 5 5 5 0 01-8.54 3.54L9 14m0 0v5H4m13-2h-7a5 5 0 01-5-5 5 5 0 018.54-3.54L15 10m0 0V5h5',
+  warning:  'M12 3l10 18H2L12 3zm0 6v5m0 3h.01',
 };
 
 export function MoonGlyph({ type, size = 24, color = 'currentColor' }: MoonGlyphProps) {

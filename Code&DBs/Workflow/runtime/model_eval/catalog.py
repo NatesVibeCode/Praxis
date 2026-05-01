@@ -12,6 +12,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from runtime.model_eval.pins import (
+    PinnedModelEvalRouteError,
+    validate_model_eval_model_config,
+)
 from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
 
 
@@ -50,6 +54,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "gpt-5.4-nano-azure-low",
         "model_slug": "openai/gpt-5.4-nano",
+        "agent": "openrouter/openai/gpt-5.4-nano",
         "provider_order": ["azure"],
         "reasoning_effort": "low",
         "temperature": 0.1,
@@ -60,6 +65,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "gpt-5.4-mini-azure-low",
         "model_slug": "openai/gpt-5.4-mini",
+        "agent": "openrouter/openai/gpt-5.4-mini",
         "provider_order": ["azure"],
         "reasoning_effort": "low",
         "temperature": 0.1,
@@ -70,6 +76,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "kimi-k2.6-parasail-int4",
         "model_slug": "moonshotai/kimi-k2.6",
+        "agent": "openrouter/moonshotai/kimi-k2.6",
         "provider_order": ["parasail/int4"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -80,6 +87,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "qwen3-coder-deepinfra-turbo",
         "model_slug": "qwen/qwen3-coder",
+        "agent": "openrouter/qwen/qwen3-coder",
         "provider_order": ["deepinfra/turbo"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -89,6 +97,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "qwen3-32b-groq",
         "model_slug": "qwen/qwen3-32b",
+        "agent": "openrouter/qwen/qwen3-32b",
         "provider_order": ["groq"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -98,6 +107,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "gpt-oss-20b-parasail-fp4",
         "model_slug": "openai/gpt-oss-20b",
+        "agent": "openrouter/openai/gpt-oss-20b",
         "provider_order": ["parasail/fp4"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -107,6 +117,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "gemma-3-27b-deepinfra-fp8",
         "model_slug": "google/gemma-3-27b-it",
+        "agent": "openrouter/google/gemma-3-27b-it",
         "provider_order": ["deepinfra/fp8"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -116,6 +127,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "llama-4-scout-groq",
         "model_slug": "meta-llama/llama-4-scout",
+        "agent": "openrouter/meta-llama/llama-4-scout",
         "provider_order": ["groq"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -125,6 +137,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "nemotron-3-nano-deepinfra-fp4",
         "model_slug": "nvidia/nemotron-3-nano-30b-a3b",
+        "agent": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
         "provider_order": ["deepinfra/fp4"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -134,6 +147,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "nemotron-nano-9b-v2-deepinfra-bf16",
         "model_slug": "nvidia/nemotron-nano-9b-v2",
+        "agent": "openrouter/nvidia/nemotron-nano-9b-v2",
         "provider_order": ["deepinfra/bf16"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -143,6 +157,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "glm-5.1-deepinfra-fp4",
         "model_slug": "z-ai/glm-5.1",
+        "agent": "openrouter/z-ai/glm-5.1",
         "provider_order": ["deepinfra/fp4"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -153,6 +168,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "minimax-m2.7-fireworks",
         "model_slug": "minimax/minimax-m2.7",
+        "agent": "openrouter/minimax/minimax-m2.7",
         "provider_order": ["fireworks"],
         "temperature": 0.1,
         "supports_seed": False,
@@ -163,6 +179,7 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     {
         "config_id": "deepseek-v4-flash-deepinfra-fp4",
         "model_slug": "deepseek/deepseek-v4-flash",
+        "agent": "openrouter/deepseek/deepseek-v4-flash",
         "provider_order": ["deepinfra/fp4"],
         "temperature": 0.1,
         "supports_seed": True,
@@ -294,6 +311,75 @@ def _builtin_tasks() -> tuple[dict[str, Any], ...]:
             ),
         },
         {
+            "task_id": "doc.closeout",
+            "suite_slug": "docs",
+            "family": "structured_doc",
+            "validator": "structured_doc_headings",
+            "expected_artifact": "closeout.md",
+            "expected_headings": [
+                "# Model Eval Closeout",
+                "## Decision",
+                "## Evidence",
+                "## Unknowns",
+                "## Follow-ups",
+            ],
+            "max_tokens": 2800,
+            "prompt": (
+                "Create closeout.md for a Model Eval matrix that tested docs, CSV, "
+                "tool choice, and swarm work. Include exact headings: # Model Eval "
+                "Closeout, ## Decision, ## Evidence, ## Unknowns, ## Follow-ups. "
+                "Name at least one unknown/assumption and state that production "
+                "routing is unchanged. "
+                + _artifact_schema_description()
+            ),
+        },
+        {
+            "task_id": "doc.launch_spec",
+            "suite_slug": "docs",
+            "family": "structured_doc",
+            "validator": "structured_doc_headings",
+            "expected_artifact": "launch_spec.md",
+            "expected_headings": [
+                "# Model Eval Launch Spec",
+                "## Goal",
+                "## Scope",
+                "## Inputs",
+                "## Acceptance",
+                "## Risks",
+            ],
+            "max_tokens": 3200,
+            "prompt": (
+                "Create launch_spec.md for launching a repeatable Model Eval suite. "
+                "Include exact headings: # Model Eval Launch Spec, ## Goal, "
+                "## Scope, ## Inputs, ## Acceptance, ## Risks. Name assumptions "
+                "and explicitly say routing unchanged until a separate approval. "
+                + _artifact_schema_description()
+            ),
+        },
+        {
+            "task_id": "doc.customer_guide",
+            "suite_slug": "docs",
+            "family": "structured_doc",
+            "validator": "structured_doc_headings",
+            "expected_artifact": "customer_guide.md",
+            "expected_headings": [
+                "# Customer Model Selection Guide",
+                "## What We Test",
+                "## What We Do Not Send",
+                "## How Results Are Used",
+                "## Open Questions",
+            ],
+            "max_tokens": 3200,
+            "prompt": (
+                "Create customer_guide.md explaining how Praxis chooses cheaper "
+                "or faster models safely. Include exact headings: # Customer Model "
+                "Selection Guide, ## What We Test, ## What We Do Not Send, "
+                "## How Results Are Used, ## Open Questions. Mention no production "
+                "routing changes from eval alone and name unknowns. "
+                + _artifact_schema_description()
+            ),
+        },
+        {
             "task_id": "deck.model_routing_review",
             "suite_slug": "pptx",
             "family": "deck_generation",
@@ -305,6 +391,21 @@ def _builtin_tasks() -> tuple[dict[str, Any], ...]:
                 "must contain slides[], where each slide has title, bullets[], "
                 "speaker_notes, and visual_hint. Cover privacy gate, task lanes, "
                 "cost, consistency, promotion, and next experiments. "
+                + _artifact_schema_description()
+            ),
+        },
+        {
+            "task_id": "deck.real_pptx_smoke",
+            "suite_slug": "pptx",
+            "family": "deck_generation",
+            "validator": "pptx_render",
+            "max_tokens": 4200,
+            "prompt": (
+                "Create a real PPTX artifact named model_eval_review.pptx. Encode "
+                "the .pptx bytes as base64 in artifact.content and use media_type "
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation. "
+                "It must have at least four titled slides covering privacy, cost, "
+                "consistency, and promotion. "
                 + _artifact_schema_description()
             ),
         },
@@ -336,6 +437,35 @@ def _builtin_tasks() -> tuple[dict[str, Any], ...]:
                 "exactly: week,workstream,owner,deliverable,done_definition. "
                 "Rows must cover docs, PPTX/deck generation, CSV extraction, "
                 "tool-use, and swarm testing. "
+                + _artifact_schema_description()
+            ),
+        },
+        {
+            "task_id": "csv.reconcile_accounts",
+            "suite_slug": "csv",
+            "family": "csv_reconciliation",
+            "validator": "csv_reconcile_accounts",
+            "max_tokens": 2800,
+            "prompt": (
+                "Reconcile account statuses into account_reconciliation.csv. "
+                "Columns exactly: account_id,source_a_status,source_b_status,disposition,notes. "
+                "Source A: A-17 blocked; B-04 ready; C-88 needs_review; D-31 ready. "
+                "Source B: A-17 ready; B-04 ready; C-88 blocked; D-31 ready. "
+                "Use disposition conflict where statuses differ and match where equal. "
+                "Notes for C-88 must say review. "
+                + _artifact_schema_description()
+            ),
+        },
+        {
+            "task_id": "xlsx.workbook_transform_manifest",
+            "suite_slug": "csv",
+            "family": "workbook_transform",
+            "validator": "workbook_manifest",
+            "max_tokens": 3200,
+            "prompt": (
+                "Create workbook_manifest.json describing an XLSX workbook transform "
+                "with at least two sheets, formulas, a chart, and a recalculation "
+                "policy. It should transform rollout rows into a weekly dashboard. "
                 + _artifact_schema_description()
             ),
         },
@@ -438,6 +568,21 @@ def _builtin_tasks() -> tuple[dict[str, Any], ...]:
             "tools": [_praxis_search_tool(), _praxis_workflow_validate_tool()],
         },
         {
+            "task_id": "tool.loop_search_then_answer",
+            "suite_slug": "tools",
+            "family": "tool_execution_loop",
+            "run_mode": "tool_execution_loop",
+            "validator": "tool_execution_transcript",
+            "max_tokens": 1200,
+            "prompt": (
+                "Call praxis_search for model eval authority, read the tool result, "
+                "then return final JSON with a tool_transcript.json artifact. "
+                "The transcript must list model turns, tool calls, tool results, "
+                "and receipt ids when available. Do not invent tools."
+            ),
+            "tools": [_praxis_search_tool()],
+        },
+        {
             "task_id": "swarm.instruct_packet",
             "suite_slug": "swarm",
             "family": "swarm_coordination",
@@ -450,6 +595,20 @@ def _builtin_tasks() -> tuple[dict[str, Any], ...]:
                 "contracts, and a deterministic reducer. It must include a "
                 "budget cap and say that workers cannot change production "
                 "routing. "
+                + _artifact_schema_description()
+            ),
+        },
+        {
+            "task_id": "swarm.reducer_consistency",
+            "suite_slug": "swarm",
+            "family": "swarm_coordination",
+            "validator": "swarm_reducer_packet",
+            "max_tokens": 3000,
+            "prompt": (
+                "Create swarm_reducer.json for four worker outputs: docs, CSV, "
+                "tool execution, and PPTX. The reducer must detect overlap, choose "
+                "a winner or merge decision, enforce a budget cap, and state that "
+                "production routing is unchanged. "
                 + _artifact_schema_description()
             ),
         },
@@ -486,6 +645,24 @@ def catalog_version_hash() -> str:
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _model_config_errors(configs: list[dict[str, Any]]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    for index, config in enumerate(configs):
+        try:
+            validate_model_eval_model_config(config)
+        except PinnedModelEvalRouteError as exc:
+            errors.append(
+                {
+                    "index": str(index),
+                    "config_id": str(config.get("config_id") or ""),
+                    "model_slug": str(config.get("model_slug") or ""),
+                    "agent": str(config.get("agent") or config.get("agent_slug") or ""),
+                    "error": str(exc),
+                }
+            )
+    return errors
 
 
 def _default_run_mode(task: dict[str, Any]) -> str:
@@ -575,9 +752,10 @@ def build_suite_plan(
 
     variants = prompt_variants or list(DEFAULT_PROMPT_VARIANTS)
     configs = model_configs or list(DEFAULT_MODEL_CONFIGS)
+    model_config_errors = _model_config_errors(configs)
     matrix_count = len(tasks) * max(1, len(variants)) * max(1, len(configs))
     return {
-        "ok": not import_errors,
+        "ok": not import_errors and not model_config_errors,
         "authority": "authority.model_eval",
         "task_count": len(tasks),
         "model_config_count": len(configs),
@@ -587,10 +765,12 @@ def build_suite_plan(
         "model_configs": configs,
         "prompt_variants": variants,
         "import_errors": import_errors,
+        "model_config_errors": model_config_errors,
         "catalog_version_hash": catalog_version_hash(),
         "consistency_contract": {
             "fixed": ["workflow_spec", "task_prompt", "fixture", "validator"],
             "varied": [
+                "agent",
                 "model_slug",
                 "provider_order",
                 "prompt_variant",
