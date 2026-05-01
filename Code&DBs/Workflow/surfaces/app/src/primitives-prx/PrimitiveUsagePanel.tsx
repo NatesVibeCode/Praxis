@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { StatusRail } from '../primitives/StructuralPrimitives';
+import { Runlog, StatusRail } from '../primitives';
 import type { PrimitiveTelemetryPayload, TrackedEventName } from './telemetry';
 
 interface PrimitiveUsagePanelProps {
@@ -275,30 +275,26 @@ export function PrimitiveUsagePanel({
           }))}
         />
       )}
-      <div className="prx-runlog" style={{ overflowY: 'auto', flex: 1, fontSize: 11 }}>
+      <div style={{ overflowY: 'auto', flex: 1, fontSize: 11 }}>
         {filtered.length === 0 ? (
           <div style={{ padding: '16px', color: 'var(--text-muted)', fontSize: 11 }}>
             {paused ? 'paused — resume to receive events' : 'waiting for primitive events…'}
           </div>
         ) : (
-          filtered.map((e) => (
-            <div className="row" key={fingerprint(e)} style={{ gridTemplateColumns: '70px 130px 1fr 90px' }}>
-              <span className="ts">{relTime(e.ts)}</span>
-              <span className="actor" title={e.surface_id || ''}>
-                {EVENT_GLYPH[e.event_name as TrackedEventName] ?? '·'} {e.event_name.replace(/^prx:/, '')}
-              </span>
-              <span className="what">
-                <span style={{ color: 'var(--text-muted)' }}>{e.surface_id ?? '—'}</span>
-                {summarize(e) && <em style={{ marginLeft: 6 }}> · {summarize(e)}</em>}
-              </span>
-              <span
-                className="stat"
-                data-tone={e.mode === 'firmware' ? 'dim' : e.mode === 'lite' ? 'ok' : 'warn'}
-              >
-                {e.mode}
-              </span>
-            </div>
-          ))
+          <Runlog
+            rows={filtered.map((e) => ({
+              ts: relTime(e.ts),
+              actor: `${EVENT_GLYPH[e.event_name as TrackedEventName] ?? '·'} ${e.event_name.replace(/^prx:/, '')}`,
+              what: (
+                <>
+                  <span style={{ color: 'var(--text-muted)' }}>{e.surface_id ?? '—'}</span>
+                  {summarize(e) && <em style={{ marginLeft: 6 }}> · {summarize(e)}</em>}
+                </>
+              ),
+              status: e.mode,
+              tone: e.mode === 'firmware' ? 'dim' : e.mode === 'lite' ? 'ok' : 'warn',
+            }))}
+          />
         )}
       </div>
     </div>
