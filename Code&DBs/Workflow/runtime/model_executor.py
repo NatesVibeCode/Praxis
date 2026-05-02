@@ -138,7 +138,7 @@ def _execute_action(conn, run_id: str, card: dict, repo_root: str) -> dict:
         # Human actions pause
         return {"status": "awaiting_human", "outputs": {"reason": "Manual action required"}}
 
-    # App cards → Haiku API (instant, parallel, no CLI overhead)
+    # App cards → routed prompt execution through task-route authority
     # Agent cards → direct unified execution primitives
     if executor_kind == 'app':
         prompt = _build_mcp_tool_prompt(card, upstream_outputs)
@@ -146,20 +146,27 @@ def _execute_action(conn, run_id: str, card: dict, repo_root: str) -> dict:
             import time as _time
             start = _time.monotonic()
             from runtime.task_assembler import TaskAssembler
-            raw = TaskAssembler._call_haiku(prompt)
+            routed = TaskAssembler.call_routed_prompt(
+                conn,
+                prompt,
+                task_type=str(card.get("task_type") or "chat"),
+                purpose=f"app_card:{card.get('id', '') or executor.get('name', 'app')}",
+            )
             duration = round(_time.monotonic() - start, 2)
-            if not raw:
-                raise RuntimeError("Haiku API returned empty")
             return {
                 "status": "succeeded",
                 "outputs": {
-                    "stdout": raw[:4000],
-                    "executed_by": executor.get('name', 'haiku'),
+                    "stdout": routed.text[:4000],
+                    "executed_by": executor.get('name', 'routed_app_prompt'),
+                    "resolved_agent": f"{routed.provider_slug}/{routed.model_slug}",
+                    "execution_transport": routed.transport_type.lower(),
+                    "runtime_profile_ref": routed.runtime_profile_ref,
+                    "candidate_ref": routed.candidate_ref,
                     "duration_seconds": duration,
                 },
             }
         except Exception as exc:
-            logger.error("Haiku card execution failed: %s", exc)
+            logger.error("Routed app card execution failed: %s", exc)
             raise
 
     # Agent cards → direct provider execution via unified runtime helpers

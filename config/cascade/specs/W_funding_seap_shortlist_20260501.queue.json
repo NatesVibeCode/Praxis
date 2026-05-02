@@ -1,0 +1,71 @@
+{
+  "name": "Funding — SEAP Approved-Provider Shortlist (WA Bellingham)",
+  "phase": "W",
+  "queue_id": "funding_seap_shortlist_20260501",
+  "outcome_goal": "artifacts/funding/seap_shortlist_20260501/seap_shortlist.md exists with: (a) at least 5 WA ESD-approved SEAP training providers serving Whatcom County or available to Bellingham residents, (b) each row has provider name, phone, email or web contact, minimum required contact hours, format (online async / online live / in-person), and enrollment lead time, (c) ranked ascending by minimum contact hours with explicit recommended call order, (d) async-friendly providers flagged for solo founder eligibility.",
+  "anti_requirements": [
+    "Do NOT invent providers or hour counts — every row must trace to a cited source URL.",
+    "Do NOT include providers that explicitly do not accept Whatcom County / Bellingham residents.",
+    "Do NOT recommend a provider based on training quality — the ranking criterion is minimum contact hours.",
+    "Do NOT submit any application or contact any provider on behalf of the operator — research only."
+  ],
+  "jobs": [
+    {
+      "label": "discover_authority_source",
+      "task_type": "research",
+      "description": "Locate the authoritative WA ESD list of SEAP-approved training providers",
+      "outcome_goal": "artifacts/funding/seap_shortlist_20260501/00_source.md identifies the canonical ESD URL hosting the SEAP-approved-provider list and the as-of date of the listing.",
+      "prompt": "Find the authoritative Washington Employment Security Department (ESD) source for the current list of SEAP-approved training providers. Start at www.esd.wa.gov/training-programs.\n\nWrite `artifacts/funding/seap_shortlist_20260501/00_source.md` with:\n- **Source URL** (the canonical page that lists SEAP-approved providers)\n- **As-of date** (when the list was last updated, if surfaced)\n- **Format** (HTML page, PDF, embedded list, etc.)\n- **Notes** (any caveats — e.g. list is filtered by region, or provider list is gated behind a form)\n\nIf the list is split across multiple pages, identify all of them. If you cannot find an authoritative ESD-hosted list, say so explicitly and stop — do not fall back to third-party aggregators.",
+      "read": [],
+      "write": ["artifacts/funding/seap_shortlist_20260501/00_source.md"],
+      "verify_command": "test -s artifacts/funding/seap_shortlist_20260501/00_source.md && grep -q 'Source URL' artifacts/funding/seap_shortlist_20260501/00_source.md"
+    },
+    {
+      "label": "extract_provider_inventory",
+      "task_type": "extraction",
+      "depends_on": ["discover_authority_source"],
+      "description": "Extract the full structured list of approved SEAP providers from the authoritative source",
+      "outcome_goal": "artifacts/funding/seap_shortlist_20260501/01_inventory.md contains a markdown table of every approved provider with name, region/county served, primary contact, and source-line reference.",
+      "prompt": "Read `artifacts/funding/seap_shortlist_20260501/00_source.md` and pull the full provider inventory from the source URL identified there.\n\nWrite `artifacts/funding/seap_shortlist_20260501/01_inventory.md` as a markdown table with columns:\n| Provider | Region/County | Primary Contact | Source line |\n\nOne row per approved provider. Do not filter at this stage — extract everything the source lists. If any field is unavailable from the source, write `(not listed)` rather than inventing.",
+      "read": ["artifacts/funding/seap_shortlist_20260501/00_source.md"],
+      "write": ["artifacts/funding/seap_shortlist_20260501/01_inventory.md"],
+      "verify_command": "test -s artifacts/funding/seap_shortlist_20260501/01_inventory.md && grep -cE '^\\|' artifacts/funding/seap_shortlist_20260501/01_inventory.md | awk '{ exit ($1>=5) ? 0 : 1 }'"
+    },
+    {
+      "label": "filter_to_bellingham_eligible",
+      "task_type": "analysis",
+      "depends_on": ["extract_provider_inventory"],
+      "description": "Filter inventory to providers eligible for a Bellingham WA / Whatcom County resident",
+      "outcome_goal": "artifacts/funding/seap_shortlist_20260501/02_eligible.md contains the subset of providers a Bellingham WA resident can enroll with, with eligibility reasoning per row.",
+      "prompt": "Read `artifacts/funding/seap_shortlist_20260501/01_inventory.md`. Keep only providers that meet at least ONE of:\n- Explicitly serve Whatcom County or Bellingham WA\n- Statewide / serve all WA residents\n- Online-only / location-agnostic delivery\n\nWrite `artifacts/funding/seap_shortlist_20260501/02_eligible.md` as a table with columns:\n| Provider | Eligibility basis | Source |\n\nFor each kept row, the **Eligibility basis** must cite a specific phrase or service-area note from the source.",
+      "read": ["artifacts/funding/seap_shortlist_20260501/01_inventory.md"],
+      "write": ["artifacts/funding/seap_shortlist_20260501/02_eligible.md"],
+      "verify_command": "test -s artifacts/funding/seap_shortlist_20260501/02_eligible.md"
+    },
+    {
+      "label": "enrich_provider_details",
+      "task_type": "research",
+      "depends_on": ["filter_to_bellingham_eligible"],
+      "description": "For each eligible provider, find phone, email, minimum contact hours, format, enrollment lead time",
+      "outcome_goal": "artifacts/funding/seap_shortlist_20260501/03_enriched.md adds per-provider rows with phone, email/web, minimum contact hours, format (online async / online live / in-person), and enrollment lead time.",
+      "prompt": "Read `artifacts/funding/seap_shortlist_20260501/02_eligible.md`. For each eligible provider, search the provider's own website for:\n- **Phone**\n- **Email or web contact form URL**\n- **Minimum required contact hours** for SEAP-qualifying training (most providers publish a program length; if SEAP-specific hours are not published, note the program's total contact hours)\n- **Format**: `online_async` / `online_live` / `in_person` / `hybrid`\n- **Enrollment lead time**: rolling enrollment, monthly cohorts, fixed start dates, etc.\n- **Source URL** for each fact\n\nWrite `artifacts/funding/seap_shortlist_20260501/03_enriched.md` as a markdown table. If a field is unavailable, write `(unknown)` and note in a footer what would be needed to resolve it (e.g. \"must call provider\").\n\nDo not invent contact info. Verify phone numbers by surfacing the page that displays them.",
+      "read": ["artifacts/funding/seap_shortlist_20260501/02_eligible.md"],
+      "write": ["artifacts/funding/seap_shortlist_20260501/03_enriched.md"],
+      "verify_command": "test -s artifacts/funding/seap_shortlist_20260501/03_enriched.md"
+    },
+    {
+      "label": "compose_shortlist",
+      "task_type": "creative",
+      "depends_on": ["enrich_provider_details"],
+      "description": "Produce the final ranked shortlist with recommended call order",
+      "outcome_goal": "artifacts/funding/seap_shortlist_20260501/seap_shortlist.md is the operator-facing deliverable: top 5 providers ranked by minimum contact hours, with phone, email, format, enrollment lead time, and a recommended call order.",
+      "prompt": "Read `artifacts/funding/seap_shortlist_20260501/03_enriched.md`. Produce the final shortlist at `artifacts/funding/seap_shortlist_20260501/seap_shortlist.md`.\n\nStructure:\n\n1. **Operator context** (one paragraph: solo tech founder in Bellingham WA, currently on UI, building Praxis as the self-employment venture, optimizing for minimum contact hours)\n2. **Top 5 providers** (ranked ascending by minimum contact hours; tie-break by enrollment lead time, then by online-async availability)\n   - For each: name, phone, email/web, minimum hours, format, lead time, async-friendly flag (yes/no), one-line note on what to ask in the intake call\n3. **Recommended call order** (numbered list; one sentence per provider explaining why it is in this slot)\n4. **Open questions** (anything that requires the operator to call to resolve)\n5. **Disqualified providers and why** (short list — providers from `02_eligible.md` that did not make the top 5, with one-line reason)\n\nBe opinionated about the call order. Hedge only where the data genuinely splits.",
+      "read": [
+        "artifacts/funding/seap_shortlist_20260501/00_source.md",
+        "artifacts/funding/seap_shortlist_20260501/03_enriched.md"
+      ],
+      "write": ["artifacts/funding/seap_shortlist_20260501/seap_shortlist.md"],
+      "verify_command": "test -s artifacts/funding/seap_shortlist_20260501/seap_shortlist.md && grep -q 'Recommended call order' artifacts/funding/seap_shortlist_20260501/seap_shortlist.md"
+    }
+  ]
+}

@@ -22,6 +22,11 @@ class _FakeCircuitBreakers:
         return self.allowed
 
 
+class _ExplodingCircuitBreakers:
+    def allow_request(self, provider_slug: str) -> bool:
+        raise RuntimeError(f"{provider_slug} override lookup failed")
+
+
 class _FakeCache:
     def __init__(self, result=None) -> None:
         self.result = result
@@ -116,6 +121,54 @@ def test_apply_workflow_preflight_returns_circuit_breaker_failure(monkeypatch):
     assert result.run_id == "run_open"
     assert result.reason_code == "circuit_breaker.open"
     assert result.failure_code == "rate_limited"
+
+
+def test_apply_workflow_preflight_fails_closed_when_circuit_authority_missing(monkeypatch):
+    from runtime.workflow import _workflow_policy as policy_module
+
+    monkeypatch.setattr(policy_module._workflow_caps, "CIRCUIT_BREAKERS", None)
+    monkeypatch.setattr(
+        policy_module._workflow_caps,
+        "WORKFLOW_CAPABILITIES",
+        SimpleNamespace(result_cache=None),
+    )
+
+    result = apply_workflow_preflight(
+        WorkflowSpec(prompt="test", provider_slug="openai"),
+        context=_context(),
+        run_id_factory=lambda: "run_closed",
+    )
+
+    assert result.run_id == "run_closed"
+    assert result.reason_code == "circuit_breaker.unavailable"
+    assert result.failure_code == "circuit_breaker.unavailable"
+    assert "Circuit breaker authority unavailable" in result.outputs["error"]
+
+
+def test_apply_workflow_preflight_fails_closed_when_circuit_check_errors(monkeypatch):
+    from runtime.workflow import _workflow_policy as policy_module
+
+    monkeypatch.setattr(
+        policy_module._workflow_caps,
+        "CIRCUIT_BREAKERS",
+        _ExplodingCircuitBreakers(),
+    )
+    monkeypatch.setattr(
+        policy_module._workflow_caps,
+        "WORKFLOW_CAPABILITIES",
+        SimpleNamespace(result_cache=None),
+    )
+
+    result = apply_workflow_preflight(
+        WorkflowSpec(prompt="test", provider_slug="openai"),
+        context=_context(),
+        run_id_factory=lambda: "run_closed",
+    )
+
+    assert result.run_id == "run_closed"
+    assert result.reason_code == "circuit_breaker.unavailable"
+    assert result.failure_code == "circuit_breaker.unavailable"
+    assert "override lookup failed" in result.outputs["error"]
 
 
 def test_apply_workflow_preflight_returns_cached_result_with_marker(monkeypatch):

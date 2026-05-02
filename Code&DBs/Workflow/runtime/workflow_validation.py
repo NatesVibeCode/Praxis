@@ -250,7 +250,7 @@ def _provider_refs_from_jobs(
                 _provider, _, _rest = agent_slug.partition("/")
                 model_slug = _rest.strip()
             try:
-                from runtime.workflow_graph_compiler import _provider_uses_cli_transport
+                from runtime.workflow_graph_materializer import _provider_uses_cli_transport
 
                 if _provider_uses_cli_transport(provider_slug, model_slug, pg_conn):
                     return
@@ -504,12 +504,12 @@ def _preflight_provider_availability(
             if circuit_breakers is None:
                 warnings.append({
                     "kind": "provider_circuit_query_unavailable",
-                    "severity": "warning",
+                    "severity": "error",
                     "label": None,
                     "message": (
                         "could not load process-local circuit-breaker state; "
-                        "continued provider availability preflight using durable "
-                        "provider_usage and circuit-breaker authority only"
+                        "provider availability preflight fails closed because "
+                        "selected providers cannot be proven runnable"
                     ),
                 })
         except Exception as exc:
@@ -801,7 +801,7 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
         NativeRuntimeProfileSyncError,
         default_native_runtime_profile_ref,
     )
-    from runtime.workflow_graph_compiler import (
+    from runtime.workflow_graph_materializer import (
         GraphWorkflowCompileError,
         compile_graph_workflow_request,
         spec_uses_graph_runtime,

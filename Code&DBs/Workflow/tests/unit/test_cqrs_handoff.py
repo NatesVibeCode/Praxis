@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactRecord
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactRecord
 from runtime.operations.commands import handoff as handoff_commands
 from runtime.operations.queries import handoff as handoff_queries
 
@@ -15,16 +15,16 @@ def _publish_command() -> handoff_commands.PublishHandoffArtifactCommand:
         artifact_kind="definition",
         payload={
             "definition_revision": "definition-1",
-            "compile_provenance": {"input_fingerprint": "fingerprint-1"},
+            "materialize_provenance": {"input_fingerprint": "fingerprint-1"},
         },
         decision_ref="decision-1",
         authority_refs=("authority-1",),
     )
 
 
-def _artifact_record() -> CompileArtifactRecord:
-    return CompileArtifactRecord(
-        compile_artifact_id="compile_artifact.definition.deadbeef",
+def _artifact_record() -> MaterializeArtifactRecord:
+    return MaterializeArtifactRecord(
+        materialize_artifact_id="materialize_artifact.definition.deadbeef",
         artifact_kind="definition",
         artifact_ref="definition-1",
         revision_ref="definition-1",
@@ -34,15 +34,15 @@ def _artifact_record() -> CompileArtifactRecord:
         authority_refs=("authority-1",),
         payload={
             "definition_revision": "definition-1",
-            "compile_provenance": {"input_fingerprint": "fingerprint-1"},
+            "materialize_provenance": {"input_fingerprint": "fingerprint-1"},
         },
         decision_ref="decision-1",
     )
 
 
-def _packet_record() -> CompileArtifactRecord:
-    return CompileArtifactRecord(
-        compile_artifact_id="compile_artifact.packet_lineage.cafebabe",
+def _packet_record() -> MaterializeArtifactRecord:
+    return MaterializeArtifactRecord(
+        materialize_artifact_id="materialize_artifact.packet_lineage.cafebabe",
         artifact_kind="packet_lineage",
         artifact_ref="packet-1",
         revision_ref="packet-1",
@@ -73,10 +73,10 @@ def test_publish_handoff_rejects_ambiguous_reuse(monkeypatch: pytest.MonkeyPatch
             self.conn = conn
 
         def load_reusable_artifact(self, **kwargs):
-            raise CompileArtifactError("conflicting reusable compile artifacts detected")
+            raise MaterializeArtifactError("conflicting reusable compile artifacts detected")
 
     subsystems = SimpleNamespace(get_pg_conn=lambda: object())
-    monkeypatch.setattr(handoff_commands, "CompileArtifactStore", _FakeStore)
+    monkeypatch.setattr(handoff_commands, "MaterializeArtifactStore", _FakeStore)
 
     with pytest.raises(handoff_commands.HandoffCommandError):
         handoff_commands.handle_publish_handoff_artifact(_publish_command(), subsystems)
@@ -97,7 +97,7 @@ def test_bind_handoff_records_packet_lineage(monkeypatch: pytest.MonkeyPatch) ->
             return _packet_record()
 
     subsystems = SimpleNamespace(get_pg_conn=lambda: object())
-    monkeypatch.setattr(handoff_commands, "CompileArtifactStore", _FakeStore)
+    monkeypatch.setattr(handoff_commands, "MaterializeArtifactStore", _FakeStore)
 
     result = handoff_commands.handle_bind_handoff_artifact(
         handoff_commands.BindHandoffArtifactCommand(
@@ -139,7 +139,7 @@ def test_consume_handoff_rejects_duplicate_checkpoint(monkeypatch: pytest.Monkey
             return {"checkpoint_id": "checkpoint-1"}
 
     subsystems = SimpleNamespace(get_pg_conn=lambda: object())
-    monkeypatch.setattr(handoff_commands, "CompileArtifactStore", _FakeStore)
+    monkeypatch.setattr(handoff_commands, "MaterializeArtifactStore", _FakeStore)
     monkeypatch.setattr(handoff_commands, "PostgresSubscriptionRepository", _FakeRepository)
     monkeypatch.setattr(handoff_commands, "PostgresCompileArtifactRepository", _FakeRepository)
 
@@ -174,7 +174,7 @@ def test_consume_handoff_commits_checkpoint(monkeypatch: pytest.MonkeyPatch) -> 
 
         def load_compile_artifact_by_revision(self, **kwargs):
             return {
-                "compile_artifact_id": "compile_artifact.plan.deadbeef",
+                "materialize_artifact_id": "materialize_artifact.plan.deadbeef",
                 "artifact_kind": kwargs["artifact_kind"],
                 "artifact_ref": kwargs["revision_ref"],
                 "revision_ref": kwargs["revision_ref"],
@@ -200,7 +200,7 @@ def test_consume_handoff_commits_checkpoint(monkeypatch: pytest.MonkeyPatch) -> 
             }
 
     subsystems = SimpleNamespace(get_pg_conn=lambda: object())
-    monkeypatch.setattr(handoff_commands, "CompileArtifactStore", _FakeStore)
+    monkeypatch.setattr(handoff_commands, "MaterializeArtifactStore", _FakeStore)
     monkeypatch.setattr(handoff_commands, "PostgresSubscriptionRepository", _FakeRepository)
     monkeypatch.setattr(handoff_commands, "PostgresCompileArtifactRepository", _FakeRepository)
 
@@ -232,7 +232,7 @@ def test_query_handoff_latest_and_lineage(monkeypatch: pytest.MonkeyPatch) -> No
             assert kwargs["artifact_kind"] == "definition"
             return [
                 {
-                    "compile_artifact_id": "artifact-2",
+                    "materialize_artifact_id": "artifact-2",
                     "artifact_kind": "definition",
                     "artifact_ref": "definition-1",
                     "revision_ref": "definition-2",
@@ -249,7 +249,7 @@ def test_query_handoff_latest_and_lineage(monkeypatch: pytest.MonkeyPatch) -> No
             assert kwargs["artifact_kind"] == "definition"
             return [
                 {
-                    "compile_artifact_id": "artifact-1",
+                    "materialize_artifact_id": "artifact-1",
                     "artifact_kind": "definition",
                     "artifact_ref": "definition-1",
                     "revision_ref": "definition-1",
@@ -261,7 +261,7 @@ def test_query_handoff_latest_and_lineage(monkeypatch: pytest.MonkeyPatch) -> No
                     "decision_ref": "decision-1",
                 },
                 {
-                    "compile_artifact_id": "artifact-2",
+                    "materialize_artifact_id": "artifact-2",
                     "artifact_kind": "definition",
                     "artifact_ref": "definition-1",
                     "revision_ref": "definition-2",
@@ -363,7 +363,7 @@ def test_handoff_round_trip_write_and_read(monkeypatch: pytest.MonkeyPatch) -> N
         "checkpoint": None,
     }
 
-    def _artifact_row_from_record(record: CompileArtifactRecord) -> dict[str, object]:
+    def _artifact_row_from_record(record: MaterializeArtifactRecord) -> dict[str, object]:
         row = dict(asdict(record))
         row["created_at"] = "2026-04-16T00:00:00+00:00"
         return row
@@ -381,13 +381,13 @@ def test_handoff_round_trip_write_and_read(monkeypatch: pytest.MonkeyPatch) -> N
             if not artifacts:
                 return None
             if len({artifact.revision_ref for artifact in artifacts}) > 1:
-                raise CompileArtifactError("conflicting reusable compile artifacts detected")
+                raise MaterializeArtifactError("conflicting reusable compile artifacts detected")
             return artifacts[-1]
 
         def record_definition(self, **kwargs):
             payload = dict(kwargs["definition"])
-            record = CompileArtifactRecord(
-                compile_artifact_id="compile_artifact.definition.definition-1",
+            record = MaterializeArtifactRecord(
+                materialize_artifact_id="materialize_artifact.definition.definition-1",
                 artifact_kind="definition",
                 artifact_ref=payload["definition_revision"],
                 revision_ref=payload["definition_revision"],
@@ -471,7 +471,7 @@ def test_handoff_round_trip_write_and_read(monkeypatch: pytest.MonkeyPatch) -> N
             return checkpoint
 
     subsystems = SimpleNamespace(get_pg_conn=lambda: object())
-    monkeypatch.setattr(handoff_commands, "CompileArtifactStore", _FakeStore)
+    monkeypatch.setattr(handoff_commands, "MaterializeArtifactStore", _FakeStore)
     monkeypatch.setattr(handoff_commands, "PostgresSubscriptionRepository", _FakeSubscriptionRepository)
     monkeypatch.setattr(handoff_commands, "PostgresCompileArtifactRepository", _FakeArtifactRepository)
     monkeypatch.setattr(handoff_queries, "PostgresCompileArtifactRepository", _FakeArtifactRepository)

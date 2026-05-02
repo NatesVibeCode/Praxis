@@ -101,6 +101,10 @@ class CompileWorkflowContextCommand(BaseModel):
         return [dict(item) if isinstance(item, dict) else str(item) for item in value]
 
 
+class MaterializeWorkflowContextCommand(CompileWorkflowContextCommand):
+    """Materialize intent and optional graph into durable Workflow Context."""
+
+
 class TransitionWorkflowContextCommand(BaseModel):
     """Transition a context pack truth state through guardrail policy."""
 
@@ -227,6 +231,18 @@ def handle_workflow_context_compile(
         "context_pack": persisted,
         "event_payload": event_payload,
     }
+
+
+def handle_workflow_context_materialize(
+    command: MaterializeWorkflowContextCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    """Canonical materialize-named handler for Workflow Context authority."""
+
+    payload = handle_workflow_context_compile(command, subsystems)
+    if isinstance(payload, dict) and payload.get("operation") == "workflow_context_compile":
+        payload = {**payload, "operation": "workflow_context_materialize"}
+    return payload
 
 
 def handle_workflow_context_transition(
@@ -372,8 +388,10 @@ def _domain_error(operation: str, exc: WorkflowContextError) -> dict[str, Any]:
 __all__ = [
     "BindWorkflowContextCommand",
     "CompileWorkflowContextCommand",
+    "MaterializeWorkflowContextCommand",
     "TransitionWorkflowContextCommand",
     "handle_workflow_context_bind",
     "handle_workflow_context_compile",
+    "handle_workflow_context_materialize",
     "handle_workflow_context_transition",
 ]

@@ -1931,7 +1931,7 @@ def _build_praxis_context(pg_conn: Any) -> str:
         "You are the Praxis operator console assistant. Praxis is LLM-first "
         "infrastructure powered by a trust compiler — one graph in Praxis.db "
         "(nodes, edges, gates, typed by data-dictionary consumes/produces) with "
-        "many lenses (Moon canvas, executor, CLI, MCP, HTTP). Agents build and "
+        "many lenses (Canvas canvas, executor, CLI, MCP, HTTP). Agents build and "
         "mutate the graph; the operator (Nate) steers — approves gates, edits "
         "misbehaving nodes — he does not assemble nodes from a palette.\n\n"
         "This chat lane runs on Together DeepSeek V4 Pro. It is an API-backed "

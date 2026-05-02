@@ -4,12 +4,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   color: var(--text);
-  background-image:
-    radial-gradient(circle at 18% -8%, rgba(243, 238, 228, 0.055), transparent 36%),
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
-  background-size: 48px 48px;
-  background-position: -1px -1px;
+  background: transparent;
 }
 
 .dash-sidebar {
@@ -23,11 +18,7 @@
   padding: 14px;
   border: 1px solid var(--shell-border);
   border-radius: 8px;
-  background:
-    linear-gradient(90deg, rgba(243, 238, 228, 0.06), transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 22%),
-    linear-gradient(180deg, rgba(17, 17, 17, 0.92), rgba(8, 8, 8, 0.98));
-  background-size: 56px 100%, 100% 100%, 100% 100%;
+  background: rgba(255, 255, 255, 0.02);
   box-shadow: 0 20px 44px rgba(0, 0, 0, 0.18);
   overflow: hidden;
 }
@@ -90,10 +81,7 @@
   padding: 14px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(90deg, rgba(243, 238, 228, 0.045), transparent 1px),
-    linear-gradient(180deg, rgba(243, 238, 228, 0.055), rgba(255, 255, 255, 0.018));
-  background-size: 48px 100%, 100% 100%;
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .dash-sidebar__overview-title {
@@ -360,30 +348,32 @@
 
 .dash-content {
   width: min(1400px, calc(100% - 36px));
-  margin: 18px auto 40px;
+  margin: 12px auto 32px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 24px;
 }
 
+/* dash-hero / dash-panel / dash-section / dash-metric used to be framed
+ * containers. Per PRIMITIVES.md: outer rims around layout grids are banned.
+ * They're now bare layout blocks; framing belongs to the primitive that
+ * owns the discrete record (PanelCard for workflow cards, ReceiptCard for
+ * receipts). Layout wrappers are transparent. */
 .dash-hero,
 .dash-panel,
 .dash-section,
 .dash-metric {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(18, 18, 18, 0.92), rgba(9, 9, 9, 0.98));
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.16);
-  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .dash-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
-  gap: 20px;
-  padding: 28px;
-  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 0;
   position: relative;
-  overflow: hidden;
 }
 
 .dash-hero::before,
@@ -394,18 +384,11 @@
 }
 
 .dash-hero::before {
-  inset: 0;
-  background:
-    linear-gradient(90deg, rgba(243, 238, 228, 0.12), transparent 1px),
-    linear-gradient(180deg, rgba(243, 238, 228, 0.08), transparent 1px);
-  background-size: 72px 72px;
-  mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.42), transparent 68%);
+  display: none;
 }
 
 .dash-hero::after {
-  inset: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.055);
-  border-radius: 6px;
+  display: none;
 }
 
 .dash-hero > * {
@@ -414,18 +397,16 @@
 }
 
 .dash-hero__title {
-  margin-top: 12px;
-  font-size: clamp(34px, 3.5rem, 54px);
-  line-height: 0.94;
-  letter-spacing: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .dash-hero__desc {
-  max-width: 720px;
-  margin-top: 16px;
-  font-size: 15px;
-  line-height: 1.75;
-  color: var(--text-muted);
+  display: none;
 }
 
 .dash-hero__actions,
@@ -440,11 +421,11 @@
 .dash-hero__actions > *,
 .dash-hero__chips > *,
 .wf-card__actions > * {
-  flex: 1 1 160px;
+  flex: none;
 }
 
 .dash-hero__actions {
-  margin-top: 22px;
+  margin-top: 0;
 }
 
 .dash-hero__primary,
@@ -659,35 +640,46 @@ button.dash-hero-card__stat--link:focus-visible {
 
 .dash-board {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.85fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.85fr);
+  gap: 12px;
   align-items: start;
 }
 
-.dash-board__main,
+.dash-board__main {
+  display: grid;
+  gap: 24px;
+}
+
 .dash-board__rail {
   display: grid;
-  gap: 18px;
+  gap: 10px;
 }
 
+/* Sections / panels are now bare layout blocks (per PRIMITIVES.md).
+ * No padding, no rounded rim, no tinted background. */
 .dash-section,
 .dash-panel {
-  padding: 22px;
-  border-radius: 8px;
+  padding: 0;
+  border-radius: 0;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
-.dash-section--live {
-  background: linear-gradient(180deg, rgba(63, 185, 80, 0.055), rgba(10, 10, 10, 0.98));
-}
-
-.dash-section--saved {
-  background: linear-gradient(180deg, rgba(243, 238, 228, 0.055), rgba(10, 10, 10, 0.98));
-}
-
+.dash-section--live,
+.dash-section--saved,
 .dash-section--draft {
-  background: linear-gradient(180deg, rgba(210, 153, 34, 0.05), rgba(10, 10, 10, 0.98));
+  background: transparent;
+}
+
+/* Tone-coded left edge on workflow cards — scan the margin, know the status */
+.dash-section--live .prx-card {
+  border-left: 3px solid var(--accent);
+}
+.dash-section--saved .prx-card {
+  border-left: 3px solid var(--success);
+}
+.dash-section--draft .prx-card {
+  border-left: 3px solid rgba(255, 255, 255, 0.08);
 }
 
 .dash-section__header,
@@ -707,11 +699,49 @@ button.dash-hero-card__stat--link:focus-visible {
 }
 
 .dash-section__copy {
-  margin-top: 10px;
-  max-width: 720px;
-  font-size: 13px;
-  line-height: 1.65;
+  display: none;
+}
+
+.dash-section__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dash-section__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--text-muted);
+}
+
+.dash-section__count-badge {
+  min-width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* Section count badges carry tone */
+.dash-section--live .dash-section__count-badge {
+  background: var(--surface-accent-soft);
+  color: var(--accent);
+}
+.dash-section--saved .dash-section__count-badge {
+  background: var(--surface-success-soft);
+  color: var(--success);
+}
+.dash-section--live .dash-section__label {
+  color: var(--accent);
 }
 
 .dash-section__count {
@@ -730,8 +760,8 @@ button.dash-hero-card__stat--link:focus-visible {
 .dash-section__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-  gap: 14px;
-  margin-top: 20px;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .dash-section__loading {
@@ -794,6 +824,11 @@ button.dash-hero-card__stat--link:focus-visible {
   box-shadow: 0 18px 30px rgba(0, 0, 0, 0.18);
 }
 
+.dash-section--live .wf-card:hover {
+  border-color: rgba(243, 238, 228, 0.28);
+  box-shadow: 0 0 20px rgba(243, 238, 228, 0.06), 0 18px 30px rgba(0, 0, 0, 0.18);
+}
+
 .wf-card__header {
   display: flex;
   justify-content: space-between;
@@ -812,7 +847,7 @@ button.dash-hero-card__stat--link:focus-visible {
   min-height: 20px;
 }
 
-.wf-card__eyebrow-row .moon-workflow-silhouette {
+.wf-card__eyebrow-row .canvas-workflow-silhouette {
   display: block;
   flex-shrink: 0;
 }
@@ -825,11 +860,6 @@ button.dash-hero-card__stat--link:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.wf-card__desc {
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--text-muted);
-}
 
 .wf-card__badge {
   flex-shrink: 0;
@@ -849,6 +879,12 @@ button.dash-hero-card__stat--link:focus-visible {
   color: #9be8c5;
   background: rgba(63, 185, 80, 0.12);
   border-color: rgba(63, 185, 80, 0.24);
+  animation: badge-breathe 3s ease-in-out infinite;
+}
+
+@keyframes badge-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+  50% { box-shadow: 0 0 8px 2px rgba(63, 185, 80, 0.18); }
 }
 
 .wf-card__badge--scheduled {
@@ -960,25 +996,6 @@ button.dash-hero-card__stat--link:focus-visible {
   background: rgba(255, 255, 255, 0.05);
 }
 
-.dash-review-item__dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.32);
-}
-
-.dash-review-item__dot--healthy {
-  background: var(--success);
-}
-
-.dash-review-item__dot--warning {
-  background: var(--warning);
-}
-
-.dash-review-item__dot--danger {
-  background: var(--danger);
-}
-
 .dash-review-item__body {
   min-width: 0;
   display: grid;
@@ -1043,31 +1060,6 @@ button.dash-hero-card__stat--link:focus-visible {
   transform: translateY(-1px);
   border-color: rgba(243, 238, 228, 0.18);
   background: rgba(255, 255, 255, 0.05);
-}
-
-.dash-run__status {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.dash-run__status--succeeded {
-  background: var(--success);
-}
-
-.dash-run__status--failed {
-  background: var(--danger);
-}
-
-.dash-run__status--running {
-  background: var(--warning);
-  box-shadow: 0 0 0 0 rgba(210, 153, 34, 0.45);
-  animation: dashPulse 1.5s ease-in-out infinite;
-}
-
-.dash-run__status--queued,
-.dash-run__status--cancelled {
-  background: rgba(255, 255, 255, 0.32);
 }
 
 .dash-run__title {
@@ -1147,19 +1139,12 @@ button.dash-hero-card__stat--link:focus-visible {
     margin: 12px auto 28px;
   }
 
-  .dash-hero,
-  .dash-metrics {
-    grid-template-columns: 1fr;
+  .dash-hero {
+    flex-wrap: wrap;
   }
 
   .dash-section__grid {
     grid-template-columns: 1fr;
-  }
-
-  .dash-hero__actions > *,
-  .dash-hero__chips > *,
-  .wf-card__actions > * {
-    flex: 1 1 180px;
   }
 }
 
@@ -1311,19 +1296,12 @@ button.dash-hero-card__stat--link:focus-visible {
     margin: 12px auto 28px;
   }
 
-  .dash-hero,
-  .dash-metrics {
-    grid-template-columns: 1fr;
+  .dash-hero {
+    flex-wrap: wrap;
   }
 
   .dash-section__grid {
     grid-template-columns: 1fr;
-  }
-
-  .dash-hero__actions > *,
-  .dash-hero__chips > *,
-  .wf-card__actions > * {
-    flex: 1 1 180px;
   }
 }
 
@@ -1793,14 +1771,11 @@ button.dash-hero-card__stat--link:focus-visible {
   .om-metrics__grid { grid-template-columns: 1fr; }
 }
 
-/* Quiet overview surface */
+/* Overview surface — inherits the canonical --backdrop from body.
+ * Brand bible: never pure black; the 3 subliminal radials carry the
+ * page warmth (cream/blue/green). */
 .dash-page {
-  background-image:
-    radial-gradient(circle at 18% -8%, rgba(243, 238, 228, 0.06), transparent 38%),
-    radial-gradient(circle at 88% 12%, rgba(210, 153, 34, 0.05), transparent 30%),
-    radial-gradient(circle at 50% 102%, rgba(63, 185, 80, 0.025), transparent 28%),
-    linear-gradient(180deg, #080808 0%, #050505 100%);
-  background-size: auto;
+  background: transparent;
 }
 
 .dash-sidebar {
@@ -2062,8 +2037,8 @@ button.dash-hero-card__stat--link:focus-visible {
 }
 
 .dash-board {
-  padding-top: 64px;
-  border-top: 1px solid var(--border-faint);
+  padding-top: 0;
+  border-top: none;
 }
 
 .dash-section__eyebrow,
@@ -2246,8 +2221,8 @@ button.dash-hero-card__stat--link:focus-visible {
 .dash-hero {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 44px;
-  padding: 74px 0 64px;
+  gap: 16px;
+  padding: 24px 0 16px;
 }
 
 .dash-hero__copy {
@@ -2255,19 +2230,26 @@ button.dash-hero-card__stat--link:focus-visible {
 }
 
 .dash-hero__title {
-  max-width: 12ch;
-  font-size: clamp(38px, 5.4vw, 64px);
-  letter-spacing: 0;
+  /* Brand bible: h1 = --fs-4xl (36px) sans, semibold (600), tight tracking. */
+  max-width: 16ch;
+  font-family: var(--font-sans);
+  font-size: var(--fs-4xl, 36px);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 .dash-hero__desc {
   max-width: 56ch;
   color: var(--text-muted);
-  font-size: clamp(16px, 1.35vw, 18px);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .dash-hero__actions {
-  max-width: 560px;
+  max-width: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 .dash-contract-preview {
@@ -2392,13 +2374,7 @@ button.dash-hero-card__stat--link:focus-visible {
 }
 
 .dash-run-instrument {
-  display: grid;
-  grid-template-columns: minmax(0, 1.04fr) minmax(360px, 0.96fr);
-  overflow: hidden;
-  border: 1px solid var(--dash-border-soft);
-  border-radius: 14px;
-  background: var(--bg-card);
-  box-shadow: var(--card-shadow);
+  display: contents;
 }
 
 .dash-terminal {
@@ -2411,8 +2387,7 @@ button.dash-hero-card__stat--link:focus-visible {
   line-height: 1.65;
 }
 
-.dash-terminal__label,
-.dash-receipts__head {
+.dash-terminal__label {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -2446,51 +2421,9 @@ button.dash-hero-card__stat--link:focus-visible {
   color: #ff8a6a;
 }
 
-.dash-receipts {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 24px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.018));
-}
-
-.dash-receipts__head {
-  margin-bottom: 10px;
-}
-
-.dash-receipt-card {
-  width: 100%;
-  border-radius: 8px;
-}
-
-.dash-receipt-button {
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.dash-receipt-button:hover .dash-receipt-card {
-  filter: brightness(1.08);
-}
-
-.dash-receipt-card--allow {
-  border-color: rgba(63, 185, 80, 0.3);
-}
-
-.dash-receipt-card--verify {
-  border-color: var(--dash-border-soft);
-}
-
-.dash-receipt-card .v {
-  overflow-wrap: anywhere;
-}
 
 .dash-board {
-  margin-top: 64px;
+  margin-top: 0;
 }
 
 .dash-start-panel {
@@ -2600,8 +2533,7 @@ button.dash-hero-card__stat--link:focus-visible {
     padding-top: 0;
   }
 
-  .dash-terminal,
-  .dash-receipts {
+  .dash-terminal {
     padding: 18px;
   }
 
@@ -2684,5 +2616,101 @@ button.dash-hero-card__stat--link:focus-visible {
 
   .dash-hero__title {
     font-size: 20px;
+  }
+}
+
+/* Dashboard phase 1: real authority cards, no mocked contract/terminal chrome. */
+.dash-hero__status {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
+.dash-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dash-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 132px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.dash-tile:hover {
+  border-color: rgba(243, 238, 228, 0.22);
+  background: rgba(255, 255, 255, 0.05);
+}
+.dash-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.dash-tile__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-tile__value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+}
+.dash-tile__detail {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.dash-tile__action {
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  transition: color 140ms ease;
+}
+.dash-tile:hover .dash-tile__action {
+  color: var(--accent);
+}
+
+.dash-run-instrument {
+  grid-template-columns: 1fr;
+}
+
+
+.dash-empty--danger {
+  border-color: rgba(248, 81, 73, 0.28);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.dash-empty--danger .dash-empty__title {
+  color: var(--danger);
+}
+
+@media (max-width: 980px) {
+  .dash-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .dash-overview-grid {
+    grid-template-columns: 1fr;
   }
 }

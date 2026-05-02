@@ -32,6 +32,14 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow data` | `praxis_data` | `data` | `launch`, `read`, `write` | Run deterministic parsing, normalization, validation, mapping, dedupe, or reconcile jobs and optionally launch them through the workflow engine. |
 | `praxis workflow artifacts` | `praxis_artifacts` | `evidence` | `read` | Browse sandbox outputs, search artifact paths, or compare generated files. |
 | `praxis workflow bugs` | `praxis_bugs` | `evidence` | `launch`, `read`, `write` | Inspect the bug tracker, run keyword or hybrid search, file a new bug, or drive replay-ready bug workflows. |
+| `praxis workflow healer-catalog` | `praxis_healer_catalog` | `evidence` | `read` | List registered healer authority refs before picking one for praxis_healer_run, or to inspect what repairs are available after a verifier fails. Returns each healer's auto_mode, safety_mode, action_ref, and the verifier_refs it's bound to. |
+| `praxis workflow healer-register` | `praxis_healer_register` | `evidence` | `write` | Register (or update) a healer authority ref without authoring a SQL migration. Use when adding a new healer that will be bound to one or more verifiers. action_ref must name a built-in handler from runtime.verifier_builtins.run_builtin_healer. |
+| `praxis workflow healer-run` | `praxis_healer_run` | `evidence` | `write` | Manually trigger a healer to repair a verifier failure. verifier_ref is required; healer_ref is optional (auto-resolves from verifier bindings when exactly one is bound). The runtime reruns the bound verifier as post-verification — succeeded status means BOTH healer action AND post-verification passed. |
+| `praxis workflow healer-runs` | `praxis_healer_runs_list` | `evidence` | `read` | List past healing_runs newest-first to inspect repair history. Filter by healer_ref / verifier_ref (which verifier triggered the heal) / target / status / trailing-window. Use to confirm a heal succeeded, audit failure rates, or check whether a specific target has been auto-repaired recently. |
+| `praxis workflow verifier-catalog` | `praxis_verifier_catalog` | `evidence` | `read` | List registered verifier authority refs before picking one for a bug-resolve, code-change preflight, or workflow-packet review gate. Returns each verifier's verifier_ref, kind (platform / receipt / run / path), enabled state, and any bound suggested-healer refs. |
+| `praxis workflow verifier-register` | `praxis_verifier_register` | `evidence` | `write` | Register (or update) a verifier authority ref without authoring a SQL migration. Use when adding a new verifier — replaces the old hand-edited verifier_builtins.py + migration pattern. Optional bind_healer_refs creates verifier_healer_bindings in the same call. |
+| `praxis workflow verifier-run` | `praxis_verifier_run` | `evidence` | `write` | Run a registered verifier against a target as a deterministic review gate — receipt-backed, replayable, links to a verification_runs row. Use this from a workflow packet (integration_id=praxis_verifier_run, integration_action=run) to express a verify step without going through bug-resolve, or interactively to confirm a verifier passes against a specific target. |
+| `praxis workflow verifier-runs` | `praxis_verifier_runs_list` | `evidence` | `read` | List past verification_runs newest-first to confirm a verifier actually ran on a target. Filter by verifier_ref, target_kind, target_ref, status, or trailing window. Use before resolving a bug to FIXED to verify the evidence chain, or to inspect failure rates of a specific verifier. |
 | `praxis workflow integration` | `praxis_integration` | `integration` | `launch`, `read`, `write` | List integrations, inspect one, validate credentials, or invoke an integration action. |
 | `praxis workflow recall` | `praxis_recall` | `knowledge` | `read` | Search the knowledge graph for decisions, patterns, entities, and prior analysis using ranked text, graph, and vector retrieval. |
 | `praxis workflow search` | `praxis_search` | `knowledge` | `read` | Federated search across code, decisions, knowledge, bugs, receipts, and related sources with semantic, exact, or regex modes — prefer this as the default discovery entry point. |
@@ -88,7 +96,9 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow runtime-truth` | `praxis_runtime_truth_snapshot` | `operations` | `read` | Inspect observed workflow runtime truth across DB authority, queue state, worker heartbeats, provider slots, host-resource leases, Docker, manifest hydration audit, and recent typed failures. |
 | `praxis workflow query` | `praxis_query` | `query` | `read` | Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use. |
 | `praxis workflow model-eval` | `praxis_model_eval` | `workflow` | `read`, `write` | Use for consistent model selection: same Workflow spec, same fixtures, same verifier, varied model/prompt/provider configuration. |
-| `praxis workflow moon` | `praxis_moon` | `workflow` | `launch`, `read`, `write` | Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_moon tool name and moon alias remain compatibility entrypoints. |
+| `praxis workflow canvas` | `praxis_canvas` | `workflow` | `launch`, `read`, `write` | Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_canvas tool name and canvas alias remain compatibility entrypoints. |
+| `praxis workflow repair` | `praxis_workflow_repair_queue` | `workflow` | `write` | Use after a Solution, Workflow, or Job fails and you need a durable repair item instead of rediscovering lost run state. |
+| `praxis workflow solution` | `praxis_solution` | `workflow` | `launch`, `read` | Submit, list, or inspect durable multi-workflow Solutions. |
 | `praxis workflow synthetic-data-generate` | `praxis_synthetic_data_generate` | `workflow` | `write` | Use when a workflow, Virtual Lab run, demo, test fixture, or model-eval fixture needs generated data with durable records and a quality-checked naming plan. |
 | `praxis workflow synthetic-data-read` | `praxis_synthetic_data_read` | `workflow` | `read` | Use to inspect generated datasets, naming plans, quality reports, and individual synthetic records. |
 | `praxis workflow synthetic-environment-clear` | `praxis_synthetic_environment_clear` | `workflow` | `write` | Use when an environment must be emptied without erasing audit history. |
@@ -139,7 +149,15 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow tools call praxis_receipts` | `praxis_receipts` | `advanced` | action: search, token_burn | `read` | - |
 | `praxis workflow artifacts` | `praxis_artifacts` | `stable` | action: stats, list, search, diff | `read` | - |
 | `praxis workflow bugs` | `praxis_bugs` | `stable` | action: list, file, search, duplicate_check, stats, show, packet, history, replay, backfill_replay, attach_evidence, patch_resume, resolve | `launch`, `read`, `write` | - |
+| `praxis workflow healer-catalog` | `praxis_healer_catalog` | `stable` | - | `read` | - |
+| `praxis workflow healer-register` | `praxis_healer_register` | `stable` | - | `write` | - |
+| `praxis workflow healer-run` | `praxis_healer_run` | `stable` | - | `write` | - |
+| `praxis workflow healer-runs` | `praxis_healer_runs_list` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_patterns` | `praxis_patterns` | `stable` | action: list, candidates, evidence, materialize | `read`, `write` | - |
+| `praxis workflow verifier-catalog` | `praxis_verifier_catalog` | `stable` | - | `read` | - |
+| `praxis workflow verifier-register` | `praxis_verifier_register` | `stable` | - | `write` | - |
+| `praxis workflow verifier-run` | `praxis_verifier_run` | `stable` | - | `write` | - |
+| `praxis workflow verifier-runs` | `praxis_verifier_runs_list` | `stable` | - | `read` | - |
 
 ### General
 
@@ -227,6 +245,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow tools call praxis_client_system_discovery_gap_record` | `praxis_client_system_discovery_gap_record` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_heartbeat` | `praxis_heartbeat` | `advanced` | action: run, status | `read`, `write` | - |
 | `praxis workflow tools call praxis_metrics_reset` | `praxis_metrics_reset` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_paid_model_access` | `praxis_paid_model_access` | `advanced` | action: status, preview, grant_once, bind_run, revoke, consume, soft_off, soft_on | `read`, `write` | - |
 | `praxis workflow tools call praxis_provider_availability_refresh` | `praxis_provider_availability_refresh` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_reload` | `praxis_reload` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_semantic_bridges_backfill` | `praxis_semantic_bridges_backfill` | `advanced` | - | `write` | - |
@@ -254,6 +273,9 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow remediation-plan` | `praxis_remediation_plan` | `stable` | - | `read` | - |
 | `praxis workflow runtime-truth` | `praxis_runtime_truth_snapshot` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_chat_routing_options_list` | `praxis_chat_routing_options_list` | `stable` | - | `read` | - |
+| `praxis workflow tools call praxis_dispatch_choice_commit` | `praxis_dispatch_choice_commit` | `stable` | - | `write` | - |
+| `praxis workflow tools call praxis_dispatch_options_list` | `praxis_dispatch_options_list` | `stable` | - | `read` | - |
+| `praxis workflow tools call praxis_execution_targets_list` | `praxis_execution_targets_list` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_execution_truth` | `praxis_execution_truth` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_model_access_control_matrix` | `praxis_model_access_control_matrix` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_provider_route_truth` | `praxis_provider_route_truth` | `stable` | - | `read` | - |
@@ -343,8 +365,10 @@ The operation catalog gateway is the CQRS write/read front door when you already
 
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
-| `praxis workflow model-eval` | `praxis_model_eval` | `advanced` | action: plan, run, inspect, compare, promote, export | `read`, `write` | - |
-| `praxis workflow moon` | `praxis_moon` | `advanced` | action: get_build, compose, suggest_next, mutate_field, launch | `launch`, `read`, `write` | - |
+| `praxis workflow model-eval` | `praxis_model_eval` | `advanced` | action: plan, run, inspect, compare, promote, export, benchmark_ingest | `read`, `write` | - |
+| `praxis workflow canvas` | `praxis_canvas` | `advanced` | action: get_build, compose, suggest_next, mutate_field, launch | `launch`, `read`, `write` | - |
+| `praxis workflow repair` | `praxis_workflow_repair_queue` | `advanced` | action: list, queue, status, summary, claim, release, complete | `write` | - |
+| `praxis workflow solution` | `praxis_solution` | `advanced` | action: submit, start, status, show, list, observe | `launch`, `read` | - |
 | `praxis workflow synthetic-data-generate` | `praxis_synthetic_data_generate` | `advanced` | - | `write` | - |
 | `praxis workflow synthetic-data-read` | `praxis_synthetic_data_read` | `advanced` | action: list_datasets, describe_dataset, list_records | `read` | - |
 | `praxis workflow synthetic-environment-clear` | `praxis_synthetic_environment_clear` | `advanced` | - | `write` | - |
@@ -353,12 +377,21 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow synthetic-environment-event-inject` | `praxis_synthetic_environment_event_inject` | `advanced` | - | `write` | - |
 | `praxis workflow synthetic-environment-read` | `praxis_synthetic_environment_read` | `advanced` | action: list_environments, describe_environment, list_effects, diff | `read` | - |
 | `praxis workflow synthetic-environment-reset` | `praxis_synthetic_environment_reset` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_agent_delegate` | `praxis_agent_delegate` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_agent_describe` | `praxis_agent_describe` | `advanced` | - | `read` | - |
+| `praxis workflow tools call praxis_agent_forge` | `praxis_agent_forge` | `advanced` | - | `read` | - |
+| `praxis workflow tools call praxis_agent_list` | `praxis_agent_list` | `advanced` | - | `read` | - |
+| `praxis workflow tools call praxis_agent_register` | `praxis_agent_register` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_agent_status` | `praxis_agent_status` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_agent_wake` | `praxis_agent_wake` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_agent_wake_list` | `praxis_agent_wake_list` | `advanced` | - | `read` | - |
 | `praxis workflow tools call praxis_compose_experiment` | `praxis_compose_experiment` | `advanced` | - | `launch` | - |
 | `praxis workflow tools call praxis_compose_plan_via_llm` | `praxis_compose_plan_via_llm` | `advanced` | - | `launch` | - |
 | `praxis workflow tools call praxis_connector` | `praxis_connector` | `advanced` | action: build, list, get, register, verify | `launch`, `read`, `write` | - |
 | `praxis workflow tools call praxis_promote_experiment_winner` | `praxis_promote_experiment_winner` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_synthesize_skeleton` | `praxis_synthesize_skeleton` | `advanced` | - | `read` | - |
-| `praxis workflow tools call praxis_wave` | `praxis_wave` | `advanced` | action: observe, start, next, record | `launch`, `read`, `write` | - |
+| `praxis workflow tools call praxis_tool_gap_file` | `praxis_tool_gap_file` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_tool_gap_list` | `praxis_tool_gap_list` | `advanced` | - | `read` | - |
 | `praxis workflow tools call praxis_workflow` | `praxis_workflow` | `advanced` | action: run, spawn, preview, status, inspect, claim, acknowledge, cancel, list, notifications, retry, repair, chain | `launch`, `read`, `write` | - |
 | `praxis workflow tools call praxis_workflow_validate` | `praxis_workflow_validate` | `advanced` | - | `read` | - |
 | `praxis workflow approve-plan` | `praxis_approve_proposed_plan` | `stable` | - | `read` | - |

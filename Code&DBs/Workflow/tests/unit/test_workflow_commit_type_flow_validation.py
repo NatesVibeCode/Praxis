@@ -1,4 +1,4 @@
-"""Tests for type-flow validation on Moon commitDefinition (Phase 1.2.a).
+"""Tests for type-flow validation on Canvas commitDefinition (Phase 1.2.a).
 
 Honors architecture-policy::platform-architecture::fail-closed-at-compile-
 no-silent-defaults. _handle_workflows_post now rejects commits whose graph
@@ -80,7 +80,7 @@ def test_body_falls_back_from_build_graph_to_definition():
 
 def test_build_graph_takes_precedence_over_definition():
     """When both build_graph and definition are present, build_graph wins —
-    it's Moon's authoritative authoring shape."""
+    it's Canvas's authoritative authoring shape."""
     # build_graph has valid flow
     build_graph = {
         "nodes": [{"node_id": "trigger_1", "route": "trigger"}],

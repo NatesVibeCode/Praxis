@@ -29,6 +29,17 @@ _RUN_ACTIVE_STATUSES = {"queued", "running"}
 class WorkflowChainError(ValueError):
     """Raised when a workflow chain file is missing, invalid, or cannot execute."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str = "workflow.chain.invalid",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.details = dict(details or {})
+
 
 @dataclass(frozen=True)
 class WorkflowChainWave:
@@ -141,6 +152,31 @@ def _validate_validate_order(
     raise WorkflowChainError(
         "validate_order must match the exact set of specs referenced by waves: "
         + "; ".join(messages),
+        reason_code="workflow.chain.validate_order_drift",
+        details={"missing_specs": missing_specs, "extra_specs": extra_specs},
+    )
+
+
+def _dedupe_ordered(values: list[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _raise_missing_specs(missing_specs: list[str]) -> None:
+    unique_missing = _dedupe_ordered(missing_specs)
+    if not unique_missing:
+        return
+    raise WorkflowChainError(
+        "workflow chain preflight failed: missing referenced spec(s): "
+        + ", ".join(unique_missing),
+        reason_code="workflow.chain.preflight_missing_specs",
+        details={"missing_specs": unique_missing},
     )
 
 
@@ -171,9 +207,10 @@ def load_workflow_chain(
         _normalize_relative_path(item, repo_root=repo_root_path)
         for item in _require_string_list(raw.get("validate_order"), field_name="validate_order")
     )
+    missing_specs: list[str] = []
     for spec_path in validate_order:
         if not (repo_root_path / spec_path).exists():
-            raise WorkflowChainError(f"validate_order spec not found: {spec_path}")
+            missing_specs.append(spec_path)
 
     raw_waves = raw.get("waves")
     if not isinstance(raw_waves, list) or not raw_waves:
@@ -197,7 +234,7 @@ def load_workflow_chain(
             raise WorkflowChainError(f"waves[{index}].specs must not be empty")
         for spec_path in spec_paths:
             if not (repo_root_path / spec_path).exists():
-                raise WorkflowChainError(f"wave spec not found: {spec_path}")
+                missing_specs.append(spec_path)
 
         depends_on = _normalize_dependency_ids(
             raw_wave.get("depends_on", []),
@@ -219,6 +256,8 @@ def load_workflow_chain(
                 raise WorkflowChainError(
                     f"wave {wave.wave_id} depends on unknown wave {dependency}",
                 )
+
+    _raise_missing_specs(missing_specs)
 
     all_wave_specs = tuple(spec_path for wave in parsed_waves for spec_path in wave.spec_paths)
     _validate_validate_order(validate_order, wave_specs=all_wave_specs)
@@ -492,14 +531,87 @@ def submit_workflow_chain(
     """Persist one durable workflow chain and queue its first runnable wave."""
 
     repo_root_path = Path(repo_root).resolve()
-    program = load_workflow_chain(coordination_path, repo_root=str(repo_root_path))
+    normalized_chain_id = chain_id or f"workflow_chain_{uuid.uuid4().hex[:12]}"
+
+    def _queue_preflight_repair(
+        *,
+        error_code: str,
+        error_detail: str,
+        missing_specs: list[str] | None = None,
+        validation_errors: list[dict[str, Any]] | None = None,
+    ) -> None:
+        from runtime.workflow.repair_queue import enqueue_solution_preflight_repair
+
+        enqueue_solution_preflight_repair(
+            conn,
+            solution_id=normalized_chain_id,
+            coordination_path=coordination_path,
+            repo_root=str(repo_root_path),
+            command_id=command_id,
+            requested_by_kind=requested_by_kind,
+            requested_by_ref=requested_by_ref,
+            error_code=error_code,
+            error_detail=error_detail,
+            missing_specs=missing_specs or [],
+            validation_errors=validation_errors or [],
+        )
+
+    try:
+        program = load_workflow_chain(coordination_path, repo_root=str(repo_root_path))
+    except WorkflowChainError as exc:
+        try:
+            _queue_preflight_repair(
+                error_code=exc.reason_code,
+                error_detail=str(exc),
+                missing_specs=list(exc.details.get("missing_specs") or []),
+            )
+        except Exception as repair_exc:  # pragma: no cover - defensive authority surfacing.
+            raise WorkflowChainError(
+                f"{exc}; repair queue enqueue failed: {repair_exc}",
+                reason_code="workflow.chain.preflight_repair_enqueue_failed",
+                details={
+                    "original_reason_code": exc.reason_code,
+                    "original_error": str(exc),
+                    "repair_error": str(repair_exc),
+                },
+            ) from repair_exc
+        raise
+
     validation = _validated_specs_for_program(program, repo_root=str(repo_root_path), pg_conn=conn)
     invalid = [item for item in validation if not item.get("valid", False)]
     if invalid:
         first_invalid = invalid[0]
-        raise WorkflowChainError(
+        validation_errors = [
+            {
+                "spec_path": str(item.get("spec_path") or ""),
+                "error": str(item.get("error") or "invalid spec"),
+            }
+            for item in invalid
+        ]
+        error_detail = (
             f"workflow chain validation failed for {first_invalid['spec_path']}: "
-            f"{first_invalid.get('error') or 'invalid spec'}",
+            f"{first_invalid.get('error') or 'invalid spec'}"
+        )
+        try:
+            _queue_preflight_repair(
+                error_code="workflow.chain.validation_failed",
+                error_detail=error_detail,
+                validation_errors=validation_errors,
+            )
+        except Exception as repair_exc:  # pragma: no cover - defensive authority surfacing.
+            raise WorkflowChainError(
+                f"{error_detail}; repair queue enqueue failed: {repair_exc}",
+                reason_code="workflow.chain.preflight_repair_enqueue_failed",
+                details={
+                    "original_reason_code": "workflow.chain.validation_failed",
+                    "original_error": error_detail,
+                    "repair_error": str(repair_exc),
+                },
+            ) from repair_exc
+        raise WorkflowChainError(
+            error_detail,
+            reason_code="workflow.chain.validation_failed",
+            details={"validation_errors": validation_errors},
         )
 
     spec_rows = _spec_rows_for_program(
@@ -510,7 +622,6 @@ def submit_workflow_chain(
     if adopt_active:
         _assert_unique_adoption_targets(spec_rows)
 
-    normalized_chain_id = chain_id or f"workflow_chain_{uuid.uuid4().hex[:12]}"
     chain_definition = _normalized_definition(program)
     conn.execute(
         """INSERT INTO workflow_chains (

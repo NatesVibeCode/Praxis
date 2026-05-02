@@ -9,7 +9,7 @@ Internal architecture of Praxis Engine.
                                 |
         +-----------------------v-----------------------+
         |                   Surfaces                     |
-        |   Moon (Overview · Build · Atlas · Manifests   |
+        |   Canvas (Overview · Build · Atlas · Manifests   |
         |   · Console)   ·   CLI   ·   MCP   ·   REST    |
         +-----------------------+-----------------------+
                                 |
@@ -79,12 +79,12 @@ Praxis treats durable authority as a first-class layer, not a side-effect of exe
 - **`operator_decisions`** — standing orders, architecture policies, supersession history. Scoped by `decision_kind`. The decision table below is a projection of architecture-policy rows; the canonical authority is the table.
 - **`primitive_catalog`** — declared platform primitives (authorities, engines, gateway wrappers, repositories) consistency-checked against code. Drift between blueprint and implementation surfaces as a structured finding.
 - **`authority_operation_receipts`** — one ledger row per gateway dispatch. Input/output hashes, idempotency key, execution status, cause receipt, correlation id.
-- **`authority_events`** — durable event stream emitted by command operations. Subscribers (Moon modules, replay tooling) read from here instead of polling REST.
+- **`authority_events`** — durable event stream emitted by command operations. Subscribers (Canvas modules, replay tooling) read from here instead of polling REST.
 - **Verifier-backed bug resolution** — bugs cannot be claimed `FIXED` without pointing at a registered verifier authority that the tracker actually executes. The verifier run lands in `verification_runs` and links via `bug_evidence_links` with `evidence_role=validates_fix` before status flips.
 
 ## Surfaces
 
-Moon is the canonical operator UI. One canvas, four tabs, one chat panel:
+Canvas is the canonical operator UI. One canvas, four tabs, one chat panel:
 
 - **Overview** — `WORKFLOW_CONTRACT` panel (TASK / READ / WRITE / LOCKED / TOOLS / APPROVAL / VERIFIER / RETRY / MATERIALIZED), receipts panel, sandbox terminal.
 - **New workflow (Build)** — describe-the-outcome compose entry, hollow-node graph editor, Inspector/Authority tabs, Release tray with pre-flight checks.
@@ -260,12 +260,12 @@ Key endpoints:
 - `POST /workflow/run` -- Submit and execute a workflow
 - `GET /workflow/{run_id}` -- Get workflow run status
 
-## Moon Dashboard
+## Canvas Dashboard
 
 A React/Vite single-page application (`surfaces/app/`) — the canonical operator UI. One canvas, four tabs, one chat panel.
 
 - **Overview** (`dashboard/Dashboard.tsx`) — `WORKFLOW_CONTRACT` panel, receipts panel, sandbox terminal pane. The trust compiler made visible.
-- **New workflow / Build** (`moon/MoonBuildPage.tsx`) — describe-the-outcome compose entry, hollow-node graph editor, Inspector/Authority tabs (`MoonNodeDetail.tsx`), Release tray with pre-flight checks (`MoonReleaseTray.tsx`).
+- **New workflow / Build** (`canvas/CanvasBuildPage.tsx`) — describe-the-outcome compose entry, hollow-node graph editor, Inspector/Authority tabs (`CanvasNodeDetail.tsx`), Release tray with pre-flight checks (`CanvasReleaseTray.tsx`).
 - **Atlas** (`atlas/AtlasPage.tsx`) — over-time accumulation across tracked architecture areas. *Confidence infrastructure, materialized.*
 - **Manifests** (`praxis/ManifestCatalogPage.tsx`) — durable manifest catalog search by family, type, status, free text.
 - **Strategy Console** (`dashboard/StrategyConsole.tsx`) — slide-over partner panel with starter prompts that orient backward / forward / sideways through the work.

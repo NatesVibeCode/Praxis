@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import runtime.compile_index as compile_index
+import runtime.materialize_index as compile_index
 from adapters import provider_transport
 from adapters.credentials import resolve_credential
 from adapters.deterministic import DeterministicTaskRequest

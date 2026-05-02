@@ -354,7 +354,13 @@ def test_tool_praxis_workflow_retry_returns_structured_runtime_error_when_pg_una
 
     monkeypatch.setattr(workflow_tools._subs, "get_pg_conn", lambda: (_ for _ in ()).throw(_StructuredError("retry db blocked")))
 
-    payload = workflow_tools.tool_praxis_workflow({"action": "retry", "run_id": "run-1", "label": "build"})
+    payload = workflow_tools.tool_praxis_workflow({
+        "action": "retry",
+        "run_id": "run-1",
+        "label": "build",
+        "previous_failure": "provider call failed before dispatch",
+        "retry_delta": "database authority outage is intentionally simulated",
+    })
 
     assert payload == {
         "error": "retry db blocked",

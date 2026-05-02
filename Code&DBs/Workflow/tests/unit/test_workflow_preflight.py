@@ -469,6 +469,32 @@ def test_provider_circuit_query_failure_is_error() -> None:
     assert warnings[0]["severity"] == "error"
 
 
+def test_provider_circuit_registry_unavailable_is_error(monkeypatch) -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "agent": "openai/gpt-5.4",
+    }])
+
+    class _Conn:
+        def execute(self, query: str, *_args):
+            if "FROM heartbeat_probe_snapshots" in query:
+                return []
+            if "FROM effective_provider_circuit_breaker_state" in query:
+                return []
+            raise AssertionError(f"unexpected query: {query}")
+
+    from runtime.workflow import _shared as shared_module
+
+    monkeypatch.setattr(shared_module, "_circuit_breakers", lambda: None)
+
+    warnings = _preflight_provider_availability(spec, pg_conn=_Conn())
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "provider_circuit_query_unavailable"
+    assert warnings[0]["severity"] == "error"
+    assert "fails closed" in warnings[0]["message"]
+
+
 # ----- workflow_id collision check ---------------------------------------
 
 

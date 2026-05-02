@@ -1,0 +1,80 @@
+{
+  "name": "Canvas Run Graph Gates",
+  "workflow_id": "ui_atlas_refinement_canvas_run_graph_gates",
+  "phase": "execute",
+  "outcome_goal": "Canvas run view renders root-heavy workflows as complete compact structures and exposes gates/data-entry contracts in the UI.",
+  "anti_requirements": [
+    "Do not change runtime workflow execution semantics.",
+    "Do not move gate/path labels back into node headers.",
+    "Do not include Atlas changes in this spec."
+  ],
+  "jobs": [
+    {
+      "label": "discover_canvas_run_presenter",
+      "agent": "auto/review",
+      "prompt": "Inspect Canvas run presenter, run overlay, node detail, run snapshot types, and current dirty diffs. Identify which dirty changes are usable for root-heavy layout, edge gate labeling, and completion contract display.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas",
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/useLiveRunSnapshot.ts"
+      ],
+      "write_scope": []
+    },
+    {
+      "label": "repair_run_layout_and_gate_projection",
+      "agent": "auto/build",
+      "depends_on": ["discover_canvas_run_presenter"],
+      "prompt": "Finalize run graph presentation. Keep compact component layout for root-heavy graphs; keep edge gate projection fields; keep completion contract pass-through. Ensure independent/root-heavy workflows do not render as a hidden vertical column.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasRunPresenter.ts",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildPresenter.ts"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasRunPresenter.ts",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildPresenter.ts"
+      ],
+      "verify_refs": [
+        "canvas-run-root-heavy-layout",
+        "canvas-run-edge-gate-labels"
+      ]
+    },
+    {
+      "label": "repair_run_contract_surfaces",
+      "agent": "auto/build",
+      "depends_on": ["repair_run_layout_and_gate_projection"],
+      "prompt": "Finalize completion gate display in run overlay and node detail. Show task type, result kind, submit tool names, outcome, scope, and prompt details when present. Keep text responsive and non-overlapping.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasRunOverlay.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasNodeDetail.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/style/components.css"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasRunOverlay.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasNodeDetail.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/style/components.css"
+      ],
+      "verify_refs": [
+        "canvas-run-completion-gate-drawer",
+        "canvas-run-completion-gate-overlay"
+      ]
+    },
+    {
+      "label": "test_canvas_run_graph_gates",
+      "agent": "auto/test",
+      "depends_on": ["repair_run_contract_surfaces"],
+      "prompt": "Add and run tests proving root-heavy run layout, edge gate labels/config, and completion contract display. Include the 10-node/1-edge root-heavy case.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasRunPresenter.test.ts",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasRunOverlay.test.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasNodeDetail.test.tsx"
+      ],
+      "verify_refs": [
+        "npm-test-canvas-run-presenter",
+        "npm-test-canvas-run-overlay",
+        "npm-test-canvas-node-detail"
+      ]
+    }
+  ]
+}

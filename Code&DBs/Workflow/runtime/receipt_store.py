@@ -911,6 +911,14 @@ def proof_metrics(*, since_hours: int = 0, conn=None) -> dict[str, Any]:
     verifier_healer_row = snapshot.get("recovery_authority") or {}
 
     receipts_total = int(row.get("receipts_total") or 0)
+    materialize_artifacts_ready = bool(
+        compile_row.get("materialize_artifacts_ready")
+        or compile_row.get("compile_artifacts_ready")
+    )
+    materialize_index_snapshots_ready = bool(
+        compile_row.get("materialize_index_snapshots_ready")
+        or compile_row.get("compile_index_snapshots_ready")
+    )
 
     def _ratio(value: Any) -> float:
         if receipts_total <= 0:
@@ -963,22 +971,21 @@ def proof_metrics(*, since_hours: int = 0, conn=None) -> dict[str, Any]:
             "related_edges": int(edges.get("related_edges") or 0),
         },
         "compile_authority": {
-            "compile_artifacts_ready": bool(compile_row.get("compile_artifacts_ready")),
+            "materialize_artifacts_ready": materialize_artifacts_ready,
+            "compile_artifacts_ready": materialize_artifacts_ready,
             "capability_catalog_ready": bool(compile_row.get("capability_catalog_ready")),
             "verify_refs_ready": bool(compile_row.get("verify_refs_ready")),
             "verification_registry_ready": bool(compile_row.get("verification_registry_ready")),
             "compile_spine_ready": all(
-                bool(compile_row.get(key))
-                for key in (
-                    "compile_artifacts_ready",
-                    "capability_catalog_ready",
-                    "verify_refs_ready",
-                    "verification_registry_ready",
+                (
+                    materialize_artifacts_ready,
+                    bool(compile_row.get("capability_catalog_ready")),
+                    bool(compile_row.get("verify_refs_ready")),
+                    bool(compile_row.get("verification_registry_ready")),
                 )
             ),
-            "compile_index_snapshots_ready": bool(
-                compile_row.get("compile_index_snapshots_ready")
-            ),
+            "materialize_index_snapshots_ready": materialize_index_snapshots_ready,
+            "compile_index_snapshots_ready": materialize_index_snapshots_ready,
             "execution_packets_ready": bool(compile_row.get("execution_packets_ready")),
             "repo_snapshots_ready": bool(compile_row.get("repo_snapshots_ready")),
             "repo_snapshots": int(repo_snapshot_row.get("repo_snapshots") or 0),

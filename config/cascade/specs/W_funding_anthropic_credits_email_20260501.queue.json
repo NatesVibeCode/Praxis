@@ -1,0 +1,49 @@
+{
+  "name": "Funding — Anthropic Startup Credits Outreach Email (Canary)",
+  "phase": "W",
+  "queue_id": "funding_anthropic_credits_email_20260501",
+  "outcome_goal": "artifacts/funding/anthropic_credits_email_20260501/anthropic_credits_email.md exists with: (a) ≤200-word email body ready for Nate to send, (b) explicit OPERATOR INPUT placeholders for personal/usage figures, (c) the right send-to address or contact path documented from Anthropic's startup program page, (d) QA pass confirming under 200 words and all placeholders called out.",
+  "anti_requirements": [
+    "Do NOT exceed 200 words in the email body.",
+    "Do NOT invent Nate's monthly LLM spend or other private numbers — leave [OPERATOR INPUT] placeholders.",
+    "Do NOT promise specific revenue, customer counts, or ship dates that are not in the operator-context paragraph.",
+    "Do NOT send the email — draft only. Sending is an explicit-permission action and stays with the operator."
+  ],
+  "jobs": [
+    {
+      "label": "gather_context",
+      "task_type": "research",
+      "description": "Find Anthropic's current startup credits program contact path",
+      "outcome_goal": "artifacts/funding/anthropic_credits_email_20260501/00_context.md captures: program URL, current credit amount if public, intended send-to address or application form, and any specifically-required framing.",
+      "prompt": "Find Anthropic's current startup credits / Anthropic for Startups program. Document:\n- **Program page URL**\n- **Current credit amount** (if public — many programs do not publish until you apply)\n- **Application path** (web form, email, partner accelerator) — be precise about which\n- **Send-to address** if email is the path, or **application form URL** if it's a form\n- **Required framing or fields** the application emphasizes (e.g. they want to know about your use case, your stack, your funding stage)\n- **Source URLs**\n\nWrite `artifacts/funding/anthropic_credits_email_20260501/00_context.md`.\n\nIf application is form-only and there is no email path, say so explicitly — the next job should produce form-field copy instead of an email body.",
+      "read": [],
+      "write": ["artifacts/funding/anthropic_credits_email_20260501/00_context.md"],
+      "verify_command": "test -s artifacts/funding/anthropic_credits_email_20260501/00_context.md"
+    },
+    {
+      "label": "draft_email",
+      "task_type": "creative",
+      "depends_on": ["gather_context"],
+      "description": "Draft the ≤200-word email or equivalent form-field copy",
+      "outcome_goal": "artifacts/funding/anthropic_credits_email_20260501/01_draft.md contains the email body (or form-field copy) ready for Nate's review.",
+      "prompt": "Read `artifacts/funding/anthropic_credits_email_20260501/00_context.md`. If email is the path, write an email body. If form is the path, write the equivalent prose to paste into the application's main narrative field.\n\nWrite `artifacts/funding/anthropic_credits_email_20260501/01_draft.md` with:\n\n**Subject** (if email): `Praxis startup credits inquiry — solo founder building on Claude as core dependency`\n\n**Body** (≤200 words):\n- Open: who Nate is (solo founder, Bellingham WA), what Praxis is (LLM-first autonomous engineering control plane, runs entirely on Claude as the core model dependency)\n- Middle: traction signals (currently dogfooding in production for own engineering work; external-user launch target 2026-07-19), what credits would specifically unlock (compute headroom for the launch ramp without forcing premature monetization)\n- Close: ask (open to whatever fits the program), single concrete next step (whether they want a call, a writeup, etc.)\n- Sign-off with `[OPERATOR INPUT: name + contact]`\n\n**Placeholders to insert** (each as `[OPERATOR INPUT: <description>]`):\n- Current monthly LLM spend (rough)\n- Whether Praxis is incorporated (LLC / Inc / not yet)\n- Any prior Anthropic API account / customer ID\n- Whether Nate has investor relationships or is bootstrapped\n\nUnder the email body, list every placeholder again as a checklist with what answer Nate needs to fill in.\n\nKeep it under 200 words for the body itself. Punchy, specific, no marketing-ese.",
+      "read": ["artifacts/funding/anthropic_credits_email_20260501/00_context.md"],
+      "write": ["artifacts/funding/anthropic_credits_email_20260501/01_draft.md"],
+      "verify_command": "test -s artifacts/funding/anthropic_credits_email_20260501/01_draft.md"
+    },
+    {
+      "label": "qa_pass",
+      "task_type": "analysis",
+      "depends_on": ["draft_email"],
+      "description": "QA the draft for word count, required elements, and placeholder coverage",
+      "outcome_goal": "artifacts/funding/anthropic_credits_email_20260501/anthropic_credits_email.md is the operator-facing deliverable: cleaned email + placeholder checklist + send instructions, with QA notes inline if any rule was bent.",
+      "prompt": "Read `artifacts/funding/anthropic_credits_email_20260501/01_draft.md` and `artifacts/funding/anthropic_credits_email_20260501/00_context.md`.\n\nCheck:\n- Email body is ≤200 words (count words in the body section only, not subject or placeholders or sign-off)\n- All four required placeholders are present: monthly LLM spend, incorporation status, prior API account, funding/investor status\n- The ask is open-ended (not a specific dollar figure)\n- The framing matches what the program page asks for (per `00_context.md`)\n- No invented private facts (revenue, customer count, etc.)\n\nIf any check fails, tighten the draft yourself.\n\nWrite the final operator-facing deliverable at `artifacts/funding/anthropic_credits_email_20260501/anthropic_credits_email.md`:\n\n1. **Send-to** (address or form URL from `00_context.md`)\n2. **Subject**\n3. **Body** (final, ≤200 words)\n4. **Placeholder checklist** (each placeholder with a note on what info Nate fills in)\n5. **QA notes** (inline notes on anything tightened from the draft, or any rule that needed bending and why)\n6. **Send instructions** (one short paragraph: what Nate does after filling placeholders — e.g. 'paste into Anthropic for Startups application form at <URL>' or 'send from your personal email to <address>')",
+      "read": [
+        "artifacts/funding/anthropic_credits_email_20260501/00_context.md",
+        "artifacts/funding/anthropic_credits_email_20260501/01_draft.md"
+      ],
+      "write": ["artifacts/funding/anthropic_credits_email_20260501/anthropic_credits_email.md"],
+      "verify_command": "test -s artifacts/funding/anthropic_credits_email_20260501/anthropic_credits_email.md && grep -q 'Send-to' artifacts/funding/anthropic_credits_email_20260501/anthropic_credits_email.md"
+    }
+  ]
+}

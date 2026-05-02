@@ -19,7 +19,7 @@ data pills, gates, receipts, and recovery paths **at the moment of action**,
 so the right choice is the easiest choice.
 
 Not "a better workflow builder." Not only "trust compiler for messy work."
-The LLM is the operator; humans supervise via Moon / chat / roadmap / bugs
+The LLM is the operator; humans supervise via Canvas / chat / roadmap / bugs
 surfaces that are lenses over the same DB-backed graph.
 
 Standing-order row: `product_architecture / llm-first-infrastructure-trust-compiler-engine`.
@@ -30,7 +30,7 @@ Praxis is an **agent substrate**, not a workflow builder. One graph lives in
 Praxis.db (nodes, edges, gates, typed by data-dictionary `consumes` / `produces`).
 Every surface is a lens on that same graph:
 
-- **Moon canvas** — live render of graph rows
+- **Canvas** — live render of graph rows
 - **Executor** — interpreter walking the rows
 - **CLI / MCP / HTTP** — alternate lenses on the same rows
 - **NL authoring** — grammar that mutates rows
@@ -39,14 +39,14 @@ Every surface is a lens on that same graph:
 
 Composition is **prescriptive**: at any state, the graph narrows to the 3–5
 tools whose `consumes` type matches what the accumulator has. LLM planning
-collapses from 100-tool search to a graph walk. Moon steering shows only
+collapses from 100-tool search to a graph walk. Canvas steering shows only
 legal next steps.
 
 The user (Nate) does not code. **Agents build and mutate the graph; the user
 steers** — approves gates, edits a misbehaving node — they do not assemble
-nodes from a palette. Moon is the control room, not an IDE.
+nodes from a palette. Canvas is the control room, not an IDE.
 
-When "edit in Moon" and "next run's behavior" are the same DB write, the shim
+When "edit in Canvas" and "next run's behavior" are the same DB write, the shim
 between UI and runtime is dead. Any feature that reintroduces a translation
 layer between a surface and the graph is a regression.
 
@@ -69,7 +69,7 @@ Master plan filed as `decision.2026-04-24.public-beta-ramp-master-plan`
   `plan.launched` event; `bind_data_pills` wired into compile path.
   Roadmap item `phase.1.1.launch.compiler` closed out (lifecycle=completed).
 - **1.2** Built-not-wired sweep ✅ type-flow validation wired into
-  `_handle_workflows_post` (Moon commit backend) and `compose_plan_from_intent`;
+  `_handle_workflows_post` (Canvas commit backend) and `compose_plan_from_intent`;
   `plan.launched` event contract registered via migration 224.
 - **1.3** Data dictionary as universal clamp ✅ 14 bug-lifecycle type slugs
   registered as `data_dictionary_objects` rows (migration 225);
@@ -111,10 +111,10 @@ rows with proper `operation_ref` + `receipt_id`. **Remaining:** the
 underlying `runtime.spec_compiler.launch_plan` and
 `runtime.intent_composition.compose_plan_from_intent` still call
 `emit_system_event` as a sidecar — dual-write during transition. Removing
-the sidecar requires migrating any `system_events` consumers (Moon
+the sidecar requires migrating any `system_events` consumers (Canvas
 observability, replay tooling) to read from `authority_events` first.
 
-**Parallel work (other model):** Phase 2 Moon Composer — query-side
+**Parallel work (other model):** Phase 2 Canvas Composer — query-side
 projections (`legal_modules_for(pills)`, `surface_for(workflow_run)`),
 modules subscribing to `graph.mutated` instead of polling REST.
 Supporting policy filed: `platform_architecture / legal-equals-computable-to-non-gap-output`.

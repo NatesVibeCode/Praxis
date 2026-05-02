@@ -39,6 +39,123 @@ def _tool(
 
 
 CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
+    "praxis_agent_forge": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Preview and validate the CQRS path before registering or changing an agent principal.",
+        when_not_to_use="Do not use it to mutate agent state; call praxis_agent_register after forge validation.",
+        risks={"default": "read"},
+        examples=[
+            _example("Preview one agent principal", {"agent_principal_ref": "agent.exec.example"}),
+        ],
+    ),
+    "praxis_agent_register": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Register or update one durable agent principal after praxis_agent_forge validation.",
+        when_not_to_use="Do not use it for wake execution, delegation, or status-only reads.",
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Register one agent principal",
+                {"agent_principal_ref": "agent.exec.example", "title": "Example Agent"},
+            ),
+        ],
+    ),
+    "praxis_agent_list": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="List durable agent principals and their current lifecycle status.",
+        when_not_to_use="Do not use it to inspect one agent in depth; use praxis_agent_describe.",
+        risks={"default": "read"},
+        examples=[_example("List active agents", {"status": "active"})],
+    ),
+    "praxis_agent_describe": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Inspect one durable agent principal, including trust and scope metadata.",
+        when_not_to_use="Do not use it for mutation; use register/status/wake tools for writes.",
+        risks={"default": "read"},
+        examples=[
+            _example("Describe one agent", {"agent_principal_ref": "agent.exec.example"}),
+        ],
+    ),
+    "praxis_agent_status": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Pause, activate, or kill one durable agent principal.",
+        when_not_to_use="Do not use it for ordinary run/job status; use praxis_workflow.",
+        risks={"default": "write"},
+        examples=[
+            _example("Pause one agent", {"agent_principal_ref": "agent.exec.example", "status": "paused"}),
+        ],
+    ),
+    "praxis_agent_wake": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Record or request one agent wake through the agent-principal authority.",
+        when_not_to_use="Do not use it for direct workflow launches; use praxis_workflow or praxis_solution.",
+        risks={"default": "write"},
+        examples=[
+            _example("Wake one agent", {"agent_principal_ref": "agent.exec.example", "trigger_kind": "manual"}),
+        ],
+    ),
+    "praxis_agent_wake_list": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="List recent agent wake records for inspection and debugging.",
+        when_not_to_use="Do not use it to create wakes; use praxis_agent_wake.",
+        risks={"default": "read"},
+        examples=[
+            _example("List recent wakes", {"agent_principal_ref": "agent.exec.example", "limit": 10}),
+        ],
+    ),
+    "praxis_agent_delegate": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Create a governed delegation from one agent principal to a child task.",
+        when_not_to_use="Do not use it for human operator workflow launches.",
+        risks={"default": "write"},
+        examples=[
+            _example("Delegate one task", {"parent_agent_ref": "agent.exec.parent", "child_task": "review"}),
+        ],
+    ),
+    "praxis_tool_gap_file": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="File a missing-tool gap as roadmap fuel before improvising around the missing capability.",
+        when_not_to_use="Do not use it for ordinary bug reports; use praxis_bugs.",
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "File one tool gap",
+                {
+                    "reporter_agent_ref": "agent.exec.example",
+                    "missing_capability": "calendar read",
+                    "attempted_task": "schedule prep",
+                    "blocked_action": "inspect availability",
+                },
+            ),
+        ],
+    ),
+    "praxis_tool_gap_list": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="List filed tool gaps and their triage state.",
+        when_not_to_use="Do not use it to file a new gap; use praxis_tool_gap_file.",
+        risks={"default": "read"},
+        examples=[_example("List open tool gaps", {"status": "open", "limit": 10})],
+    ),
     "praxis_access_control": _tool(
         surface="operations",
         tier="advanced",
@@ -67,6 +184,41 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "provider_slug": "openai",
                     "transport_type": "CLI",
                     "decision_ref": "architecture-policy::routing::disable-openai-cli",
+                },
+            ),
+        ],
+    ),
+    "praxis_paid_model_access": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Preview, grant, revoke, bind, or inspect exact one-run leases for paid model access.",
+        when_not_to_use="Do not use it for broad provider enables or unpaid route changes; use praxis_access_control for hard-off policy.",
+        risks={
+            "default": "read",
+            "actions": {
+                "bind_run": "write",
+                "consume": "write",
+                "grant_once": "write",
+                "preview": "read",
+                "revoke": "write",
+                "soft_off": "write",
+                "soft_on": "write",
+                "status": "read",
+            },
+        },
+        examples=[
+            _example("Preview paid access state", {"action": "preview", "runtime_profile_ref": "praxis"}),
+            _example(
+                "Grant one exact paid route",
+                {
+                    "action": "grant_once",
+                    "runtime_profile_ref": "praxis",
+                    "job_type": "build",
+                    "transport_type": "API",
+                    "adapter_type": "llm_task",
+                    "provider_slug": "fireworks",
+                    "model_slug": "accounts/fireworks/models/kimi-k2p6",
                 },
             ),
         ],
@@ -334,7 +486,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example(
                 "Set compile request shape",
                 {
-                    "task_type": "compile",
+                    "task_type": "materialize",
                     "provider_slug": "openai",
                     "model_slug": "gpt-5.4",
                     "temperature": 0.2,
@@ -345,7 +497,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example(
                 "Attach request contract",
                 {
-                    "task_type": "compile",
+                    "task_type": "materialize",
                     "provider_slug": "openai",
                     "model_slug": "gpt-5.4",
                     "request_contract_ref": "llm_request_contract.openai.gpt-5-4.api.compile",
@@ -967,14 +1119,14 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Refine a manifest", {"manifest_id": "manifest_abc123", "feedback": "Add weekly trends and remove the status grid"}),
         ],
     ),
-    "praxis_moon": _tool(
+    "praxis_canvas": _tool(
         surface="workflow",
         tier="advanced",
-        recommended_alias="moon",
+        recommended_alias="canvas",
         when_to_use=(
             "Read, compose, suggest, mutate, or launch Workflow graphs through "
             "the same CQRS-backed build authority used by the in-app Workflow surface. "
-            "The praxis_moon tool name and moon alias remain compatibility entrypoints."
+            "The praxis_canvas tool name and canvas alias remain compatibility entrypoints."
         ),
         when_not_to_use=(
             "Do not use it for unrelated roadmap, bug, provider-routing, or direct "
@@ -1991,6 +2143,280 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_verifier_catalog": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="verifier-catalog",
+        when_to_use=(
+            "List registered verifier authority refs before picking one for "
+            "a bug-resolve, code-change preflight, or workflow-packet review "
+            "gate. Returns each verifier's verifier_ref, kind (platform / "
+            "receipt / run / path), enabled state, and any bound "
+            "suggested-healer refs."
+        ),
+        when_not_to_use=(
+            "Do not use it to actually run a verifier — that path is still "
+            "internal to verifier_authority (and reachable via "
+            "praxis_bugs action=resolve). This is a read-only catalog query."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "List enabled verifiers",
+                {"enabled": True, "limit": 50},
+            ),
+            _example(
+                "Include disabled rows",
+                {"enabled": False, "limit": 100},
+            ),
+        ],
+    ),
+    "praxis_healer_catalog": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="healer-catalog",
+        when_to_use=(
+            "List registered healer authority refs before picking one for "
+            "praxis_healer_run, or to inspect what repairs are available "
+            "after a verifier fails. Returns each healer's auto_mode, "
+            "safety_mode, action_ref, and the verifier_refs it's bound to."
+        ),
+        when_not_to_use=(
+            "Do not use it to actually run a healer — use praxis_healer_run "
+            "for that. This is a read-only catalog query."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example("List enabled healers", {"enabled": True, "limit": 50}),
+            _example("Include disabled rows", {"enabled": False}),
+        ],
+    ),
+    "praxis_healer_runs_list": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="healer-runs",
+        when_to_use=(
+            "List past healing_runs newest-first to inspect repair history. "
+            "Filter by healer_ref / verifier_ref (which verifier triggered "
+            "the heal) / target / status / trailing-window. Use to confirm "
+            "a heal succeeded, audit failure rates, or check whether a "
+            "specific target has been auto-repaired recently."
+        ),
+        when_not_to_use=(
+            "Do not use it to RUN a healer — use praxis_healer_run."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Recent runs of one healer",
+                {"healer_ref": "healer.platform.schema_bootstrap", "limit": 20},
+            ),
+            _example(
+                "Runs triggered by one verifier",
+                {"verifier_ref": "verifier.platform.receipt_provenance"},
+            ),
+            _example(
+                "Failed heals in the last day",
+                {"status": "failed", "since_iso": "2026-04-30T00:00:00Z"},
+            ),
+        ],
+    ),
+    "praxis_healer_run": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="healer-run",
+        when_to_use=(
+            "Manually trigger a healer to repair a verifier failure. "
+            "verifier_ref is required; healer_ref is optional (auto-resolves "
+            "from verifier bindings when exactly one is bound). The runtime "
+            "reruns the bound verifier as post-verification — succeeded "
+            "status means BOTH healer action AND post-verification passed."
+        ),
+        when_not_to_use=(
+            "Do not use it for fuzzy LLM-driven repair — healers are "
+            "deterministic. The internal scheduler "
+            "(run_due_platform_verifications) already runs canonical heals "
+            "automatically; use this surface for manual repair gates."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Auto-resolve healer for one verifier",
+                {"verifier_ref": "verifier.platform.schema_authority"},
+            ),
+            _example(
+                "Explicit healer + verifier pair",
+                {
+                    "healer_ref": "healer.platform.schema_bootstrap",
+                    "verifier_ref": "verifier.platform.schema_authority",
+                },
+            ),
+            _example(
+                "Dry-run (no healing_runs row)",
+                {"verifier_ref": "verifier.platform.receipt_provenance", "record_run": False},
+            ),
+        ],
+    ),
+    "praxis_verifier_register": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="verifier-register",
+        when_to_use=(
+            "Register (or update) a verifier authority ref without authoring "
+            "a SQL migration. Use when adding a new verifier — replaces the "
+            "old hand-edited verifier_builtins.py + migration pattern. "
+            "Optional bind_healer_refs creates verifier_healer_bindings in "
+            "the same call."
+        ),
+        when_not_to_use=(
+            "Do not use this to RUN a verifier — that's praxis_verifier_run. "
+            "Do not use it to register healers — that's praxis_healer_register."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Register a builtin verifier",
+                {
+                    "verifier_ref": "verifier.platform.example_check",
+                    "display_name": "Example platform check",
+                    "verifier_kind": "builtin",
+                    "builtin_ref": "verify_schema_authority",
+                    "decision_ref": "decision.example.check.20260501",
+                },
+            ),
+            _example(
+                "Register a verification_ref-backed verifier with a healer binding",
+                {
+                    "verifier_ref": "verifier.platform.foo",
+                    "display_name": "Foo verifier",
+                    "verifier_kind": "verification_ref",
+                    "verification_ref": "verification.foo.20260501",
+                    "decision_ref": "decision.foo.20260501",
+                    "bind_healer_refs": ["healer.platform.foo_repair"],
+                },
+            ),
+        ],
+    ),
+    "praxis_healer_register": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="healer-register",
+        when_to_use=(
+            "Register (or update) a healer authority ref without authoring a "
+            "SQL migration. Use when adding a new healer that will be bound "
+            "to one or more verifiers. action_ref must name a built-in "
+            "handler from runtime.verifier_builtins.run_builtin_healer."
+        ),
+        when_not_to_use=(
+            "Do not use this to RUN a healer — that's praxis_healer_run. "
+            "Do not use it to register verifiers — that's praxis_verifier_register."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Register a guarded manual healer",
+                {
+                    "healer_ref": "healer.platform.example_repair",
+                    "display_name": "Example platform repair",
+                    "action_ref": "heal_schema_bootstrap",
+                    "auto_mode": "manual",
+                    "safety_mode": "guarded",
+                    "decision_ref": "decision.example.repair.20260501",
+                },
+            ),
+            _example(
+                "Register an automatic guarded healer",
+                {
+                    "healer_ref": "healer.platform.auto_repair",
+                    "display_name": "Auto repair",
+                    "action_ref": "heal_proof_backfill",
+                    "auto_mode": "automatic",
+                    "safety_mode": "guarded",
+                    "decision_ref": "decision.auto_repair.20260501",
+                },
+            ),
+        ],
+    ),
+    "praxis_verifier_run": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="verifier-run",
+        when_to_use=(
+            "Run a registered verifier against a target as a deterministic "
+            "review gate — receipt-backed, replayable, links to a "
+            "verification_runs row. Use this from a workflow packet "
+            "(integration_id=praxis_verifier_run, integration_action=run) "
+            "to express a verify step without going through bug-resolve, "
+            "or interactively to confirm a verifier passes against a "
+            "specific target."
+        ),
+        when_not_to_use=(
+            "Do not use it for fuzzy LLM-driven review — verifiers are "
+            "deterministic. For control-plane scheduler runs that should "
+            "auto-file bugs on failure, set promote_bug=True; otherwise "
+            "leave the default (False)."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Compile-check a Python file",
+                {
+                    "verifier_ref": "verifier.job.python.py_compile",
+                    "target_kind": "path",
+                    "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/runtime/example.py",
+                    "inputs": {"path": "/Users/nate/Praxis/Code&DBs/Workflow/runtime/example.py"},
+                },
+            ),
+            _example(
+                "Run pytest on one test file",
+                {
+                    "verifier_ref": "verifier.job.python.pytest_file",
+                    "target_kind": "path",
+                    "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_smoke.py",
+                    "inputs": {"path": "/Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_smoke.py"},
+                },
+            ),
+            _example(
+                "Platform schema authority check",
+                {
+                    "verifier_ref": "verifier.platform.schema_authority",
+                    "target_kind": "platform",
+                    "target_ref": "",
+                },
+            ),
+        ],
+    ),
+    "praxis_verifier_runs_list": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="verifier-runs",
+        when_to_use=(
+            "List past verification_runs newest-first to confirm a "
+            "verifier actually ran on a target. Filter by verifier_ref, "
+            "target_kind, target_ref, status, or trailing window. Use "
+            "before resolving a bug to FIXED to verify the evidence chain, "
+            "or to inspect failure rates of a specific verifier."
+        ),
+        when_not_to_use=(
+            "Do not use it to RUN a verifier — that path is still internal "
+            "(via praxis_bugs action=resolve). This is read-only history."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Recent runs of one verifier",
+                {"verifier_ref": "verifier.job.python.pytest_file", "limit": 20},
+            ),
+            _example(
+                "Failed runs in the last day",
+                {"status": "failed", "since_iso": "2026-04-30T00:00:00Z"},
+            ),
+            _example(
+                "Runs against one path-kind target",
+                {"target_kind": "path", "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_smoke.py"},
+            ),
+        ],
+    ),
     "praxis_virtual_lab_state_read": _tool(
         surface="operations",
         tier="advanced",
@@ -2853,25 +3279,27 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Poll build-state events", {"channel": "build_state", "limit": 50}),
         ],
     ),
-    "praxis_wave": _tool(
+    "praxis_solution": _tool(
         surface="workflow",
         tier="advanced",
-        recommended_alias=None,
-        when_to_use="Observe or coordinate wave-based execution programs.",
-        when_not_to_use="Do not use it for single workflow runs with no wave orchestration.",
+        recommended_alias="solution",
+        when_to_use="Submit, list, or inspect durable multi-workflow Solutions.",
+        when_not_to_use="Do not use it for one workflow run; use praxis_workflow.",
         risks={
             "default": "read",
             "actions": {
+                "list": "read",
                 "observe": "read",
-                "next": "read",
+                "show": "read",
+                "status": "read",
                 "start": "launch",
-                "record": "write",
+                "submit": "launch",
             },
         },
         examples=[
-            _example("List runnable jobs on one wave", {"action": "next", "wave_id": "wave_1"}),
-            _example("Observe current wave state", {"action": "observe"}),
-            _example("Record results on one wave", {"action": "record", "wave_id": "wave_1", "jobs": "build:pass,test:fail"}),
+            _example("List recent Solutions", {"action": "list", "limit": 10}),
+            _example("Inspect one Solution", {"action": "status", "solution_id": "workflow_chain_123"}),
+            _example("Submit a Solution", {"action": "submit", "coordination_path": "artifacts/workflow/solution.json"}),
         ],
     ),
     "praxis_workflow": _tool(
@@ -3290,7 +3718,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                         "name": "q2_roadmap_landing",
                         "why": "Land the two active roadmap items this phase.",
                         "from_roadmap_items": [
-                            "roadmap_item.make.moon.ui.emit.runnable.graph.authority.for.gated.9.step.workflows",
+                            "roadmap_item.make.canvas.ui.emit.runnable.graph.authority.for.gated.9.step.workflows",
                         ],
                     }
                 },
@@ -3303,7 +3731,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                         "why": "Explore open operator ideas as bounded build packets.",
                         "from_ideas": [
                             "operator_idea.ingest_shopify_orders",
-                            "operator_idea.moon_inbox_digest",
+                            "operator_idea.canvas_inbox_digest",
                         ],
                     }
                 },

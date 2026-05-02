@@ -56,6 +56,7 @@ __all__ = [
     "resolve_api_key_env_vars",
     "resolve_mcp_args_template",
     "resolve_lane_policy",
+    "resolve_lane_policy_record",
     "resolve_adapter_contract",
     "supports_adapter",
     "supports_model_adapter",
@@ -849,6 +850,18 @@ def resolve_mcp_args_template(provider_slug: str) -> list[str]:
 def resolve_lane_policy(provider_slug: str, adapter_type: str) -> dict[str, Any] | None:
     _load_from_db()
     return provider_transport.resolve_lane_policy(
+        provider_slug,
+        adapter_type,
+        profiles=_REGISTRY,
+    )
+
+
+def resolve_lane_policy_record(
+    provider_slug: str,
+    adapter_type: str,
+) -> dict[str, Any] | None:
+    _load_from_db()
+    return provider_transport.resolve_lane_policy_record(
         provider_slug,
         adapter_type,
         profiles=_REGISTRY,

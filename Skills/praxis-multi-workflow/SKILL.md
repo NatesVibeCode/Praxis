@@ -1,6 +1,6 @@
 ---
 name: praxis-multi-workflow
-description: "Praxis batch workflow coordination skill. Use when multiple workflow runs need shared tracking, explicit sequencing, or wave-based execution."
+description: "Praxis batch workflow coordination skill. Use when multiple workflow runs need shared tracking, explicit sequencing, or Solution-based execution."
 ---
 
 # Praxis Multi-Workflow
@@ -23,7 +23,7 @@ Coordinate many runs without inventing a second orchestration system.
 
 - use one spec when the jobs belong to one lifecycle
 - use many specs when retries and cancellation should stay independent
-- use waves only when later work must wait on earlier outcomes
+- use a Solution only when later workflow phases must wait on earlier outcomes
 
 ## Surfaces
 
@@ -35,29 +35,31 @@ For templated iteration across a list of items, use the loop surface:
 praxis workflow loop --items "a,b,c" --prompt "Analyze: {{item}}" [--tier mid] [--max-parallel 4]
 ```
 
-Wave control lives on the catalog-backed wave tool:
+Solution control lives on the catalog-backed Solution tool:
 
 ```text
-praxis workflow tools describe praxis_wave
-praxis workflow tools call praxis_wave --input-json '{"action":"observe"}'
+praxis workflow tools describe praxis_solution
+praxis workflow tools call praxis_solution --input-json '{"action":"list"}'
 ```
 
-Verified `praxis_wave` actions:
+Verified `praxis_solution` actions:
 
-- `observe`
 - `start`
-- `next`
-- `record`
+- `submit`
+- `status`
+- `show`
+- `list`
+- `observe`
 
 Example:
 
 ```text
-praxis workflow tools call praxis_wave --input-json '{"action":"record","wave_id":"<wave_id>","jobs":"job_a:pass,job_b:fail"}' --yes
+praxis workflow tools call praxis_solution --input-json '{"action":"status","solution_id":"<solution_id>"}'
 ```
 
 ## Rules
 
-- do not use wave state when plain parallel launch is enough
+- do not create a Solution when plain parallel launch is enough
 - keep an explicit map of `spec -> run_id`
 - run `praxis workflow firecheck --json` before launching a batch
 - prove one representative job can fire before expanding to the fleet
@@ -71,6 +73,6 @@ Return:
 
 1. `Batch Shape`
 2. `Run Set`
-3. `Wave Plan`
+3. `Solution Plan`
 4. `Tracking Surface`
 5. `Failure Containment`

@@ -24,6 +24,10 @@ from policy.domain import AdmissionDecisionRecord
 from registry.domain import RegistryResolver
 from runtime.admission_repair import repair_or_seed_submission_evidence
 from runtime.execution import RuntimeOrchestrator
+from runtime.execution_packet_authority import (
+    PacketInspectionUnavailable,
+    resolve_packet_inspection,
+)
 from runtime.instance import (
     NativeWorkflowInstance,
     resolve_native_instance,
@@ -174,15 +178,6 @@ def _missing_packet_inspection_column_error(exc: Exception) -> bool:
     return "does not exist" in message or "undefined column" in message
 
 
-def _packet_inspection_from_row_value(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    if row is None:
-        return None
-    inspection = row.get("packet_inspection")
-    if not isinstance(inspection, Mapping):
-        return None
-    return dict(inspection)
-
-
 async def _fetch_run_row(
     conn: _Connection,
     *,
@@ -262,7 +257,7 @@ def _authority_binding_summary(raw: object) -> dict[str, Any] | None:
     """Compact projection of workflow_jobs.authority_binding for list views.
 
     Returns a small {bound, canonical_count, predecessor_count, blocked_compat_count,
-    redirected_count} dict for compact-idle Moon rendering. Full binding payload
+    redirected_count} dict for compact-idle Canvas rendering. Full binding payload
     is loadable via runtime.workflow.job_runtime_context.load_workflow_job_authority_binding
     when a caller (detail panel, agent context preview) needs the obligation
     summaries themselves.
@@ -780,54 +775,23 @@ class NativeWorkflowFrontdoor:
         finally:
             await conn.close()
 
-        packet_inspection = _packet_inspection_from_row_value(row)
-        packet_inspection_source = "missing"
-        if packet_inspection is not None:
-            packet_inspection_source = "materialized"
-        if packet_row is not None:
-            packets = packet_row.get("packets")
-            if isinstance(packets, str):
-                try:
-                    packets = json.loads(packets)
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    packets = []
-            if (
-                packet_inspection is None
-                and isinstance(packets, Sequence)
-                and not isinstance(packets, (str, bytes, bytearray))
-                and packets
-            ):
-                try:
-                    from runtime.execution_packet_authority import inspect_execution_packets
-                except Exception as exc:
-                    raise NativeFrontdoorError(
-                        "frontdoor.packet_inspection_unavailable",
-                        "workflow run manifest inspection helpers are unavailable",
-                        details={
-                            "stage": "import",
-                            "run_id": run_id,
-                            "error_type": type(exc).__name__,
-                            "error_message": str(exc),
-                        },
-                    ) from exc
-                try:
-                    packet_inspection = inspect_execution_packets(
-                        packets,
-                        run_row=dict(row),
-                    )
-                    if packet_inspection is not None:
-                        packet_inspection_source = "derived"
-                except Exception as exc:
-                    raise NativeFrontdoorError(
-                        "frontdoor.packet_inspection_unavailable",
-                        "workflow run manifest inspection derivation failed",
-                        details={
-                            "stage": "derive",
-                            "run_id": run_id,
-                            "error_type": type(exc).__name__,
-                            "error_message": str(exc),
-                        },
-                    ) from exc
+        try:
+            packet_inspection, packet_inspection_source = resolve_packet_inspection(
+                run_row=dict(row),
+                packets=packet_row.get("packets") if packet_row is not None else [],
+            )
+        except PacketInspectionUnavailable as exc:
+            details = {
+                "stage": exc.stage,
+                "run_id": run_id,
+                "error_type": type(exc.error).__name__ if exc.error is not None else type(exc).__name__,
+                "error_message": str(exc.error) if exc.error is not None else str(exc),
+            }
+            raise NativeFrontdoorError(
+                "frontdoor.packet_inspection_unavailable",
+                str(exc),
+                details=details,
+            ) from exc
 
         return (
             dict(row),

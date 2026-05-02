@@ -16,8 +16,8 @@ from adapters.keychain import resolve_secret
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 BLOCKED_PROVIDER_SLUGS: tuple[str, ...] = (
-    "moonshot",
-    "moonshotai",
+    "canvasshot",
+    "canvasshotai",
     "kimi",
     "deepseek",
     "deepseek-ai",

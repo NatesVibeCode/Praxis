@@ -79,6 +79,20 @@ _STAGE_VERB_HINTS: dict[str, tuple[str, float, tuple[str, ...]]] = {
     "rollback": ("fix", 0.8, ("debug",)),
     "revert": ("fix", 0.8, ("debug",)),
     "undo": ("fix", 0.8, ("debug",)),
+    # Deterministic data-plane verbs. Stage stays "build" (the work still
+    # produces an execution_receipt) but capability_hints flag the packet
+    # as routable to integration/praxis_data/<op> instead of an LLM agent.
+    # The fork-out author reads the hints and emits the right integration
+    # fields. See architecture-policy::data-plane::deterministic-over-llm.
+    "dedupe": ("build", 0.9, ("data_op", "dedupe")),
+    "deduplicate": ("build", 0.9, ("data_op", "dedupe")),
+    "normalize": ("build", 0.85, ("data_op", "normalize")),
+    "reconcile": ("build", 0.9, ("data_op", "reconcile")),
+    "aggregate": ("build", 0.8, ("data_op", "aggregate")),
+    "profile": ("build", 0.8, ("data_op", "profile")),
+    "redact": ("build", 0.85, ("data_op", "redact")),
+    "backfill": ("build", 0.8, ("data_op", "backfill")),
+    "parse": ("build", 0.75, ("data_op", "parse")),
 }
 
 
@@ -95,6 +109,24 @@ _PHRASE_OVERRIDES: list[tuple[re.Pattern[str], str, float, tuple[str, ...], str]
      "research", 0.7, ("research",), "look at"),
     (re.compile(r"\bscore\s+(?:the\s+)?fit\b|\bevaluate\s+fit\b", re.IGNORECASE),
      "review", 0.85, ("review", "analysis"), "score fit"),
+    # Compound data-flavored phrases. These bias toward the data plane
+    # even when the leading verb is ambiguous on its own ("validate" on
+    # its own is review-flavored; "validate records against schema" is
+    # deterministic data work).
+    (re.compile(r"\bvalidate\s+(?:records?|rows?|fields?)\s+(?:against|with)\b", re.IGNORECASE),
+     "build", 0.9, ("data_op", "validate"), "validate records"),
+    (re.compile(r"\bdedupe\s+(?:records?|rows?|users?|entries|keys?)\b", re.IGNORECASE),
+     "build", 0.9, ("data_op", "dedupe"), "dedupe records"),
+    (re.compile(r"\bredact\s+(?:pii|sensitive|fields?)\b", re.IGNORECASE),
+     "build", 0.9, ("data_op", "redact"), "redact PII"),
+    (re.compile(r"\b(?:join|merge)\s+(?:source|datasets?|tables?|sources?)\b", re.IGNORECASE),
+     "build", 0.85, ("data_op", "join"), "join sources"),
+    (re.compile(r"\breconcile\s+(?:source\s+vs\s+target|state|datasets?)\b", re.IGNORECASE),
+     "build", 0.9, ("data_op", "reconcile"), "reconcile source/target"),
+    (re.compile(r"\bdead[-\s]?letter\b", re.IGNORECASE),
+     "build", 0.85, ("data_op", "dead_letter"), "dead-letter rows"),
+    (re.compile(r"\brepair\s+loop\b", re.IGNORECASE),
+     "build", 0.85, ("data_op", "repair_loop"), "repair loop"),
 ]
 
 

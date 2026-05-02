@@ -108,7 +108,7 @@ def build_git_provenance(
                 )
             )
         else:
-            from runtime.compile_index import current_repo_fingerprint
+            from runtime.materialize_index import current_repo_fingerprint
 
             payload.update(_json_safe(current_repo_fingerprint(workspace_root)))
         payload["available"] = True

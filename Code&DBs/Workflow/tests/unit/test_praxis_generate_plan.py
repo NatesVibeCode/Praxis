@@ -34,7 +34,7 @@ def test_praxis_generate_plan_materialize_dispatches_compile_then_reads_build(mo
     result = workflow.tool_praxis_generate_plan(
         {
             "action": "materialize_plan",
-            "intent": "Generate a Moon workflow",
+            "intent": "Generate a Canvas workflow",
             "workflow_id": "wf_generated",
             "title": "Generated plan",
             "enable_llm": True,
@@ -44,7 +44,7 @@ def test_praxis_generate_plan_materialize_dispatches_compile_then_reads_build(mo
 
     assert [call[0] for call in calls] == ["compile_materialize", "workflow_build_get"]
     assert calls[0][1] == {
-        "intent": "Generate a Moon workflow",
+        "intent": "Generate a Canvas workflow",
         "match_limit": 5,
         "workflow_id": "wf_generated",
         "title": "Generated plan",

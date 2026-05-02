@@ -68,7 +68,7 @@ def _header_value(headers: Any, *names: str) -> str:
 
 
 def _base_definition_metrics(definition: dict[str, Any]) -> dict[str, Any]:
-    from runtime.compile_reuse import stable_hash
+    from runtime.materialize_reuse import stable_hash
 
     execution_setup = definition.get("execution_setup") if isinstance(definition.get("execution_setup"), dict) else {}
     references = definition.get("references") if isinstance(definition.get("references"), list) else []
@@ -112,7 +112,7 @@ def _definition_from_workflow_row(conn: Any, workflow_id: str) -> tuple[dict[str
     if conn is None or not workflow_id:
         return {}, {}
     row = None
-    query = "SELECT definition, compiled_spec FROM public.workflows WHERE id = $1"
+    query = "SELECT definition, materialized_spec FROM public.workflows WHERE id = $1"
     try:
         if hasattr(conn, "fetchrow"):
             row = conn.fetchrow(query, workflow_id)
@@ -124,20 +124,20 @@ def _definition_from_workflow_row(conn: Any, workflow_id: str) -> tuple[dict[str
     if not isinstance(row, dict):
         return {}, {}
     definition = row.get("definition")
-    compiled_spec = row.get("compiled_spec")
+    materialized_spec = row.get("materialized_spec")
     if isinstance(definition, str):
         try:
             definition = json.loads(definition)
         except json.JSONDecodeError:
             definition = {}
-    if isinstance(compiled_spec, str):
+    if isinstance(materialized_spec, str):
         try:
-            compiled_spec = json.loads(compiled_spec)
+            materialized_spec = json.loads(materialized_spec)
         except json.JSONDecodeError:
-            compiled_spec = {}
+            materialized_spec = {}
     return (
         dict(definition) if isinstance(definition, dict) else {},
-        dict(compiled_spec) if isinstance(compiled_spec, dict) else {},
+        dict(materialized_spec) if isinstance(materialized_spec, dict) else {},
     )
 
 
@@ -173,15 +173,15 @@ def _trigger_route_metrics(
     response_payload: dict[str, Any],
 ) -> dict[str, Any]:
     workflow_id = str(response_payload.get("workflow_id") or "").strip()
-    definition, compiled_spec = _definition_from_workflow_row(conn, workflow_id)
+    definition, materialized_spec = _definition_from_workflow_row(conn, workflow_id)
     metrics = _base_definition_metrics(definition) if definition else {}
     return {
         **metrics,
         "workflow_id": workflow_id,
         "run_id": str(response_payload.get("run_id") or "").strip(),
-        "compiled_job_count": _list_count(compiled_spec.get("jobs")),
-        "trigger_count": _list_count(compiled_spec.get("triggers")),
-        "has_current_plan": bool(compiled_spec),
+        "materialized_job_count": _list_count(materialized_spec.get("jobs")),
+        "trigger_count": _list_count(materialized_spec.get("triggers")),
+        "has_current_plan": bool(materialized_spec),
         "metadata": {
             "workflow_name": str(response_payload.get("workflow_name") or "").strip() or None,
         },

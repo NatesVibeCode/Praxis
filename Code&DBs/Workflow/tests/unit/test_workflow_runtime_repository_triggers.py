@@ -104,7 +104,7 @@ def test_reconcile_workflow_triggers_preserves_manual_triggers_and_owns_source_i
     persisted = repo.reconcile_workflow_triggers(
         conn,
         workflow_id="wf_123",
-        compiled_spec={
+        materialized_spec={
             "triggers": [
                 {
                     "source_trigger_id": "trigger-001",

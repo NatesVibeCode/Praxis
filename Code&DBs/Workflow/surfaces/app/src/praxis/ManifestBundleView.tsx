@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QuadrantGrid } from '../grid/QuadrantGrid';
+import { Button } from '../primitives';
 import { emitPraxisOpenTab } from './events';
 import { normalizePraxisBundle, resolvePraxisBundleTab, type PraxisSurfaceBundleV4, type PraxisTabDefinition, type SourceOption } from './manifest';
 import { SourceOptionPills } from './SourceOptionPills';
@@ -306,19 +307,17 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
             ) : null}
           </div>
           {visibleTabs.length > 1 && (
-            <div className="app-shell__surface-tabs app-shell__surface-tabs--inline">
+            <div className="app-shell__surface-tabs app-shell__surface-tabs--inline prx-button-row">
               {visibleTabs.map((entry) => (
-                <button
+                <Button
                   key={entry.id}
-                  type="button"
+                  size="sm"
+                  tone={entry.id === selectedTab.id ? 'primary' : 'ghost'}
+                  active={entry.id === selectedTab.id}
                   onClick={() => emitPraxisOpenTab({ kind: 'manifest', manifestId, tabId: entry.id })}
-                  className={[
-                    'app-shell__surface-tab',
-                    entry.id === selectedTab.id ? 'app-shell__surface-tab--active' : '',
-                  ].filter(Boolean).join(' ')}
                 >
                   {entry.label}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -332,18 +331,15 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
             </div>
           )}
           {canCustomize ? (
-            <button
-              type="button"
+            <Button
+              size="sm"
+              tone={customizing ? 'primary' : 'ghost'}
+              active={customizing}
               onClick={() => setCustomizing((value) => !value)}
-              className={[
-                'app-shell__surface-action',
-                'app-shell__surface-action--primary',
-                customizing ? 'app-shell__surface-action--active' : '',
-              ].filter(Boolean).join(' ')}
               aria-pressed={customizing}
             >
               {customizing ? 'Done' : 'Customize'}
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>

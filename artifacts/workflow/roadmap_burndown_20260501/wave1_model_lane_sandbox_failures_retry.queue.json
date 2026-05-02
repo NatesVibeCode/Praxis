@@ -1,0 +1,26 @@
+{
+  "name": "Roadmap Burn Down Wave 1 - Model Lane Sandbox Proof Retry",
+  "workflow_id": "roadmap_burndown_20260501_wave1_model_lane_sandbox_failures_retry",
+  "phase": "execute",
+  "workdir": ".",
+  "outcome_goal": "Prove the Wave 1 model-lane sandbox repair path can run as a single Google-only workflow before re-expanding the roadmap burn-down.",
+  "jobs": [
+    {
+      "label": "model_lane_sandbox_failures",
+      "agent": "google/gemini-3-flash-preview",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap_burndown.wave1.model_lane_sandbox_failures"
+      ],
+      "timeout": 900,
+      "submission_required": true,
+      "workdir": ".",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow",
+        "Code&DBs/Workflow/runtime/sandbox_runtime.py",
+        "Code&DBs/Workflow/tests"
+      ],
+      "prompt": "Retry delta: run only this representative Wave 1 job through Google after the workflow migration authority drift was repaired, avoiding the previous four-job parallel burst that hit provider rate limits. Fix the recent workflow sandbox_error cluster enough that one explicit model-lane workflow can produce durable output. Start with praxis_discover. Focus on environment propagation and sandbox execution boundaries. Respect the standing order that Anthropic and OpenAI are currently off for budget control and must not be used. Add or update focused tests. Submit a code-change candidate with evidence, or file/update the canonical bug with root-cause evidence if the blocker is outside this job's write scope."
+    }
+  ]
+}

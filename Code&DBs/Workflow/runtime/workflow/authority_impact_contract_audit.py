@@ -21,7 +21,7 @@ from a recent window) and classifies each one:
   the gated pipeline.
 
 Returns coverage findings + summary counts. Caller decides what to do
-(file a bug, surface in Moon, gate a CI step, etc.). The audit itself is
+(file a bug, surface in Canvas, gate a CI step, etc.). The audit itself is
 purely descriptive — no writes, no side effects.
 """
 

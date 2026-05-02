@@ -19,7 +19,14 @@ from typing import Any, Mapping
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-_ANCHOR_FIELDS = ("run_id", "receipt_id", "event_id", "correlation_id", "bug_id")
+_ANCHOR_FIELDS = (
+    "run_id",
+    "receipt_id",
+    "event_id",
+    "correlation_id",
+    "bug_id",
+    "dispatch_choice_ref",
+)
 _MUTATING_RISK_MARKERS = ("write", "launch", "session")
 _RUN_TERMINAL_STATES = {
     "canceled",
@@ -162,14 +169,14 @@ def _compile_preview(intent: str | None, subsystems: Any) -> tuple[dict[str, Any
     if not intent:
         return None, None
     try:
-        from runtime.compile_cqrs import preview_compile
+        from runtime.materialize_cqrs import preview_compile
 
         conn = subsystems.get_pg_conn() if hasattr(subsystems, "get_pg_conn") else None
         preview = preview_compile(intent, conn=conn, match_limit=8).to_dict()
         return preview, None
     except Exception as exc:
         return None, {
-            "source": "runtime.compile_cqrs.preview_compile",
+            "source": "runtime.materialize_cqrs.preview_compile",
             "error": str(exc),
         }
 
@@ -263,6 +270,7 @@ class QueryExecutionProof(BaseModel):
     event_id: str | None = None
     correlation_id: str | None = None
     bug_id: str | None = None
+    dispatch_choice_ref: str | None = None
     stale_after_seconds: int = 180
     include_trace: bool = True
 
@@ -286,7 +294,7 @@ class QueryExecutionProof(BaseModel):
         if len(provided) != 1:
             raise ValueError(
                 "execution_proof requires exactly one of run_id, receipt_id, "
-                "event_id, correlation_id, or bug_id"
+                "event_id, correlation_id, bug_id, or dispatch_choice_ref"
             )
         return self
 
@@ -452,7 +460,7 @@ def handle_query_legal_tools(query: QueryLegalTools, subsystems: Any) -> dict[st
         "data_dictionary_objects",
     ]
     if preview is not None or preview_error is not None:
-        authority_sources.append("runtime.compile_cqrs.preview_compile")
+        authority_sources.append("runtime.materialize_cqrs.preview_compile")
 
     payload: dict[str, Any] = {
         "view": "legal_tools",
@@ -628,7 +636,7 @@ def _record_evidence(
 
 
 def _query_trace(query: QueryExecutionProof, subsystems: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    if not query.include_trace:
+    if not query.include_trace or query.dispatch_choice_ref:
         return None, None
     try:
         from runtime.operation_catalog_gateway import execute_operation_from_subsystems
@@ -675,6 +683,133 @@ def _latest_claim(conn: Any, run_id: str) -> dict[str, Any] | None:
         """,
         run_id,
     )
+
+
+def _dispatch_choice_row(conn: Any, dispatch_choice_ref: str) -> dict[str, Any] | None:
+    return _first_row(
+        conn,
+        """
+        SELECT dispatch_choice_ref, dispatch_ref, workload_kind, task_slug,
+               candidate_set_hash, selected_candidate_ref, selected_target_ref,
+               selected_profile_ref, selected_provider_slug, selected_model_slug,
+               selected_transport_type, selection_kind, selected_by, surface,
+               conversation_id, selected_candidate_json, ask_all_candidates_json,
+               selected_at
+          FROM execution_dispatch_choices
+         WHERE dispatch_choice_ref = $1
+         LIMIT 1
+        """,
+        dispatch_choice_ref,
+    )
+
+
+def _dispatch_choice_message_row(conn: Any, choice: Mapping[str, Any]) -> dict[str, Any] | None:
+    conversation_id = _clean_text(choice.get("conversation_id"))
+    if not conversation_id:
+        return None
+    return _first_row(
+        conn,
+        """
+        SELECT id, conversation_id, role, model_used, latency_ms, cost_usd, created_at
+          FROM conversation_messages
+         WHERE conversation_id = $1
+           AND role = 'assistant'
+           AND created_at >= $2
+         ORDER BY created_at ASC
+         LIMIT 1
+        """,
+        conversation_id,
+        choice.get("selected_at"),
+    )
+
+
+def _dispatch_choice_proof(query: QueryExecutionProof, subsystems: Any) -> dict[str, Any]:
+    anchor = _trace_payload_for_query(query)
+    evidence: list[dict[str, Any]] = []
+    missing_evidence: list[str] = []
+    query_errors: list[dict[str, Any]] = []
+    conn = subsystems.get_pg_conn()
+    try:
+        choice = _dispatch_choice_row(conn, str(query.dispatch_choice_ref))
+    except Exception as exc:
+        choice = None
+        query_errors.append({"source": "execution_dispatch_choices", "error": str(exc)})
+
+    _record_evidence(
+        evidence,
+        source="execution_dispatch_choices",
+        present=choice is not None,
+        proof_strength="strong" if choice else "missing",
+        details=choice or {},
+    )
+    if choice is None:
+        missing_evidence.append("execution_dispatch_choices")
+        return {
+            "view": "execution_proof",
+            "anchor": anchor,
+            "run_id": None,
+            "fired": False,
+            "currently_executing": False,
+            "verdict": "not_fired",
+            "confidence": "low",
+            "evidence": _json_safe(evidence),
+            "missing_evidence": sorted(set(missing_evidence)),
+            "recommended_next_action": "commit_dispatch_choice_then_run",
+            "query_errors": query_errors,
+            "authority_sources": ["execution_dispatch_choices"],
+        }
+
+    message = _dispatch_choice_message_row(conn, choice)
+    selected_model = (
+        f"{choice.get('selected_provider_slug')}/{choice.get('selected_model_slug')}"
+        if choice.get("selected_provider_slug") and choice.get("selected_model_slug")
+        else None
+    )
+    actual_model = _clean_text((message or {}).get("model_used"))
+    model_matched = bool(actual_model and selected_model and actual_model == selected_model)
+    _record_evidence(
+        evidence,
+        source="conversation_messages",
+        present=message is not None,
+        proof_strength="strong" if model_matched else "weak" if message else "missing",
+        details={
+            "message": message or {},
+            "selected_model": selected_model,
+            "actual_model": actual_model,
+            "model_matched": model_matched,
+        },
+    )
+    if message is None:
+        missing_evidence.append("conversation_message_after_dispatch_choice")
+    elif not model_matched:
+        missing_evidence.append("selected_model_match")
+
+    verdict = "dispatch_choice_governed_run" if model_matched else "dispatch_choice_committed"
+    return {
+        "view": "execution_proof",
+        "anchor": anchor,
+        "run_id": None,
+        "fired": message is not None,
+        "currently_executing": False,
+        "verdict": verdict,
+        "confidence": "high" if model_matched else "medium",
+        "selected_candidate_ref": choice.get("selected_candidate_ref"),
+        "selected_target_ref": choice.get("selected_target_ref"),
+        "selected_profile_ref": choice.get("selected_profile_ref"),
+        "selected_provider_slug": choice.get("selected_provider_slug"),
+        "selected_model_slug": choice.get("selected_model_slug"),
+        "selected_transport_type": choice.get("selected_transport_type"),
+        "evidence": _json_safe(evidence),
+        "missing_evidence": sorted(set(missing_evidence)),
+        "recommended_next_action": (
+            "none" if model_matched else "inspect_chat_message_model_used"
+        ),
+        "query_errors": query_errors,
+        "authority_sources": [
+            "execution_dispatch_choices",
+            "conversation_messages",
+        ],
+    }
 
 
 def _job_summary(conn: Any, run_id: str) -> dict[str, Any] | None:
@@ -869,6 +1004,9 @@ def _recommended_next_action(
 
 
 def handle_query_execution_proof(query: QueryExecutionProof, subsystems: Any) -> dict[str, Any]:
+    if query.dispatch_choice_ref:
+        return _dispatch_choice_proof(query, subsystems)
+
     trace, trace_error = _query_trace(query, subsystems)
     compact_trace = _compact_trace(trace) if trace is not None else None
     run_id = query.run_id or _derive_run_id_from_trace(trace)

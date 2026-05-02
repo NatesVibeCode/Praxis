@@ -12,7 +12,7 @@ _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 _AUTHORITY_SEAMS = {
     "runtime/workflow/orchestrator.py": "default_native_authority_refs",
     "runtime/workflow/runtime_setup.py": "default_native_authority_refs",
-    "runtime/spec_compiler.py": "default_native_authority_refs",
+    "runtime/spec_materializer.py": "default_native_authority_refs",
     "runtime/workflow_builder.py": "default_native_authority_refs",
     "runtime/model_executor.py": "default_native_runtime_profile_ref_required",
     "surfaces/api/rest.py": "default_native_authority_refs",

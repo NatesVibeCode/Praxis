@@ -15,7 +15,7 @@ import pytest
 
 from runtime import task_type_router
 import runtime._workflow_database as runtime_db
-import runtime.compile_index as compile_index
+import runtime.materialize_index as compile_index
 from runtime.idempotency import canonical_hash
 import runtime.retry_orchestrator as retry_orchestrator
 from runtime.domain import RouteIdentity
@@ -81,6 +81,15 @@ def _patch_task_profile_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(task_profiles, "_DB_TASK_TYPE_KEYWORDS", keywords)
 
 
+@pytest.fixture(autouse=True)
+def _patch_repo_policy_contract_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        _ctx_mod,
+        "get_repo_policy_contract",
+        lambda _conn, *, repo_root: None,
+    )
+
+
 class _FakeConn:
     def __init__(
         self,
@@ -106,11 +115,15 @@ class _FakeConn:
 
     def execute(self, query: str, *args):
         self.queries.append((query, args))
-        if "FROM compile_artifacts" in query:
+        if "FROM compile_artifacts" in query or "FROM materialize_artifacts" in query:
             artifact_kind = args[0]
             input_fingerprint = args[1]
             return [
-                row
+                {
+                    **row,
+                    "materialize_artifact_id": row.get("materialize_artifact_id")
+                    or row.get("compile_artifact_id"),
+                }
                 for row in self.compile_artifact_rows
                 if row["artifact_kind"] == artifact_kind and row["input_fingerprint"] == input_fingerprint
             ]
@@ -224,6 +237,12 @@ class _FakeConn:
         if "SELECT pg_notify" in query:
             return []
         return []
+
+    def fetchrow(self, query: str, *args):
+        self.queries.append((query, args))
+        if "FROM operator_repo_policy_contracts" in query:
+            return None
+        raise AssertionError(f"Unexpected fetchrow: {' '.join(query.split())}")
 
 
 def test_definition_version_for_hash_is_positive_int32_and_deterministic():
@@ -1982,7 +2001,7 @@ def _KEEP_test_execute_job_fails_closed_when_migrated_run_compile_index_is_stale
             "workflow_definition": {
                 "type": "operating_model",
                 "definition_revision": "def_alpha",
-                "compile_provenance": {
+                "materialize_provenance": {
                     "compile_index_ref": "compile_index.alpha",
                     "compile_surface_revision": "surface.alpha",
                 },
@@ -2033,7 +2052,7 @@ def _KEEP_test_execute_job_fails_closed_when_migrated_run_compile_index_is_stale
         compile_index,
         "load_compile_index_snapshot",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            compile_index.CompileIndexAuthorityError(
+            compile_index.MaterializeIndexAuthorityError(
                 "compile_index.snapshot_stale",
                 "compile index snapshot is stale",
             )
@@ -2744,7 +2763,7 @@ def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypa
         _admission_mod,
         "_build_graph_execution_packet",
         lambda *_args, **_kwargs: {
-            "compile_provenance": {
+            "materialize_provenance": {
                 "input_fingerprint": "packet_input.alpha",
                 "reuse": {
                     "decision": "compiled",
@@ -2998,7 +3017,7 @@ def test_submit_workflow_insert_keeps_integration_action_and_args(monkeypatch):
         if "INSERT INTO workflow_jobs" in query
     )
     assert "$18::jsonb, $19::jsonb" in insert_query
-    assert len(insert_args) == 21
+    assert len(insert_args) == 22
     assert insert_args[15] == "integration.example"
     assert insert_args[16] == "run"
     assert insert_args[17] == '{"mode": "fast"}'
@@ -3829,7 +3848,7 @@ def test_retry_job_uses_shared_queue_admission_gate(monkeypatch):
 
 def test_retry_job_reports_validated_packet_reuse_provenance() -> None:
     packet_lineage_hash = "packet_lineage_hash.alpha"
-    compile_provenance = {
+    materialize_provenance = {
         "input_fingerprint": "packet-input.alpha",
         "packet_lineage_revision": "packet_lineage.alpha",
         "packet_lineage_hash": packet_lineage_hash,
@@ -3852,9 +3871,9 @@ def test_retry_job_reports_validated_packet_reuse_provenance() -> None:
         "verify_refs": [],
         "authority_inputs": {},
         "file_inputs": {},
-        "compile_provenance": dict(compile_provenance),
+        "materialize_provenance": dict(materialize_provenance),
         "packet_hash": packet_lineage_hash,
-        "packet_revision": compile_provenance["packet_lineage_revision"],
+        "packet_revision": materialize_provenance["packet_lineage_revision"],
         "decision_ref": "decision.compile.packet.lineage.alpha",
         "parent_artifact_ref": "plan_alpha",
     }
@@ -3908,7 +3927,7 @@ def test_retry_job_reports_validated_packet_reuse_provenance() -> None:
                 "authority_inputs": {},
                 "file_inputs": {},
                 "payload": {
-                    "compile_provenance": compile_provenance,
+                    "materialize_provenance": materialize_provenance,
                 },
                 "decision_ref": "decision.compile.packet.execution.alpha",
             },
@@ -3952,7 +3971,7 @@ def test_retry_job_rejects_stale_packet_lineage_artifact() -> None:
         "verify_refs": [],
         "authority_inputs": {},
         "file_inputs": {},
-        "compile_provenance": {
+        "materialize_provenance": {
             "input_fingerprint": "packet-input.alpha",
         },
         "packet_hash": packet_lineage_hash,
@@ -4007,7 +4026,7 @@ def test_retry_job_rejects_stale_packet_lineage_artifact() -> None:
                 "authority_inputs": {},
                 "file_inputs": {},
                 "payload": {
-                    "compile_provenance": {
+                    "materialize_provenance": {
                         "input_fingerprint": "packet-input.alpha",
                     },
                 },

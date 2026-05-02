@@ -6,8 +6,8 @@
       }
     }
   ],
-  "model": "moonshotai/kimi-k2.6",
-  "provider": "moonshot",
+  "model": "canvasshotai/kimi-k2.6",
+  "provider": "canvasshot",
   "usage": {
     "cost": 0
   }

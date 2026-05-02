@@ -216,6 +216,114 @@ def _auto_route_slug(value: Any) -> str:
     return f"auto/{key}" if key else ""
 
 
+def _transport_from_candidate_row(
+    row: Mapping[str, Any],
+    *,
+    has_cli_template: bool,
+) -> ExecutionTransport:
+    raw_transport = str(row.get("transport_type") or "").strip().upper()
+    if raw_transport == "CLI":
+        return ExecutionTransport.cli
+    if raw_transport == "API":
+        return ExecutionTransport.api
+    if raw_transport:
+        raise AgentConfigError(
+            "invalid_candidate_transport_type",
+            f"provider_model_candidates.transport_type must be CLI or API, got {raw_transport!r}",
+        )
+    return ExecutionTransport.cli if has_cli_template else ExecutionTransport.api
+
+
+def _transport_matches_route(
+    route_row: Mapping[str, Any],
+    concrete: AgentConfig,
+) -> bool:
+    raw_transport = str(route_row.get("transport_type") or "").strip().upper()
+    if not raw_transport:
+        return True
+    if raw_transport == "CLI":
+        return concrete.execution_transport is ExecutionTransport.cli
+    if raw_transport == "API":
+        return concrete.execution_transport is ExecutionTransport.api
+    return False
+
+
+def _agent_config_from_candidate_row(row: Mapping[str, Any]) -> AgentConfig:
+    from registry.model_context_limits import context_window_for_model
+
+    provider = str(row["provider_slug"])
+    model = str(row["model_slug"])
+    slug = f"{provider}/{model}"
+    tags = row.get("capability_tags") or []
+    if isinstance(tags, str):
+        tags = json.loads(tags)
+
+    tier = "mid"
+    if isinstance(tags, list):
+        if "frontier" in tags:
+            tier = "frontier"
+        elif "economy" in tags:
+            tier = "economy"
+
+    try:
+        context_window = context_window_for_model(provider, model)
+    except RuntimeError:
+        defaults = row.get("default_parameters") or {}
+        if isinstance(defaults, str):
+            defaults = json.loads(defaults)
+        if not isinstance(defaults, Mapping):
+            defaults = {}
+        context_window = int(defaults.get("context_window") or 128_000)
+
+    cli_cfg = row.get("cli_config") or {}
+    if isinstance(cli_cfg, str):
+        cli_cfg = json.loads(cli_cfg)
+    if not isinstance(cli_cfg, Mapping):
+        cli_cfg = {}
+
+    reasoning_control = row.get("reasoning_control") or {}
+    if isinstance(reasoning_control, str):
+        reasoning_control = json.loads(reasoning_control)
+    if not isinstance(reasoning_control, Mapping):
+        reasoning_control = {}
+
+    cmd_template = cli_cfg.get("cmd_template")
+    execution_transport = _transport_from_candidate_row(
+        row,
+        has_cli_template=bool(cmd_template),
+    )
+
+    if execution_transport is ExecutionTransport.cli and cmd_template:
+        resolved = [str(part).replace("{model}", model) for part in cmd_template]
+        import shlex
+        wrapper = " ".join(shlex.quote(part) for part in resolved)
+    else:
+        wrapper = None
+    sandbox_provider = _default_sandbox_provider(transport=execution_transport)
+
+    return AgentConfig(
+        slug=slug,
+        provider=provider,
+        model=model,
+        wrapper_command=wrapper,
+        docker_image=None,
+        context_window=context_window,
+        max_output_tokens=0,
+        cost_per_input_mtok=5.0,
+        cost_per_output_mtok=20.0,
+        timeout_seconds=900,
+        idle_timeout_seconds=180,
+        failover_targets=(),
+        allowed_stages=("plan", "build", "review", "debate", "test", "debug"),
+        capability_tier=tier,
+        output_format=str(cli_cfg.get("output_format") or "json"),
+        execution_transport=execution_transport,
+        sandbox_provider=sandbox_provider,
+        sandbox_policy=SandboxPolicy(),
+        reasoning_control=dict(reasoning_control),
+    )
+
+
 class AgentRegistry:
     """Immutable agent configuration registry.
 
@@ -289,89 +397,21 @@ class AgentRegistry:
         """
         rows = conn.execute(
             """SELECT DISTINCT ON (provider_slug, model_slug)
-                provider_slug, model_slug, status, priority, balance_weight,
+                provider_slug, model_slug, transport_type, status, priority, balance_weight,
                 capability_tags, default_parameters, cli_config, reasoning_control
             FROM provider_model_candidates
             WHERE status = 'active'
             ORDER BY provider_slug, model_slug, priority ASC, created_at DESC"""
         )
-        from registry.model_context_limits import context_window_for_model
         agents = []
         for r in rows:
-            provider = r["provider_slug"]
-            model = r["model_slug"]
-            slug = f"{provider}/{model}"
-            tags = r["capability_tags"]
-            if isinstance(tags, str):
-                tags = json.loads(tags)
-
-            tier = "mid"
-            if isinstance(tags, list):
-                if "frontier" in tags:
-                    tier = "frontier"
-                elif "economy" in tags:
-                    tier = "economy"
-
-            try:
-                context_window = context_window_for_model(provider, model)
-            except RuntimeError:
-                # model_profiles missing context_window — fall back to
-                # default_parameters from the candidate row, then 128k.
-                _defaults = r.get("default_parameters") or {}
-                if isinstance(_defaults, str):
-                    _defaults = json.loads(_defaults)
-                context_window = int(_defaults.get("context_window") or 128_000)
-
-            # Read CLI config from DB
-            cli_cfg = r.get("cli_config") or {}
-            if isinstance(cli_cfg, str):
-                cli_cfg = json.loads(cli_cfg)
-            reasoning_control = r.get("reasoning_control") or {}
-            if isinstance(reasoning_control, str):
-                reasoning_control = json.loads(reasoning_control)
-            if not isinstance(reasoning_control, Mapping):
-                reasoning_control = {}
-
-            cmd_template = cli_cfg.get("cmd_template")
-            envelope_key = cli_cfg.get("envelope_key")
-
-            if cmd_template:
-                # Build wrapper from DB template — replace {model}
-                resolved = [part.replace("{model}", model) for part in cmd_template]
-                import shlex
-                wrapper = " ".join(shlex.quote(part) for part in resolved)
-                execution_transport = ExecutionTransport.cli
-            else:
-                wrapper = None
-                execution_transport = ExecutionTransport.api
-            sandbox_provider = _default_sandbox_provider(transport=execution_transport)
-
-            agents.append(AgentConfig(
-                slug=slug,
-                provider=provider,
-                model=model,
-                wrapper_command=wrapper,
-                docker_image=None,
-                context_window=context_window,
-                max_output_tokens=0,  # CLIs handle their own limits
-                cost_per_input_mtok=5.0,
-                cost_per_output_mtok=20.0,
-                timeout_seconds=900,
-                idle_timeout_seconds=180,
-                failover_targets=(),
-                allowed_stages=("plan", "build", "review", "debate", "test", "debug"),
-                capability_tier=tier,
-                output_format=cli_cfg.get("output_format", "json"),
-                execution_transport=execution_transport,
-                sandbox_provider=sandbox_provider,
-                sandbox_policy=SandboxPolicy(),
-                reasoning_control=dict(reasoning_control),
-            ))
+            agents.append(_agent_config_from_candidate_row(r))
 
         agents_by_slug = {agent.slug: agent for agent in agents}
         try:
             route_rows = conn.execute(
                 """SELECT task_type, provider_slug, model_slug, rank,
+                          transport_type,
                           benchmark_score, cost_per_m_tokens,
                           route_tier, route_tier_rank,
                           latency_class, latency_rank,
@@ -435,6 +475,8 @@ class AgentRegistry:
             concrete_slug = f"{row['provider_slug']}/{row['model_slug']}"
             concrete = agents_by_slug.get(concrete_slug)
             if concrete is None or not task_type:
+                continue
+            if not _transport_matches_route(row, concrete):
                 continue
             row_reasoning_control = row.get("reasoning_control") or {}
             if isinstance(row_reasoning_control, str):
@@ -552,6 +594,65 @@ class AgentRegistry:
             _synthesize_alias(_auto_route_slug(latency_class), targets)
 
         return cls(agents)
+
+    @classmethod
+    def load_from_postgres_for_route(
+        cls,
+        conn,
+        *,
+        provider_slug: str,
+        model_slug: str,
+        transport_type: str,
+        candidate_ref: str | None = None,
+    ) -> AgentConfig | None:
+        """Load the exact provider/model/transport candidate for execution.
+
+        ``load_from_postgres`` keeps the legacy provider/model registry view.
+        Execution routes that already carry candidate/transport authority use
+        this exact lookup so a stale CLI template cannot hijack an API route
+        for the same provider/model slug.
+        """
+        normalized_transport = str(transport_type or "").strip().upper()
+        if normalized_transport not in {"CLI", "API"}:
+            return None
+        normalized_candidate_ref = str(candidate_ref or "").strip()
+        if normalized_candidate_ref:
+            rows = conn.execute(
+                """SELECT provider_slug, model_slug, transport_type, status, priority, balance_weight,
+                          capability_tags, default_parameters, cli_config, reasoning_control
+                   FROM provider_model_candidates
+                   WHERE status = 'active'
+                     AND candidate_ref = $1
+                     AND provider_slug = $2
+                     AND model_slug = $3
+                     AND transport_type = $4
+                   ORDER BY priority ASC, created_at DESC
+                   LIMIT 1""",
+                normalized_candidate_ref,
+                provider_slug,
+                model_slug,
+                normalized_transport,
+            )
+            if rows:
+                return _agent_config_from_candidate_row(rows[0])
+            return None
+        rows = conn.execute(
+            """SELECT provider_slug, model_slug, transport_type, status, priority, balance_weight,
+                      capability_tags, default_parameters, cli_config, reasoning_control
+               FROM provider_model_candidates
+               WHERE status = 'active'
+                 AND provider_slug = $1
+                 AND model_slug = $2
+                 AND transport_type = $3
+               ORDER BY priority ASC, created_at DESC
+               LIMIT 1""",
+            provider_slug,
+            model_slug,
+            normalized_transport,
+        )
+        if not rows:
+            return None
+        return _agent_config_from_candidate_row(rows[0])
 
     # ------------------------------------------------------------------
     # Lookups

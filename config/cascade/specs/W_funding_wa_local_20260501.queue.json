@@ -1,0 +1,99 @@
+{
+  "name": "Funding — Washington Local Programs (WTIA, Commerce, WWU iLab, Whatcom SBDC)",
+  "phase": "W",
+  "queue_id": "funding_wa_local_20260501",
+  "outcome_goal": "artifacts/funding/wa_local_20260501/wa_local_funding.md exists with: (a) ≥6 WA-state or Bellingham-local programs covered, (b) per program — type (grant/advisor/credits/space/network), eligibility, application or intro process, contact, typical award size, (c) which can be approached this month with a 30-min intro meeting, (d) talking points for initial outreach.",
+  "anti_requirements": [
+    "Do NOT include national programs in this report — WA / Pacific Northwest / Bellingham only.",
+    "Do NOT invent contacts — every named individual must trace to a public source URL.",
+    "Do NOT recommend approaching programs that explicitly serve only post-revenue or post-Series-A startups.",
+    "Do NOT contact any program — research and prep talking points only."
+  ],
+  "jobs": [
+    {
+      "label": "wtia_research",
+      "task_type": "research",
+      "description": "Research Washington Technology Industry Association (WTIA) programs",
+      "outcome_goal": "artifacts/funding/wa_local_20260501/programs/wtia.md catalogs WTIA programs relevant to a solo pre-revenue AI infra founder.",
+      "prompt": "Research Washington Technology Industry Association (washingtontechnology.org or equivalent). Find:\n- Member tier options (which is appropriate for a solo pre-revenue founder)\n- Active grant or program offerings (e.g. Cascadia Innovation Corridor, founder programs)\n- Mentorship / advisor programs\n- Events / community access\n- Cost (membership fees if any)\n- Application or intro contact path\n\nWrite `artifacts/funding/wa_local_20260501/programs/wtia.md` with one section per relevant offering. For each: name, type, eligibility, cost, contact, source URL.",
+      "read": [],
+      "write": ["artifacts/funding/wa_local_20260501/programs/wtia.md"],
+      "verify_command": "test -s artifacts/funding/wa_local_20260501/programs/wtia.md"
+    },
+    {
+      "label": "wa_commerce_research",
+      "task_type": "research",
+      "description": "Research WA Department of Commerce / StartUp Washington programs",
+      "outcome_goal": "artifacts/funding/wa_local_20260501/programs/wa_commerce.md catalogs WA Department of Commerce and StartUp Washington offerings for solo founders.",
+      "prompt": "Research Washington Department of Commerce (commerce.wa.gov) and StartUp Washington (startup.choosewashingtonstate.com or equivalent). Find:\n- Active grant programs for early-stage tech businesses\n- Tax credit programs (R&D, small business, etc.)\n- Resource directories (linking to other programs)\n- Direct contact for solo founder questions\n\nWrite `artifacts/funding/wa_local_20260501/programs/wa_commerce.md` with one section per offering. For each: name, type, eligibility, application URL, contact, source URL.",
+      "read": [],
+      "write": ["artifacts/funding/wa_local_20260501/programs/wa_commerce.md"],
+      "verify_command": "test -s artifacts/funding/wa_local_20260501/programs/wa_commerce.md"
+    },
+    {
+      "label": "wwu_ilab_research",
+      "task_type": "research",
+      "description": "Research Western Washington University iLab / entrepreneurship programs (Bellingham)",
+      "outcome_goal": "artifacts/funding/wa_local_20260501/programs/wwu_ilab.md catalogs WWU's entrepreneurship resources accessible to a Bellingham community founder.",
+      "prompt": "Research Western Washington University's entrepreneurship and innovation resources — search for WWU iLab, WWU Center for Innovation, WWU SBDC affiliation, or equivalent. Note: many of these programs serve both students and the surrounding community.\n\nFind:\n- Whether community founders (non-students) can access programs\n- Available programs: incubator/accelerator, mentorship, micro-grants, lab/space access\n- Cost\n- Intro contact path\n\nWrite `artifacts/funding/wa_local_20260501/programs/wwu_ilab.md`. If non-students cannot access, say so explicitly.",
+      "read": [],
+      "write": ["artifacts/funding/wa_local_20260501/programs/wwu_ilab.md"],
+      "verify_command": "test -s artifacts/funding/wa_local_20260501/programs/wwu_ilab.md"
+    },
+    {
+      "label": "whatcom_sbdc_research",
+      "task_type": "research",
+      "description": "Research Washington Small Business Development Center (Whatcom County)",
+      "outcome_goal": "artifacts/funding/wa_local_20260501/programs/whatcom_sbdc.md catalogs Whatcom County SBDC services for a solo tech founder.",
+      "prompt": "Research the Washington Small Business Development Center (wsbdc.org) Whatcom County office. Find:\n- Free advisor services (1:1 business counseling)\n- Workshops and training\n- Microloan or grant referrals they facilitate\n- Local advisor name and contact (Bellingham-based if listed)\n- How to schedule an intro meeting\n\nWrite `artifacts/funding/wa_local_20260501/programs/whatcom_sbdc.md`. SBDC is free — confirm and document any caveats.",
+      "read": [],
+      "write": ["artifacts/funding/wa_local_20260501/programs/whatcom_sbdc.md"],
+      "verify_command": "test -s artifacts/funding/wa_local_20260501/programs/whatcom_sbdc.md"
+    },
+    {
+      "label": "bellingham_econ_dev_research",
+      "task_type": "research",
+      "description": "Research City of Bellingham / Whatcom County / Port of Bellingham economic development programs",
+      "outcome_goal": "artifacts/funding/wa_local_20260501/programs/bellingham_econ_dev.md catalogs local economic development programs accessible to a tech founder.",
+      "prompt": "Research economic development programs from:\n- City of Bellingham (cob.org)\n- Port of Bellingham\n- Whatcom County government economic development\n- Bellingham Regional Chamber of Commerce\n\nLook for: small business grants, loan programs, tech-sector support, networking events, broadband/infrastructure assistance for home-based businesses.\n\nWrite `artifacts/funding/wa_local_20260501/programs/bellingham_econ_dev.md`. Most local programs target brick-and-mortar — be honest about which are not applicable to a software founder.",
+      "read": [],
+      "write": ["artifacts/funding/wa_local_20260501/programs/bellingham_econ_dev.md"],
+      "verify_command": "test -s artifacts/funding/wa_local_20260501/programs/bellingham_econ_dev.md"
+    },
+    {
+      "label": "innovate_washington_research",
+      "task_type": "research",
+      "description": "Research Innovate Washington and other state-level innovation programs",
+      "outcome_goal": "artifacts/funding/wa_local_20260501/programs/innovate_washington.md catalogs Innovate Washington and adjacent state-level innovation programs.",
+      "prompt": "Research Innovate Washington (or its current successor entity if rebranded), Life Sciences Washington (in case AI-for-bio is in scope), and any other state-level innovation programs that fund or support early-stage tech founders.\n\nWrite `artifacts/funding/wa_local_20260501/programs/innovate_washington.md` with one section per program. For each: status (active/dormant/sunset), eligibility, type of support, contact.",
+      "read": [],
+      "write": ["artifacts/funding/wa_local_20260501/programs/innovate_washington.md"],
+      "verify_command": "test -s artifacts/funding/wa_local_20260501/programs/innovate_washington.md"
+    },
+    {
+      "label": "compose_contact_list",
+      "task_type": "creative",
+      "depends_on": [
+        "wtia_research",
+        "wa_commerce_research",
+        "wwu_ilab_research",
+        "whatcom_sbdc_research",
+        "bellingham_econ_dev_research",
+        "innovate_washington_research"
+      ],
+      "description": "Produce the final operator-facing contact list with talking points",
+      "outcome_goal": "artifacts/funding/wa_local_20260501/wa_local_funding.md is the operator-facing deliverable with ranked outreach order, contacts, and talking points per program.",
+      "prompt": "Read all six program files under `artifacts/funding/wa_local_20260501/programs/`.\n\nProduce `artifacts/funding/wa_local_20260501/wa_local_funding.md` with:\n\n1. **TL;DR** (3 sentences: which 2–3 programs to approach this month and why)\n2. **Outreach order** (numbered list of programs ranked by expected return-on-30-min — programs that offer free advisor time first, paid memberships last)\n3. **Per-program section**:\n   - Heading: `## <Program name>`\n   - Quick facts: type, eligibility, cost, contact (name + phone/email), schedule-link if available\n   - **Why approach now / why later / why never** — one line\n   - **Talking points for the 30-min intro** — 3 bullets framing what Nate wants to learn (not what he wants them to do for him)\n4. **Disqualified programs** — short list of programs from the inputs that are not applicable, with one-line reason each\n\nFraming for the talking points: Nate is a solo founder in Bellingham building Praxis (autonomous engineering control plane), pre-revenue, target external launch 2026-07-19. He's looking for: (a) connection to other WA founders, (b) signal on which state/local programs are worth applying to, (c) advisor time on go-to-market.",
+      "read": [
+        "artifacts/funding/wa_local_20260501/programs/wtia.md",
+        "artifacts/funding/wa_local_20260501/programs/wa_commerce.md",
+        "artifacts/funding/wa_local_20260501/programs/wwu_ilab.md",
+        "artifacts/funding/wa_local_20260501/programs/whatcom_sbdc.md",
+        "artifacts/funding/wa_local_20260501/programs/bellingham_econ_dev.md",
+        "artifacts/funding/wa_local_20260501/programs/innovate_washington.md"
+      ],
+      "write": ["artifacts/funding/wa_local_20260501/wa_local_funding.md"],
+      "verify_command": "test -s artifacts/funding/wa_local_20260501/wa_local_funding.md && grep -q 'Outreach order' artifacts/funding/wa_local_20260501/wa_local_funding.md"
+    }
+  ]
+}

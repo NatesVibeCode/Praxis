@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
@@ -19,10 +20,10 @@ if str(_WORKFLOW_ROOT) not in sys.path:
 
 import pytest
 
-from runtime import spec_compiler
-from runtime.spec_compiler import (
+from runtime import spec_materializer
+from runtime.spec_materializer import (
     ApprovedPlan,
-    CompiledSpec,
+    MaterializedSpec,
     LaunchSubmitFailedError,
     Plan,
     PlanPacket,
@@ -39,7 +40,7 @@ from runtime.spec_compiler import (
 def _stub_compile_spec(intent_dict, *, conn):
     label = intent_dict.get("label") or intent_dict["description"].split()[0].lower()
     return (
-        CompiledSpec(
+        MaterializedSpec(
             prompt=f"PROMPT({intent_dict['description']})",
             scope_write=list(intent_dict.get("write") or []),
             scope_read=intent_dict.get("read"),
@@ -56,7 +57,8 @@ def _stub_compile_spec(intent_dict, *, conn):
 
 
 class _FakeConn:
-    pass
+    def execute(self, _query: str, *_args: Any) -> list[dict[str, Any]]:
+        return []
 
 
 def _make_plan() -> Plan:
@@ -127,7 +129,7 @@ def test_ensure_run_id_or_raise_rejects_missing_run_id() -> None:
 
 
 def test_launch_plan_raises_on_failed_submit(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     def _failing_submit(conn, **kwargs):
         return {
@@ -152,7 +154,7 @@ def test_launch_plan_raises_on_failed_submit(monkeypatch) -> None:
 
 
 def test_launch_proposed_raises_on_failed_submit(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     def _failing_submit(conn, **kwargs):
         return {"status": "approval_required", "command_id": "cmd-needs-approval"}
@@ -170,7 +172,7 @@ def test_launch_proposed_raises_on_failed_submit(monkeypatch) -> None:
 
 
 def test_launch_approved_raises_on_failed_submit(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     def _failing_submit(conn, **kwargs):
         return {

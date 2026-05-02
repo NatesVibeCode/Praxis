@@ -19,6 +19,7 @@ _VALID_SOURCES = frozenset({"auto", "inferred", "operator"})
 _VALID_EDGE_KINDS = frozenset({
     "references", "derives_from", "projects_to", "ingests_from",
     "produces", "consumes", "promotes_to", "same_as",
+    "dispatches", "governed_by",
 })
 
 

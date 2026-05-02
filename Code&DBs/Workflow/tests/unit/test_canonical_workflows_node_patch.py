@@ -39,7 +39,7 @@ def _definition() -> dict:
 def test_apply_node_field_patch_updates_exact_node_field() -> None:
     patched = _apply_node_field_patch(
         _definition(),
-        row={"compiled_spec": {}},
+        row={"materialized_spec": {}},
         subpath="nodes/node-1/prompt",
         body={"value": "Search docs, API references, auth pages, and SDK examples."},
     )
@@ -54,7 +54,7 @@ def test_apply_node_field_patch_rejects_multi_field_body() -> None:
     with pytest.raises(WorkflowRuntimeBoundaryError, match="exactly one field"):
         _apply_node_field_patch(
             _definition(),
-            row={"compiled_spec": {}},
+            row={"materialized_spec": {}},
             subpath="nodes/node-1",
             body={"prompt": "Search docs.", "outputs": ["candidate_docs"]},
         )

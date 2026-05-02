@@ -160,7 +160,7 @@ def _surface_catalog_item_from_row(row: dict[str, Any]) -> dict[str, Any]:
     return _decorate_catalog_item(item)
 
 
-def _load_surface_catalog_items(pg: Any, *, surface_name: str = "moon") -> list[dict[str, Any]]:
+def _load_surface_catalog_items(pg: Any, *, surface_name: str = "canvas") -> list[dict[str, Any]]:
     rows = pg.execute(
         """SELECT catalog_item_id, label, icon, family, status, drop_kind,
                   display_order,
@@ -209,7 +209,7 @@ def _normalize_review_payload(payload: Any) -> dict[str, Any] | None:
     return _json_clone(payload)
 
 
-def _load_surface_review_decisions(pg: Any, *, surface_name: str = "moon") -> list[dict[str, Any]]:
+def _load_surface_review_decisions(pg: Any, *, surface_name: str = "canvas") -> list[dict[str, Any]]:
     rows = pg.execute(
         """
         SELECT DISTINCT ON (target_kind, target_ref)
@@ -234,7 +234,7 @@ def _load_surface_review_decisions(pg: Any, *, surface_name: str = "moon") -> li
     return [dict(row) for row in rows or []]
 
 
-def _load_surface_source_policies(pg: Any, *, surface_name: str = "moon") -> dict[str, dict[str, Any]]:
+def _load_surface_source_policies(pg: Any, *, surface_name: str = "canvas") -> dict[str, dict[str, Any]]:
     rows = pg.execute(
         """SELECT source_kind,
                   truth_category, truth_badge, truth_detail,

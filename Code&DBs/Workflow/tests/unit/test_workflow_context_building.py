@@ -13,7 +13,7 @@ def test_context_shard_resolves_scopes_against_container_workspace_when_host_roo
     tmp_path,
 ) -> None:
     container_root = tmp_path / "workspace"
-    target = container_root / "Code&DBs" / "Workflow" / "runtime" / "spec_compiler.py"
+    target = container_root / "Code&DBs" / "Workflow" / "runtime" / "spec_materializer.py"
     target.parent.mkdir(parents=True)
     target.write_text("VALUE = 1\n", encoding="utf-8")
 
@@ -24,14 +24,14 @@ def test_context_shard_resolves_scopes_against_container_workspace_when_host_roo
     )
     resolution_root = context_building._scope_resolution_root(
         repo_root=str(tmp_path / "missing_host"),
-        scope_paths=["Code&DBs/Workflow/runtime/spec_compiler.py"],
+        scope_paths=["Code&DBs/Workflow/runtime/spec_materializer.py"],
     )
 
     shard = context_building._job_execution_context_shard(
         conn=_Conn(),
         job={
             "label": "proof",
-            "write_scope": ["Code&DBs/Workflow/runtime/spec_compiler.py"],
+            "write_scope": ["Code&DBs/Workflow/runtime/spec_materializer.py"],
         },
         spec_verify_refs=[],
         repo_root=str(tmp_path / "missing_host"),
@@ -40,7 +40,7 @@ def test_context_shard_resolves_scopes_against_container_workspace_when_host_roo
 
     assert resolution_root == str(container_root)
     assert "scope_resolution_error" not in shard
-    assert shard["write_scope"] == ["Code&DBs/Workflow/runtime/spec_compiler.py"]
+    assert shard["write_scope"] == ["Code&DBs/Workflow/runtime/spec_materializer.py"]
     assert shard["metrics"]["write_scope_count"] == 1
 
 

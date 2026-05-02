@@ -29,17 +29,17 @@ describe('uiActionLedger', () => {
       },
     });
 
-    const moonEntry = await runUiAction({
-      surface: 'moon',
-      undoScope: 'moon:wf_123',
+    const canvasEntry = await runUiAction({
+      surface: 'canvas',
+      undoScope: 'canvas:wf_123',
       label: 'Attach reference',
       authority: 'build.authority_attachments',
       reason: 'Attach escalation policy evidence.',
       outcome: 'Escalation policy is now available.',
       apply: () => undefined,
       undoDescriptor: {
-        kind: 'moon.payload.restore',
-        scope: 'moon:wf_123',
+        kind: 'canvas.payload.restore',
+        scope: 'canvas:wf_123',
         payload: { workflow: { id: 'wf_123', name: 'Support Intake' } },
       },
     });
@@ -57,8 +57,8 @@ describe('uiActionLedger', () => {
       recovery: 'undo_ready',
       undoable: true,
     });
-    expect(entries.find((entry) => entry.id === moonEntry.id)).toMatchObject({
-      undoScope: 'moon:wf_123',
+    expect(entries.find((entry) => entry.id === canvasEntry.id)).toMatchObject({
+      undoScope: 'canvas:wf_123',
       recovery: 'undo_ready',
       undoable: true,
     });
@@ -66,22 +66,22 @@ describe('uiActionLedger', () => {
 
   test('executes registered undo executors for serialized descriptors', async () => {
     const restorePayload = jest.fn();
-    const unregister = registerUiActionUndoExecutor('moon.payload.restore', (descriptor) => {
+    const unregister = registerUiActionUndoExecutor('canvas.payload.restore', (descriptor) => {
       restorePayload(descriptor.payload);
       return true;
     });
 
     const entry = await runUiAction({
-      surface: 'moon',
-      undoScope: 'moon:draft',
+      surface: 'canvas',
+      undoScope: 'canvas:draft',
       label: 'Restore draft graph',
       authority: 'build.build_graph',
       reason: 'Undo the latest draft graph edit.',
       outcome: 'The draft graph is back to the previous payload.',
       apply: () => undefined,
       undoDescriptor: {
-        kind: 'moon.payload.restore',
-        scope: 'moon:draft',
+        kind: 'canvas.payload.restore',
+        scope: 'canvas:draft',
         payload: { build_graph: { nodes: [{ node_id: 'node-1' }], edges: [] } },
       },
     });

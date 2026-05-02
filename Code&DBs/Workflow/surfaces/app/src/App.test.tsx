@@ -7,7 +7,7 @@ import { AppShell } from './App';
 import { clearRoutesForTest, setRoutesForTest, type RouteRegistryRow } from './shell/routeRegistry';
 import { clearSessionAggregateForTest } from './shell/sessionAggregate';
 
-const appShellMoonMocks = vi.hoisted(() => ({
+const appShellCanvasMocks = vi.hoisted(() => ({
   dirty: false,
   message: 'This draft workflow only exists locally.',
 }));
@@ -27,8 +27,8 @@ vi.mock('./dashboard/CostsPanel', () => ({
   CostsPanel: () => <div>Costs Surface</div>,
 }));
 
-vi.mock('./moon/MoonBuildPage', () => ({
-  MoonBuildPage: ({
+vi.mock('./canvas/CanvasBuildPage', () => ({
+  CanvasBuildPage: ({
     workflowId,
     onDraftStateChange,
     onWorkflowCreated,
@@ -38,10 +38,10 @@ vi.mock('./moon/MoonBuildPage', () => ({
     onWorkflowCreated?: (id: string) => void;
   }) => {
     React.useEffect(() => {
-      const dirty = appShellMoonMocks.dirty && !workflowId;
+      const dirty = appShellCanvasMocks.dirty && !workflowId;
       onDraftStateChange?.(
         dirty
-          ? { dirty: true, message: appShellMoonMocks.message }
+          ? { dirty: true, message: appShellCanvasMocks.message }
           : { dirty: false, message: null },
       );
       return () => onDraftStateChange?.({ dirty: false, message: null });
@@ -128,13 +128,13 @@ const TEST_ROUTES: RouteRegistryRow[] = [
     display_order: 20,
     binding_revision: 'test',
     decision_ref: 'test',
-    component_ref: 'moon/MoonBuildPage.MoonBuildPage',
+    component_ref: 'canvas/CanvasBuildPage.CanvasBuildPage',
     tab_kind_label: 'Build',
-    tab_label_template: '{{moonRunId ? "Run view" : buildWorkflowId ? "Workflow workspace" : "New workflow"}}',
+    tab_label_template: '{{canvasRunId ? "Run view" : buildWorkflowId ? "Workflow workspace" : "New workflow"}}',
     context_label: 'App builder',
     context_detail_template: 'Shape the workflow graph.',
     nav_description_template: 'Jump back into Workflow Build.',
-    nav_keywords: ['build', 'workflow', 'moon'],
+    nav_keywords: ['build', 'workflow', 'canvas'],
     event_bus_kind: 'build',
     keyboard_shortcut: 'ctrl+n',
     draft_guard_required: true,
@@ -153,7 +153,7 @@ const TEST_ROUTES: RouteRegistryRow[] = [
     display_order: 40,
     binding_revision: 'test',
     decision_ref: 'test',
-    component_ref: 'moon/MoonBuildPage.MoonBuildPage',
+    component_ref: 'canvas/CanvasBuildPage.CanvasBuildPage',
     tab_kind_label: 'Run',
     tab_label_template: 'Run view',
     context_label: 'Run observer',
@@ -289,8 +289,8 @@ function clickCommandMenuNewWorkflow() {
 describe('AppShell', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
-    appShellMoonMocks.dirty = false;
-    appShellMoonMocks.message = 'This draft workflow only exists locally.';
+    appShellCanvasMocks.dirty = false;
+    appShellCanvasMocks.message = 'This draft workflow only exists locally.';
     clearSessionAggregateForTest();
     clearRoutesForTest();
     vi.restoreAllMocks();
@@ -386,7 +386,7 @@ describe('AppShell', () => {
   });
 
   test('prompts before leaving a dirty draft builder and stays put when cancelled', async () => {
-    appShellMoonMocks.dirty = true;
+    appShellCanvasMocks.dirty = true;
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<AppShell />);
@@ -407,7 +407,7 @@ describe('AppShell', () => {
   });
 
   test('does not block the draft save handoff into a real workflow', async () => {
-    appShellMoonMocks.dirty = true;
+    appShellCanvasMocks.dirty = true;
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<AppShell />);

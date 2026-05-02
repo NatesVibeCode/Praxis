@@ -65,7 +65,7 @@ def test_materialize_workflow_uses_command_side_runtime(monkeypatch) -> None:
         return {
             "row": {"id": workflow_id, "name": body["title"]},
             "definition": {"workflow_id": workflow_id},
-            "compiled_spec": {},
+            "materialized_spec": {},
             "build_bundle": {
                 "build_graph": {"nodes": [{"node_id": "node-1"}], "edges": []},
                 "projection_status": {"state": "ready"},
@@ -81,7 +81,7 @@ def test_materialize_workflow_uses_command_side_runtime(monkeypatch) -> None:
         lambda row, **kwargs: {
             "workflow": {"id": row["id"], "name": row.get("name")},
             "definition": kwargs.get("definition") or {},
-            "compiled_spec": kwargs.get("compiled_spec") or {},
+            "materialized_spec": kwargs.get("materialized_spec") or {},
             "build_graph": (kwargs.get("build_bundle") or {}).get("build_graph"),
             "compile_preview": kwargs.get("compile_preview"),
         },
@@ -138,7 +138,7 @@ def test_materialize_workflow_fails_closed_on_empty_graph(monkeypatch) -> None:
         lambda *args, **kwargs: {
             "row": {"id": kwargs["workflow_id"], "name": "Empty Graph"},
             "definition": {"workflow_id": kwargs["workflow_id"]},
-            "compiled_spec": {},
+            "materialized_spec": {},
             "build_bundle": {
                 "build_graph": {"nodes": [], "edges": []},
                 "projection_status": {"state": "ready"},
@@ -155,7 +155,7 @@ def test_materialize_workflow_fails_closed_on_empty_graph(monkeypatch) -> None:
             workflow_id="wf_empty",
             enable_full_compose=False,
         )
-    except compile_cqrs.CompileMaterializationError as exc:
+    except compile_cqrs.MaterializationError as exc:
         assert exc.reason_code == "compile.materialize.empty_graph"
         assert exc.details["graph_summary"]["node_count"] == 0
     else:  # pragma: no cover - explicit fail branch for assertion clarity
@@ -204,7 +204,7 @@ def test_materialize_workflow_does_not_save_when_full_compose_fails(monkeypatch)
 
     try:
         compile_cqrs.materialize_workflow("make a custom integration", conn="db")
-    except compile_cqrs.CompileMaterializationError as exc:
+    except compile_cqrs.MaterializationError as exc:
         assert exc.reason_code == "synthesis.llm_call_failed"
         assert exc.details["compose_provenance"]["error"] == "provider timed out"
     else:  # pragma: no cover - explicit fail branch for assertion clarity

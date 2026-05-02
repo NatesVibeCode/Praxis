@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { AtlasConstellation } from './AtlasConstellation';
 import { AtlasContactSheet } from './AtlasContactSheet';
 import { AtlasLedger } from './AtlasLedger';
+import { EventChain, RadioPillGroup } from '../primitives';
 import './AtlasPage.css';
 
 // ── View state ────────────────────────────────────────────────────────
@@ -1096,36 +1097,17 @@ export function AtlasPage() {
       </div>
 
       {/* ── View toggle ── */}
-      <div className="atlas-view-toggle" role="tablist" aria-label="Atlas view">
-        <span
-          role="tab"
-          aria-selected={view === 'constellation'}
-          className={view === 'constellation' ? 'prx-radio-pill checked' : 'prx-radio-pill'}
-          onClick={() => switchView('constellation')}
-          style={{ cursor: 'pointer' }}
-        >
-          map
-        </span>
-        <span
-          role="tab"
-          aria-selected={view === 'contact'}
-          className={view === 'contact' ? 'prx-radio-pill checked' : 'prx-radio-pill'}
-          onClick={() => switchView('contact')}
-          style={{ cursor: 'pointer' }}
-        >
-          contact
-        </span>
-        {view === 'ledger' && (
-          <span
-            role="tab"
-            aria-selected
-            className="prx-radio-pill checked"
-            style={{ cursor: 'pointer' }}
-          >
-            ledger
-          </span>
-        )}
-      </div>
+      <RadioPillGroup
+        ariaLabel="Atlas view"
+        className="atlas-view-toggle"
+        value={view}
+        onChange={(next) => switchView(next as AtlasView)}
+        options={[
+          { value: 'constellation', label: 'map' },
+          { value: 'contact', label: 'contact' },
+          ...(view === 'ledger' ? [{ value: 'ledger', label: 'ledger' }] : []),
+        ]}
+      />
 
       {/* ── HUD top-right: freshness ── */}
       <div
@@ -1307,14 +1289,7 @@ function AtlasProvenanceChain({ node }: AtlasProvenanceProps) {
   return (
     <div className="atlas-card__provenance">
       <div className="atlas-card__provenance-cap">PROVENANCE</div>
-      <div className="prx-chain">
-        {rings.map((r, i) => (
-          <div key={`${r.label}-${i}`} className="ev" data-tone={r.tone}>
-            <div className="hd">{r.label}</div>
-            <div className="what">{r.what}</div>
-          </div>
-        ))}
-      </div>
+      <EventChain items={rings.map((r) => ({ label: r.label, what: r.what, tone: r.tone }))} />
     </div>
   );
 }

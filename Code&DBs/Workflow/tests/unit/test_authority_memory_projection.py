@@ -50,12 +50,33 @@ class _FakeConnection:
             return []
         return self.fetch_responses.pop(0)
 
-    async def execute(self, query: str, *args: Any) -> str:
+    async def execute(self, query: str, *args: Any) -> Any:
         self.executed.append((query, args))
+        if query.strip().upper().startswith("SELECT"):
+            return await self.fetch(query, *args)
         return "OK"
 
     async def close(self) -> None:
         return None
+
+
+def test_fake_connection_execute_select_parity() -> None:
+    async def run() -> None:
+        row = _FakeRow(id=1, name="test")
+        conn = _FakeConnection(fetch_responses=[[row]])
+        
+        # Unified workflow code sometimes uses .execute() for SELECTs 
+        # expecting it to behave like .fetch()
+        results = await conn.execute("SELECT * FROM foo")
+        assert results == [row]
+        assert conn.fetched == ["SELECT * FROM foo"]
+        
+        # Non-SELECT should still return status string
+        status = await conn.execute("UPDATE foo SET name = $1", "bar")
+        assert status == "OK"
+        assert len(conn.executed) == 2
+
+    asyncio.run(run())
 
 
 def test_projections_registered() -> None:

@@ -36,8 +36,8 @@
 
   /*
    * Status-scale tokens — platform-wide semantic run/job states. Platform
-   * surfaces (primitives, modules, the dashboard) use these; Moon surfaces
-   * use the monochrome --moon-status-* scale defined in moon-tokens.css.
+   * surfaces (primitives, modules, the dashboard) use these; Canvas surfaces
+   * use the monochrome --canvas-status-* scale defined in canvas-tokens.css.
    */
   --status-pending: #484f58;
   --status-idle: #8b949e;
@@ -5990,7 +5990,7 @@ body.high-contrast :focus-visible {
         <span class="label">section strip</span>
       </div>
       <h2>Section strip</h2>
-      <p class="note">Cap-marker above a section. Top hairline + numeral + tracked label. Use as the structural sibling of section blocks across Moon and the landing site.</p>
+      <p class="note">Cap-marker above a section. Top hairline + numeral + tracked label. Use as the structural sibling of section blocks across Canvas and the landing site.</p>
       <div class="stage">
         <div class="prx-section-strip"><span class="num">01</span><span class="sep">·</span><span class="label">contract</span></div>
         <div class="prx-section-strip" style="margin-top:24px"><span class="num">02</span><span class="sep">·</span><span class="label">in practice</span></div>
@@ -6585,13 +6585,13 @@ body.high-contrast :focus-visible {
                    "fields":[
                      {"key":"slug","label":"slug","type":"text","placeholder":"refund.batch · plan.composed · authority.event","required":true,"hint":"Dotted lowercase. Stable handle — used in operation contracts, lineage, and validators."},
                      {"key":"category","label":"category","type":"radio","required":true,"options":[{"label":"data","value":"data"},{"label":"query","value":"query"},{"label":"command","value":"command"},{"label":"event","value":"event"}],"hint":"data = primitive type · query/command = operation kind · event = authority_events row type."},
-                     {"key":"label","label":"display label","type":"text","placeholder":"Refund batch contract","hint":"Human-readable name for surfaces like Moon. Optional."}
+                     {"key":"label","label":"display label","type":"text","placeholder":"Refund batch contract","hint":"Human-readable name for surfaces like Canvas. Optional."}
                    ]
                  },
                  {
                    "label":"contract",
                    "title":"Type contract",
-                   "description":"Optional parent + consumes/produces chains. Drives the prescriptive narrowing in Moon and the launch compiler.",
+                   "description":"Optional parent + consumes/produces chains. Drives the prescriptive narrowing in Canvas and the launch compiler.",
                    "fields":[
                      {"key":"parent_slug","label":"parent_slug","type":"text","placeholder":"refund","hint":"Optional. Inherits validators and lineage from parent."},
                      {"key":"consumes","label":"consumes","type":"text","placeholder":"support.queue, payments.ledger","hint":"Comma-separated slugs this type consumes when used as input."},
@@ -6976,7 +6976,7 @@ body.high-contrast :focus-visible {
           <div class="hd"><span>subscribers ·</span><span class="event">plan.composed</span></div>
           <div class="row"><span class="glyph">›</span><span class="name">plan.launch</span><span class="desc">auto-dispatch when launch_intent=true</span></div>
           <div class="row"><span class="glyph">›</span><span class="name">verifier.precompile</span><span class="desc">pre-warm verifier cache</span></div>
-          <div class="row"><span class="glyph">⤳</span><span class="name">moon.observability.tail</span><span class="desc">stream to Moon canvas</span></div>
+          <div class="row"><span class="glyph">⤳</span><span class="name">canvas.observability.tail</span><span class="desc">stream to Canvas canvas</span></div>
           <div class="row"><span class="glyph">⤳</span><span class="name">friction.scan</span><span class="desc">match against operator standing orders</span></div>
         </div>
       </div>
@@ -7334,7 +7334,7 @@ body.high-contrast :focus-visible {
     <section class="demo" id="op-health-demo">
       <div class="prx-section-strip"><span class="num">48</span><span class="sep">·</span><span class="label">operation health</span></div>
       <h2>Operation health dashboard <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-left:8px">functional · composed</span></h2>
-      <p class="note">A "Moon-detail" page for one operation: live gauge (replay rate · error rate · count), latency block-bargraph history, recent receipts as runlog rows, goal panel slice, last receipt's drawer-on-click. All composed from existing primitives — no new visual code.</p>
+      <p class="note">A "Canvas-detail" page for one operation: live gauge (replay rate · error rate · count), latency block-bargraph history, recent receipts as runlog rows, goal panel slice, last receipt's drawer-on-click. All composed from existing primitives — no new visual code.</p>
       <div class="stage" style="padding:0;background:transparent;border:none">
         <div style="display:flex;gap:14px;align-items:center;margin-bottom:12px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em;color:var(--text-muted)">
           <span style="text-transform:uppercase;letter-spacing:0.14em">operation</span>
@@ -7749,7 +7749,7 @@ body.high-contrast :focus-visible {
           <div class="fence-zone" data-zone="outside">
             <div class="zone-title">outside fence</div>
             <div class="scope-row" data-scope="denied"><span class="glyph"></span><span>deny</span><strong>routeRegistry.ts</strong><em>same component_ref</em></div>
-            <div class="scope-row" data-scope="denied"><span class="glyph"></span><span>deny</span><strong>Dashboard / Moon</strong><em>separate surfaces</em></div>
+            <div class="scope-row" data-scope="denied"><span class="glyph"></span><span>deny</span><strong>Dashboard / Canvas</strong><em>separate surfaces</em></div>
             <div class="scope-row" data-scope="held"><span class="glyph"></span><span>hold</span><strong>new API fields</strong><em>needs separate packet</em></div>
           </div>
         </div>

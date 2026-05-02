@@ -30,6 +30,7 @@ from adapters.llm_client import (
     call_llm_streaming,
 )
 from runtime.chat_store import ChatStore
+from runtime.execution_targets import resolve_target_for_transport
 
 _log = logging.getLogger(__name__)
 
@@ -65,21 +66,21 @@ You have access to tools that can:
 - Cancel running workflows
 - Run read-only database queries
 
-Workflow graph authoring tools (legacy moon_* tool names; use when the user asks to build, edit, or launch a workflow):
-- moon_get_build: load the current graph (nodes, edges, gates, contracts, issues). ALWAYS call this BEFORE proposing or making edits — never assume graph state.
-- moon_compose_from_prose: generate a whole graph from a natural-language description. Use when the user is starting from scratch.
-- moon_suggest_next: ask the graph what nodes are LEGAL to add next given current accumulator types. Use when narrowing options.
-- moon_mutate_field: edit any field on a node, edge, or contract via subpath. Use after moon_get_build so you target real ids.
-- moon_launch: launch the composed workflow as a run. Only call after the user confirms.
+Workflow graph authoring tools (legacy canvas_* tool names; use when the user asks to build, edit, or launch a workflow):
+- canvas_get_build: load the current graph (nodes, edges, gates, contracts, issues). ALWAYS call this BEFORE proposing or making edits — never assume graph state.
+- canvas_compose: generate a whole graph from a natural-language description. Use when the user is starting from scratch.
+- canvas_suggest_next: ask the graph what nodes are LEGAL to add next given current accumulator types. Use when narrowing options.
+- canvas_mutate_field: edit any field on a node, edge, or contract via subpath. Use after canvas_get_build so you target real ids.
+- canvas_launch: launch the composed workflow as a run. Only call after the user confirms.
 
-Authoring loop: read graph → propose change in plain English → call moon_mutate_field → re-read with moon_get_build → confirm to user. Don't batch many mutations without showing the user the intermediate state.
+Authoring loop: read graph → propose change in plain English → call canvas_mutate_field → re-read with canvas_get_build → confirm to user. Don't batch many mutations without showing the user the intermediate state.
 
 When the user asks you to do something, use the appropriate tool. Present data clearly. When showing tables, include all relevant columns.
 Workflow mutations are command-bus backed. If a tool returns approval_required or queued metadata, report that state instead of pretending the mutation already wrote through.
 
-When the user has the Workflow canvas open, the selection_context will contain a single entry with kind="moon_context" carrying workflow_id (and possibly selected_node_id, selected_edge_id). The legacy moon_* tools auto-default workflow_id to that entry when you omit it — so when the user says "what's in this workflow" or "add a Slack node here", you can call moon_get_build / moon_mutate_field WITHOUT passing workflow_id and it will target the workflow they're looking at. Only pass workflow_id explicitly when the user names a different workflow.
+When the user has the Workflow canvas open, the selection_context will contain a single entry with kind="canvas_context" carrying workflow_id (and possibly selected_node_id, selected_edge_id). The legacy canvas_* tools auto-default workflow_id to that entry when you omit it — so when the user says "what's in this workflow" or "add a Slack node here", you can call canvas_get_build / canvas_mutate_field WITHOUT passing workflow_id and it will target the workflow they're looking at. Only pass workflow_id explicitly when the user names a different workflow.
 
-The moon_context may also include visible_ui_snapshot. Treat it as a read-only witness of what the operator can currently see, not as saved state. If moon_get_build returns state_mismatch=visible_ui_has_graph_persisted_read_empty, do not say the workflow is empty; say that you can see the visible canvas but the saved build read is stale or unsaved, then use moon_mutate_field/workflow build authority for durable repairs.
+The canvas_context may also include visible_ui_snapshot. Treat it as a read-only witness of what the operator can currently see, not as saved state. If canvas_get_build returns state_mismatch=visible_ui_has_graph_persisted_read_empty, do not say the workflow is empty; say that you can see the visible canvas but the saved build read is stale or unsaved, then use canvas_mutate_field/workflow build authority for durable repairs.
 
 If the user has selected items (shown in the context), reference them when relevant. If they ask to "route these" or "send these to a workflow", use the run_workflow tool with the selected items.
 
@@ -181,7 +182,7 @@ def _chat_max_tokens(
 
 def _selection_context_char_limit(item: dict[str, Any]) -> int:
     kind = str(item.get("kind") or item.get("type") or "").strip()
-    if kind in {"moon_context", "moon_materialize_handoff"}:
+    if kind in {"canvas_context", "canvas_materialize_handoff"}:
         return 12_000
     if kind == "chat_file_context":
         return 16_000
@@ -263,6 +264,12 @@ class ChatOrchestrator:
         # Persist user message
         user_msg_id = self._persist_message(conversation_id, "user", user_content)
 
+        # If this conversation is pinned to an agent_principal, record a
+        # chat-trigger wake so the action lands in the agent's audit ledger
+        # alongside the synchronous chat reply (Phase A trigger convergence).
+        # Best-effort — never block the chat path.
+        self._maybe_request_agent_wake(conversation_id, user_content)
+
         # Load history
         messages = self._load_history(conversation_id, selection_context)
         resolved_max_tokens = _chat_max_tokens(
@@ -290,6 +297,9 @@ class ChatOrchestrator:
                 "tool_results": [],
                 "model_used": model_used,
                 "latency_ms": latency_ms,
+                **resolve_target_for_transport(
+                    transport_type="CLI",
+                ).to_dict(),
             }
 
         # Tool loop
@@ -365,6 +375,11 @@ class ChatOrchestrator:
                 "tool_results": all_tool_results,
                 "model_used": model_used,
                 "latency_ms": response.latency_ms,
+                "usage": response.usage,
+                "response_model": response.model,
+                **resolve_target_for_transport(
+                    transport_type="API",
+                ).to_dict(),
             }
 
         # Max iterations reached
@@ -378,6 +393,9 @@ class ChatOrchestrator:
                 else None
             ),
             "latency_ms": 0,
+            **resolve_target_for_transport(
+                transport_type="API",
+            ).to_dict(),
         }
 
     # ------------------------------------------------------------------
@@ -405,6 +423,9 @@ class ChatOrchestrator:
         # Persist user message
         self._persist_message(conversation_id, "user", user_content)
 
+        # Pinned-agent chat-trigger wake (Phase A — same hook as send_message).
+        self._maybe_request_agent_wake(conversation_id, user_content)
+
         # Load history
         messages = self._load_history(conversation_id, selection_context)
         resolved_max_tokens = _chat_max_tokens(
@@ -426,7 +447,14 @@ class ChatOrchestrator:
             )
             self._chat_store.touch_updated_at(conversation_id)
             yield {"event": "text_delta", "data": {"text": assistant_content}}
-            yield {"event": "done", "data": {"message_id": msg_id, "model_used": model_used, "tool_results_count": 0}}
+            yield {"event": "done", "data": {
+                "message_id": msg_id,
+                "model_used": model_used,
+                "tool_results_count": 0,
+                **resolve_target_for_transport(
+                    transport_type="CLI",
+                ).to_dict(),
+            }}
             return
 
         # Resolve HTTP model lane
@@ -439,6 +467,8 @@ class ChatOrchestrator:
         all_tool_results: list[dict] = []
         full_text = ""
         iteration = 0
+        latest_usage: dict[str, Any] = {}
+        stop_reason: str | None = None
 
         while iteration < _MAX_TOOL_ITERATIONS:
             iteration += 1
@@ -494,6 +524,9 @@ class ChatOrchestrator:
 
                 elif event["type"] == "message_stop":
                     stop_reason = event.get("stop_reason")
+                    usage = event.get("usage")
+                    if isinstance(usage, dict):
+                        latest_usage = usage
 
                 elif event["type"] == "error":
                     yield {"event": "error", "data": {"message": event["message"]}}
@@ -535,6 +568,11 @@ class ChatOrchestrator:
             "message_id": msg_id,
             "model_used": f"{provider}/{model}",
             "tool_results_count": len(all_tool_results),
+            "usage": latest_usage,
+            "stop_reason": stop_reason,
+            **resolve_target_for_transport(
+                transport_type="API",
+            ).to_dict(),
         }}
 
     # ------------------------------------------------------------------
@@ -594,6 +632,62 @@ class ChatOrchestrator:
         title = title[0].upper() + title[1:] if title else "Conversation"
 
         self._chat_store.update_title(conversation_id, title)
+
+    def _maybe_request_agent_wake(
+        self,
+        conversation_id: str,
+        user_content: str,
+    ) -> None:
+        """If this conversation is pinned to an agent_principal in
+        agent_registry.default_conversation_id, record a chat-trigger wake
+        through agent_wake.request. Best-effort — never blocks the chat path.
+
+        Phase A trigger convergence: pinned chat creates an agent_wakes row
+        (trigger_kind='chat') so chat / schedule / webhook all produce the
+        same wake shape and the agent's audit ledger is complete.
+        """
+        try:
+            principal_rows = self._pg.execute(
+                """SELECT agent_principal_ref, status
+                   FROM agent_registry
+                   WHERE default_conversation_id = $1
+                   LIMIT 1""",
+                conversation_id,
+            )
+        except Exception:
+            return
+        if not principal_rows:
+            return
+        principal = dict(principal_rows[0])
+        if str(principal.get("status") or "").strip() != "active":
+            return
+
+        from runtime.operations.commands.agent_principals import (
+            RequestAgentWakeCommand,
+            handle_request_agent_wake,
+        )
+
+        class _Subsystems:
+            def __init__(self, conn: Any) -> None:
+                self._conn = conn
+
+            def get_pg_conn(self) -> Any:
+                return self._conn
+
+        try:
+            command = RequestAgentWakeCommand(
+                agent_principal_ref=principal["agent_principal_ref"],
+                trigger_kind="chat",
+                trigger_source_ref=conversation_id,
+                payload={
+                    "conversation_id": conversation_id,
+                    "user_content_preview": user_content[:500],
+                },
+            )
+            handle_request_agent_wake(command, _Subsystems(self._pg))
+        except Exception:
+            # Wake recording is best-effort; chat continues regardless.
+            pass
 
     def _load_history(
         self,

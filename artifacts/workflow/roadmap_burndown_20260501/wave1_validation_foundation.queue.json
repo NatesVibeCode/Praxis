@@ -56,11 +56,11 @@
       "prompt": "Repair docs/catalog parity failures without hand-authoring docs as hidden authority. If generated docs are stale, route the fix through the generator or catalog metadata. Keep docs as projections of runtime/catalog truth. Submit a code-change candidate and include the focused validation command."
     },
     {
-      "label": "moon_atlas_literal_paths",
+      "label": "canvas_atlas_literal_paths",
       "agent": "google/gemini-3-flash-preview",
       "task_type": "build",
       "verify_refs": [
-        "verify.roadmap_burndown.wave1.moon_atlas_literal_paths"
+        "verify.roadmap_burndown.wave1.canvas_atlas_literal_paths"
       ],
       "timeout": 900,
       "submission_required": true,
@@ -69,7 +69,7 @@
         "Code&DBs/Workflow/surfaces/app",
         "Code&DBs/Workflow/tests"
       ],
-      "prompt": "Fix the Moon/Atlas route literal and UI validation regressions surfaced by the full-suite run. Prefer a single route authority or helper over inline API path strings. Keep UI color/selection policy intact. Add focused tests or update existing tests to prove the UI no longer hardcodes stale run routes."
+      "prompt": "Fix the Canvas/Atlas route literal and UI validation regressions surfaced by the full-suite run. Prefer a single route authority or helper over inline API path strings. Keep UI color/selection policy intact. Add focused tests or update existing tests to prove the UI no longer hardcodes stale run routes."
     }
   ]
 }

@@ -6,7 +6,32 @@ from runtime.workflow._routing import _select_claim_route
 class _ClaimConn:
     def execute(self, query: str, *args):
         if "route_plan_manifest" in query:
-            raise AssertionError("claim routing must not use stored route_plan_manifest")
+            return [
+                {
+                    "route_plan_manifest": {
+                        "jobs": {
+                            "phase_build": {
+                                "route_candidates": [
+                                    {
+                                        "slug": "openai/gpt-5.4",
+                                        "provider_slug": "openai",
+                                        "model_slug": "gpt-5.4",
+                                        "transport_type": "API",
+                                        "adapter_type": "llm_task",
+                                    },
+                                    {
+                                        "slug": "anthropic/claude-sonnet-4-6",
+                                        "provider_slug": "anthropic",
+                                        "model_slug": "claude-sonnet-4-6",
+                                        "transport_type": "CLI",
+                                        "adapter_type": "cli_llm",
+                                    },
+                                ],
+                            }
+                        }
+                    }
+                }
+            ]
         if "FROM route_policy_registry" in query:
             return [
                 {
@@ -42,12 +67,14 @@ class _ClaimConn:
                     "candidate_ref": "cand-openai",
                     "provider_slug": "openai",
                     "model_slug": "gpt-5.4",
+                    "transport_type": "API",
                     "priority": 0,
                 },
                 {
                     "candidate_ref": "cand-anthropic",
                     "provider_slug": "anthropic",
                     "model_slug": "claude-sonnet-4-6",
+                    "transport_type": "CLI",
                     "priority": 0,
                 },
             ]
@@ -145,7 +172,41 @@ class _ClaimConn:
         raise AssertionError(query)
 
 
-def test_select_claim_route_does_not_use_persisted_route_plan_manifest() -> None:
+class _CandidateRefClaimConn(_ClaimConn):
+    def execute(self, query: str, *args):
+        if "route_plan_manifest" in query:
+            return [
+                {
+                    "route_plan_manifest": {
+                        "jobs": {
+                            "phase_build": {
+                                "route_candidates": [
+                                    {
+                                        "slug": "openai/gpt-5.4",
+                                        "candidate_ref": "cand-openai-stale",
+                                        "provider_slug": "openai",
+                                        "model_slug": "gpt-5.4",
+                                        "transport_type": "CLI",
+                                        "adapter_type": "cli_llm",
+                                    },
+                                    {
+                                        "slug": "anthropic/claude-sonnet-4-6",
+                                        "candidate_ref": "cand-anthropic",
+                                        "provider_slug": "anthropic",
+                                        "model_slug": "claude-sonnet-4-6",
+                                        "transport_type": "CLI",
+                                        "adapter_type": "cli_llm",
+                                    },
+                                ],
+                            }
+                        }
+                    }
+                }
+            ]
+        return super().execute(query, *args)
+
+
+def test_select_claim_route_uses_manifest_transport_but_current_catalog_authority() -> None:
     selected = _select_claim_route(
         _ClaimConn(),
         {
@@ -157,4 +218,19 @@ def test_select_claim_route_does_not_use_persisted_route_plan_manifest() -> None
         },
     )
 
-    assert selected in {"openai/gpt-5.4", "anthropic/claude-sonnet-4-6"}
+    assert selected == "anthropic/claude-sonnet-4-6"
+
+
+def test_select_claim_route_uses_manifest_candidate_ref_when_present() -> None:
+    selected = _select_claim_route(
+        _CandidateRefClaimConn(),
+        {
+            "run_id": "run-with-candidate-ref-manifest",
+            "label": "phase_build",
+            "agent_slug": "openai/gpt-5.4",
+            "failover_chain": ["openai/gpt-5.4", "anthropic/claude-sonnet-4-6"],
+            "route_task_type": "build",
+        },
+    )
+
+    assert selected == "anthropic/claude-sonnet-4-6"

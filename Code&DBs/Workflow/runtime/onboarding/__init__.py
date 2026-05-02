@@ -2,7 +2,7 @@
 
 One probe authority, many surfaces. Every onboarding gate — platform prereqs,
 runtime readiness, provider credentials, MCP integration — is a
-``GateProbe`` registered in ``ONBOARDING_GRAPH``. CLI, HTTP, and future Moon
+``GateProbe`` registered in ``ONBOARDING_GRAPH``. CLI, HTTP, and future Canvas
 renderers all read from the same graph.
 
 Public API:

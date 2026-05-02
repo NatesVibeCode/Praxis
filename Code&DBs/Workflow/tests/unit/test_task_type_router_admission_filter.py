@@ -158,12 +158,11 @@ def test_denied_admission_drops_candidate():
 
 
 def test_denied_admission_preserves_other_rows_from_same_provider_with_different_adapter():
-    """If anthropic has two rows in candidates — one resolving to llm_task
-    (denied) and one to a hypothetical admitted adapter — we don't currently
-    model that, because ``_default_adapter_for_provider`` is per-provider
-    not per-row. The test pins the current behavior: all anthropic rows
-    share a single resolved adapter, so all anthropic rows are dropped
-    together when that adapter is denied."""
+    """Admission is row-adapter authority, not a provider-wide default.
+
+    If one anthropic row is API/llm_task and another is CLI/cli_llm, a denial
+    for llm_task must not kill the admitted CLI row from the same provider.
+    """
     conn = _FakeConn([
         {
             "provider_slug": "anthropic",
@@ -172,14 +171,29 @@ def test_denied_admission_preserves_other_rows_from_same_provider_with_different
             "policy_reason": "",
             "decision_ref": "",
         },
+        {
+            "provider_slug": "anthropic",
+            "adapter_type": "cli_llm",
+            "admitted_by_policy": True,
+            "policy_reason": "",
+            "decision_ref": "",
+        },
     ])
     router = _RouterShim(conn)
     rows = [
-        {"provider_slug": "anthropic", "model_slug": "claude-opus-4-6"},
-        {"provider_slug": "anthropic", "model_slug": "claude-sonnet-4-6"},
+        {
+            "provider_slug": "anthropic",
+            "model_slug": "claude-opus-4-6",
+            "adapter_type": "llm_task",
+        },
+        {
+            "provider_slug": "anthropic",
+            "model_slug": "claude-sonnet-4-6",
+            "adapter_type": "cli_llm",
+        },
     ]
     kept = _call_filter(router, "review", rows)
-    assert kept == [], "all anthropic candidates should be dropped under a provider-wide denial"
+    assert kept == [rows[1]]
 
 
 # ------------------------------------------------------------- admit cases

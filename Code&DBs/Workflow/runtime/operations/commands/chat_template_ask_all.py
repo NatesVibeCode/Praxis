@@ -25,7 +25,7 @@ class ChatRoutePin(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider_slug: str = Field(description="Provider slug, e.g. 'openrouter'.")
-    model_slug: str = Field(description="Model slug, e.g. 'moonshotai/kimi-k2.6'.")
+    model_slug: str = Field(description="Model slug, e.g. 'canvasshotai/kimi-k2.6'.")
 
     @field_validator("provider_slug", "model_slug", mode="before")
     @classmethod

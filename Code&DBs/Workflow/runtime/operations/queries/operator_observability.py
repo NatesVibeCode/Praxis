@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-import json
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -19,9 +18,14 @@ from runtime.queue_admission import (
     query_queue_depth_snapshot,
 )
 from runtime.receipt_store import list_receipts, receipt_stats
+from runtime.workflow.unified import get_run_status
 from surfaces.api.handlers import _bug_surface_contract as _bug_contract
 from surfaces.api.handlers._shared import _bug_to_dict, _serialize
 from surfaces.api.operator_read import NativeOperatorQueryFrontdoor
+
+
+_IN_FLIGHT_RUN_STATES = frozenset({"queued", "running"})
+_RUN_STATUS_AUTHORITY = "runtime.workflow.unified.get_run_status"
 
 
 def _resolved_env(subsystems: Any) -> dict[str, str] | None:
@@ -89,6 +93,62 @@ def _queue_depth_snapshot(pg: Any) -> dict[str, Any]:
             "queue_depth_utilization_pct": 0.0,
             "queue_depth_error": str(exc),
         }
+
+
+def _elapsed_since(value: object, *, now: datetime) -> float | None:
+    if not isinstance(value, datetime):
+        return None
+    timestamp = value
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return round((now - timestamp).total_seconds(), 1)
+
+
+def _in_flight_workflow_snapshots(conn: Any, *, limit: int = 10) -> list[dict[str, Any]]:
+    capped_limit = max(1, min(int(limit), 50))
+    candidate_rows = conn.execute(
+        f"""SELECT run_id, current_state, requested_at
+        FROM workflow_runs
+        WHERE current_state IN ('queued', 'running')
+        ORDER BY requested_at DESC LIMIT {capped_limit}""",
+    )
+    now = datetime.now(timezone.utc)
+    in_flight: list[dict[str, Any]] = []
+    for row in candidate_rows:
+        run_id = str(row["run_id"])
+        status_data = get_run_status(conn, run_id)
+        if not status_data:
+            continue
+        status = str(
+            status_data.get("status")
+            or status_data.get("current_state")
+            or row["current_state"]
+            or ""
+        )
+        if status not in _IN_FLIGHT_RUN_STATES:
+            continue
+        total_jobs = int(status_data.get("total_jobs") or 0)
+        completed_jobs = int(status_data.get("completed_jobs") or 0)
+        if total_jobs > 0 and completed_jobs >= total_jobs:
+            continue
+        created_at = (
+            status_data.get("created_at")
+            or status_data.get("requested_at")
+            or row["requested_at"]
+        )
+        in_flight.append(
+            {
+                "run_id": run_id,
+                "workflow_id": status_data.get("workflow_id"),
+                "workflow_name": status_data.get("spec_name") or "",
+                "status": status,
+                "total_jobs": total_jobs,
+                "completed_jobs": completed_jobs,
+                "elapsed_seconds": _elapsed_since(created_at, now=now),
+                "status_authority": _RUN_STATUS_AUTHORITY,
+            }
+        )
+    return in_flight
 
 
 def _parse_bug_status(bt_mod: Any, raw_status: object):
@@ -347,42 +407,7 @@ def handle_query_operator_status_snapshot(
     in_flight_authority_ready = True
     in_flight_error: str | None = None
     try:
-        running_rows = conn.execute(
-            """SELECT run_id, current_state, requested_at, request_envelope
-            FROM workflow_runs
-            WHERE current_state = 'running'
-            ORDER BY requested_at DESC LIMIT 10""",
-        )
-        now = datetime.now(timezone.utc)
-        for row in running_rows:
-            envelope = row["request_envelope"]
-            if isinstance(envelope, str):
-                try:
-                    envelope = json.loads(envelope)
-                except json.JSONDecodeError:
-                    envelope = {}
-            if not isinstance(envelope, dict):
-                envelope = {}
-            outbox_count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM workflow_outbox WHERE run_id = $1 AND authority_table = 'receipts'",
-                row["run_id"],
-            )
-            completed = int(outbox_count[0]["cnt"]) if outbox_count else 0
-            elapsed = None
-            if row["requested_at"]:
-                elapsed = round((now - row["requested_at"]).total_seconds(), 1)
-            total_jobs = int(envelope.get("total_jobs") or 0)
-            if total_jobs > 0 and completed >= total_jobs:
-                continue
-            in_flight.append(
-                {
-                    "run_id": row["run_id"],
-                    "workflow_name": envelope.get("name") or envelope.get("spec_name", ""),
-                    "total_jobs": total_jobs,
-                    "completed_jobs": completed,
-                    "elapsed_seconds": elapsed,
-                }
-            )
+        in_flight = _in_flight_workflow_snapshots(conn)
     except Exception as exc:
         in_flight_authority_ready = False
         in_flight_error = str(exc)
@@ -403,6 +428,7 @@ def handle_query_operator_status_snapshot(
         "since_hours": query.since_hours,
         "zone_authority_ready": zone_authority_ready,
         "in_flight_authority_ready": in_flight_authority_ready,
+        "in_flight_status_authority": _RUN_STATUS_AUTHORITY,
         "in_flight_error": in_flight_error,
         "observability_state": (
             "ready"

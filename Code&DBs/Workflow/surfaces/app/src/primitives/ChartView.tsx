@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 
 interface ChartViewProps {
   chartType: 'bar' | 'line' | 'pie';
@@ -12,9 +12,18 @@ const W = 320;
 const H = 180;
 const PAD = { top: 12, right: 12, bottom: 36, left: 44 };
 
-export function ChartView({ chartType, data, xKey, yKey, cellOpacities }: ChartViewProps) {
-  const COLORS = ['#58a6ff', '#3fb950', '#d29922', '#f85149', '#bc8cff', '#79c0ff'];
+const TONES = ['ok', 'warn', 'err', 'dim', 'live', 'ok'] as const;
 
+function toneVar(index: number): string {
+  const tone = TONES[index % TONES.length];
+  if (tone === 'ok') return 'var(--success)';
+  if (tone === 'warn') return 'var(--warning)';
+  if (tone === 'err') return 'var(--danger)';
+  if (tone === 'live') return 'var(--accent)';
+  return 'var(--text-muted)';
+}
+
+export function ChartView({ chartType, data, xKey, yKey, cellOpacities }: ChartViewProps) {
   const values = useMemo(
     () => data.map((d) => Number(d[yKey] ?? 0)),
     [data, yKey],
@@ -30,20 +39,8 @@ export function ChartView({ chartType, data, xKey, yKey, cellOpacities }: ChartV
 
   if (data.length === 0) {
     return (
-      <div style={{
-        background: 'var(--bg-card, #161b22)',
-        border: '1px solid var(--border, #30363d)',
-        borderRadius: 'var(--radius, 6px)',
-        padding: 'var(--space-lg, 16px)',
-        color: 'var(--text-muted, #8b949e)',
-        fontSize: 13,
-        textAlign: 'center',
-        height: H,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        No data
+      <div className="prx-frame" data-tone="dim">
+        <span>No data</span>
       </div>
     );
   }
@@ -61,12 +58,12 @@ export function ChartView({ chartType, data, xKey, yKey, cellOpacities }: ChartV
       const y2 = cy + r * Math.sin(angle);
       const large = sweep > Math.PI ? 1 : 0;
       const path = `M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z`;
-      return { path, color: COLORS[i % COLORS.length], opacity: cellOpacities?.[i] ?? 1 };
+      return { path, color: toneVar(i), opacity: cellOpacities?.[i] ?? 1 };
     });
     return (
-      <svg width={W} height={H} style={{ display: 'block' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="prx-chart-svg">
         {slices.map((s, i) => (
-          <path key={i} d={s.path} fill={s.color} opacity={s.opacity} stroke="var(--bg-card, #161b22)" strokeWidth={1} />
+          <path key={i} d={s.path} fill={s.color} opacity={s.opacity} stroke="var(--bg-card)" strokeWidth={1} />
         ))}
       </svg>
     );
@@ -80,17 +77,17 @@ export function ChartView({ chartType, data, xKey, yKey, cellOpacities }: ChartV
     });
     const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
     return (
-      <svg width={W} height={H} style={{ display: 'block' }}>
-        <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="var(--border, #30363d)" strokeWidth={1} />
-        <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="var(--border, #30363d)" strokeWidth={1} />
-        <path d={d} fill="none" stroke="#58a6ff" strokeWidth={2} />
+      <svg viewBox={`0 0 ${W} ${H}`} className="prx-chart-svg">
+        <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
+        <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
+        <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2} />
         {pts.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={3} fill="#58a6ff" opacity={cellOpacities?.[i] ?? 1} />
+          <circle key={i} cx={p.x} cy={p.y} r={3} fill="var(--accent)" opacity={cellOpacities?.[i] ?? 1} />
         ))}
         {labels.map((l, i) => {
           const x = PAD.left + (i / Math.max(labels.length - 1, 1)) * innerW;
           return (
-            <text key={i} x={x} y={H - 4} textAnchor="middle" fill="#8b949e" fontSize={9}>
+            <text key={i} x={x} y={H - 4} textAnchor="middle" fill="var(--text-muted)" fontSize={9}>
               {l.slice(0, 8)}
             </text>
           );
@@ -99,12 +96,11 @@ export function ChartView({ chartType, data, xKey, yKey, cellOpacities }: ChartV
     );
   }
 
-  // bar (default)
   const barW = innerW / values.length - 4;
   return (
-    <svg width={W} height={H} style={{ display: 'block' }}>
-      <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="var(--border, #30363d)" strokeWidth={1} />
-      <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="var(--border, #30363d)" strokeWidth={1} />
+    <svg viewBox={`0 0 ${W} ${H}`} className="prx-chart-svg">
+      <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
+      <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
       {values.map((v, i) => {
         const bh = (v / maxVal) * innerH;
         const x = PAD.left + i * (innerW / values.length) + 2;
@@ -113,11 +109,11 @@ export function ChartView({ chartType, data, xKey, yKey, cellOpacities }: ChartV
           <g key={i}>
             <rect
               x={x} y={y} width={barW} height={bh}
-              fill={COLORS[i % COLORS.length]}
+              fill={toneVar(i)}
               opacity={cellOpacities?.[i] ?? 1}
               rx={2}
             />
-            <text x={x + barW / 2} y={H - 4} textAnchor="middle" fill="#8b949e" fontSize={9}>
+            <text x={x + barW / 2} y={H - 4} textAnchor="middle" fill="var(--text-muted)" fontSize={9}>
               {labels[i].slice(0, 8)}
             </text>
           </g>

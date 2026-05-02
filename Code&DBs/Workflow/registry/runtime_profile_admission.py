@@ -56,6 +56,10 @@ class RuntimeProfileAdmittedCandidate:
     provider_name: str
     provider_slug: str
     model_slug: str
+    transport_type: str | None
+    host_provider_slug: str
+    variant: str
+    effort_slug: str
     priority: int
     balance_weight: int
     position_index: int
@@ -285,6 +289,10 @@ def load_admitted_runtime_profile_candidates(
                candidate.provider_name,
                candidate.provider_slug,
                candidate.model_slug,
+               candidate.transport_type,
+               candidate.host_provider_slug,
+               candidate.variant,
+               candidate.effort_slug,
                candidate.priority,
                candidate.balance_weight,
                candidate.route_tier,
@@ -393,6 +401,10 @@ def load_admitted_runtime_profile_candidates(
                 provider_name=_require_text(row["provider_name"], field_name="provider_name"),
                 provider_slug=_require_text(row["provider_slug"], field_name="provider_slug"),
                 model_slug=_require_text(row["model_slug"], field_name="model_slug"),
+                transport_type=_optional_text(row.get("transport_type")),
+                host_provider_slug=str(row.get("host_provider_slug") or ""),
+                variant=str(row.get("variant") or ""),
+                effort_slug=str(row.get("effort_slug") or ""),
                 priority=_require_int(row["priority"], field_name="priority"),
                 balance_weight=_require_int(row["balance_weight"], field_name="balance_weight"),
                 position_index=_require_int(row["position_index"], field_name="position_index"),

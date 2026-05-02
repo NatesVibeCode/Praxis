@@ -1,7 +1,7 @@
 """Phase 2.1.E regression: packet_map entries carry typed release gates.
 
 Before this change, the packet_map entry exposed ``expected_gates``
-(verify_ref list) but no typed gate contracts. Moon-generated workflows
+(verify_ref list) but no typed gate contracts. Canvas-generated workflows
 shipped without release gates that could auto-satisfy from typed state,
 forcing gate evaluation to fall back to human review (BUG-2729F8B7).
 
@@ -24,7 +24,7 @@ _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
-from runtime.spec_compiler import _build_packet_map_entry, PlanPacket
+from runtime.spec_materializer import _build_packet_map_entry, PlanPacket
 
 
 def _job(**overrides):

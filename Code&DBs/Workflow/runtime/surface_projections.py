@@ -61,7 +61,7 @@ def _total_runs_reducer(subs: Any, *, source_ref: str, **_: Any) -> dict[str, An
 
 
 def _legal_templates_reducer(subs: Any, *, source_ref: str, **kwargs: Any) -> dict[str, Any]:
-    from runtime.surface_template_compiler import legal_templates_reducer as _reducer
+    from runtime.surface_template_materializer import legal_templates_reducer as _reducer
 
     return _reducer(subs, source_ref=source_ref, query_params=kwargs.get("query_params"))
 
@@ -82,8 +82,8 @@ def _default_shell_state() -> dict[str, Any]:
         "buildWorkflowId": None,
         "buildIntent": None,
         "builderSeed": None,
-        "buildView": "moon",
-        "moonRunId": None,
+        "buildView": "canvas",
+        "canvasRunId": None,
         "dashboardDetail": None,
     }
 
@@ -165,13 +165,13 @@ def _fold_shell_event(state: dict[str, Any], event_type: str, payload: dict[str,
             next_state["activeTabId"] = "build"
             next_state["buildWorkflowId"] = workflow_id or None
             next_state["buildIntent"] = intent or None
-            next_state["buildView"] = "moon"
-            next_state["moonRunId"] = None
+            next_state["buildView"] = "canvas"
+            next_state["canvasRunId"] = None
             next_state["dashboardDetail"] = None
         elif initial_route == "route.app.run":
             run_id = str(slot_values.get("run_id") or "").strip()
             next_state["activeTabId"] = "build"
-            next_state["moonRunId"] = run_id or None
+            next_state["canvasRunId"] = run_id or None
             next_state["dashboardDetail"] = None
         return next_state
 
@@ -275,7 +275,7 @@ REDUCERS: dict[str, Reducer] = {
     "runtime.surface_projections.pass_rate_reducer": _pass_rate_reducer,
     "runtime.surface_projections.open_bugs_reducer": _open_bugs_reducer,
     "runtime.surface_projections.total_runs_reducer": _total_runs_reducer,
-    "runtime.surface_template_compiler.legal_templates_reducer": _legal_templates_reducer,
+    "runtime.surface_template_materializer.legal_templates_reducer": _legal_templates_reducer,
     "runtime.surface_projections.reduce_ui_shell_state": _reduce_ui_shell_state,
 }
 

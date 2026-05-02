@@ -116,12 +116,14 @@ def test_provider_route_truth_reports_blocked_reasons(monkeypatch) -> None:
                     {
                         "provider_slug": "openai",
                         "model_slug": "gpt-x",
+                        "transport_type": "CLI",
                         "is_runnable": False,
                         "primary_removal_reason_code": "control.off",
                     },
                     {
                         "provider_slug": "openai",
                         "model_slug": "gpt-y",
+                        "transport_type": "CLI",
                         "is_runnable": True,
                     },
                 ],
@@ -140,8 +142,51 @@ def test_provider_route_truth_reports_blocked_reasons(monkeypatch) -> None:
     assert result["view"] == "provider_route_truth"
     assert result["summary"]["route_state"] == "mixed"
     assert result["summary"]["reason_counts"] == {"control.off": 1}
+    assert result["summary"]["privacy_counts"]["by_state"] == {"not_required": 2}
     assert len(result["legal_routes"]) == 1
     assert len(result["blocked_routes"]) == 1
+
+
+def test_provider_route_truth_applies_privacy_gate_to_runnable_api_route(monkeypatch) -> None:
+    def _fake_component(_subsystems, *, operation_name: str, payload: dict | None = None):
+        if operation_name == "operator.provider_control_plane":
+            return {
+                "projection_freshness": {"freshness_status": "fresh"},
+                "rows": [
+                    {
+                        "provider_slug": "openrouter",
+                        "model_slug": "unknown/model",
+                        "transport_type": "API",
+                        "is_runnable": True,
+                        "capability_state": "runnable",
+                        "effective_dispatch_state": "enabled",
+                        "removal_reasons": [],
+                        "source_refs": ["projection.private_provider_control_plane_snapshot"],
+                    }
+                ],
+            }
+        if operation_name == "operator.model_access_control_matrix":
+            return {"counts": {"by_control_state": {"on": 1}}}
+        raise AssertionError(operation_name)
+
+    monkeypatch.setattr(operator_composed, "_component", _fake_component)
+
+    result = operator_composed.handle_query_provider_route_truth(
+        operator_composed.QueryProviderRouteTruth(provider_slug="openrouter"),
+        object(),
+    )
+
+    assert result["summary"]["route_state"] == "blocked"
+    assert result["summary"]["runnable_routes"] == 0
+    assert result["summary"]["reason_counts"] == {"openrouter_policy.no_approved_endpoint": 1}
+    assert result["summary"]["privacy_counts"]["by_state"] == {"blocked": 1}
+    blocked = result["blocked_routes"][0]
+    assert blocked["is_runnable"] is False
+    assert blocked["capability_state"] == "removed"
+    assert blocked["effective_dispatch_state"] == "disabled"
+    assert blocked["privacy_posture"]["dispatch_allowed"] is False
+    assert blocked["privacy_posture"]["reason_code"] == "openrouter_policy.no_approved_endpoint"
+    assert blocked["removal_reasons"][0]["reason_code"] == "openrouter_policy.no_approved_endpoint"
 
 
 def test_operation_forge_previews_register_payload_for_new_operation() -> None:

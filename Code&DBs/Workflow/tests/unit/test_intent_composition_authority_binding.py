@@ -10,7 +10,7 @@ from runtime.intent_composition import (
     _packet_write_paths_to_targets,
     attach_authority_bindings_to_packets,
 )
-from runtime.spec_compiler import PlanPacket
+from runtime.spec_materializer import PlanPacket
 
 
 @dataclass

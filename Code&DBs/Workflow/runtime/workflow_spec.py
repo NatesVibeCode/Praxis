@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from runtime.workflow_graph_compiler import (
+from runtime.workflow_graph_materializer import (
     GraphWorkflowCompileError,
     compile_graph_workflow_request,
     spec_uses_graph_runtime,

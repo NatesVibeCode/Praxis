@@ -35,12 +35,24 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 0
 fi
 
-session_id="$(python3 -c "
+payload="$(cat 2>/dev/null)"
+
+session_id="$(printf '%s' "$payload" | python3 -c "
 import json, sys
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(sys.stdin.read() or '{}')
     sid = str(data.get('session_id') or '').strip()
     print(sid if sid else '')
+except Exception:
+    pass
+" 2>/dev/null || echo "")"
+
+transcript_path="$(printf '%s' "$payload" | python3 -c "
+import json, sys
+try:
+    data = json.loads(sys.stdin.read() or '{}')
+    p = str(data.get('transcript_path') or '').strip()
+    print(p if p else '')
 except Exception:
     pass
 " 2>/dev/null || echo "")"
@@ -49,6 +61,84 @@ except Exception:
 # timestamp as a fallback so markers are unique per termination event.
 if [[ -z "$session_id" ]]; then
     session_id="anon_${PPID}_$(date +%s)"
+fi
+
+# Skip marker write when the session produced durable signals — the work
+# is captured elsewhere (commit, bug filing, roadmap row, ingested fact),
+# so a closeout marker would be noise. We err toward suppression: any of
+# Edit / Write / NotebookEdit, any praxis_operator_* / praxis_bugs /
+# praxis_ingest tool call, or any Bash 'git commit' / 'gh pr create'
+# counts as "captured work."
+#
+# Pure-research sessions (only Read/Bash with no commits) still get a
+# marker — those are the ones where there might be durable knowledge
+# (decisions, ideas) worth filing through the closeout skill.
+if [[ -f "$transcript_path" ]]; then
+    durable_signal="$(python3 - "$transcript_path" <<'EOF' 2>/dev/null || echo no
+import json, sys
+path = sys.argv[1]
+
+DURABLE_TOOLS = {
+    "Edit", "Write", "NotebookEdit",
+}
+DURABLE_PRAXIS_PREFIXES = (
+    "mcp__praxis__praxis_bugs",
+    "mcp__praxis__praxis_operator_write",
+    "mcp__praxis__praxis_operator_closeout",
+    "mcp__praxis__praxis_operator_decisions",
+    "mcp__praxis__praxis_operator_architecture_policy",
+    "mcp__praxis__praxis_operator_ideas",
+    "mcp__praxis__praxis_operator_relations",
+    "mcp__praxis__praxis_ingest",
+)
+GIT_COMMIT_HINTS = (
+    "git commit",
+    "git push",
+    "gh pr create",
+    "praxis_operator_write",
+    "praxis_operator_closeout",
+    "praxis_operator_decisions",
+    "praxis_operator_architecture_policy",
+    "praxis_bugs",
+    "praxis_ingest",
+)
+
+try:
+    with open(path) as fp:
+        for line in fp:
+            try:
+                ev = json.loads(line)
+            except Exception:
+                continue
+            msg = ev.get("message") or {}
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for c in content:
+                if not isinstance(c, dict) or c.get("type") != "tool_use":
+                    continue
+                name = c.get("name", "")
+                if name in DURABLE_TOOLS:
+                    print("yes")
+                    sys.exit(0)
+                if any(name.startswith(p) for p in DURABLE_PRAXIS_PREFIXES):
+                    print("yes")
+                    sys.exit(0)
+                if name == "Bash":
+                    cmd = (c.get("input") or {}).get("command", "") or ""
+                    for hint in GIT_COMMIT_HINTS:
+                        if hint in cmd:
+                            print("yes")
+                            sys.exit(0)
+    print("no")
+except Exception:
+    print("no")
+EOF
+)"
+    if [[ "$durable_signal" == "yes" ]]; then
+        # Captured work — no marker. Hook fired without writing to MARKER_DIR.
+        exit 0
+    fi
 fi
 
 # Sanitize the session_id for use as a filename (no slashes, no colons).

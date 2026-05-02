@@ -30,7 +30,7 @@ class _CapturingConn:
 def _call_upsert(repo: PostgresTaskTypeRoutingRepository, **overrides: Any) -> None:
     defaults: dict[str, Any] = {
         "task_type": "build",
-        "model_slug": "moonshotai/kimi-k2.6",
+        "model_slug": "canvasshotai/kimi-k2.6",
         "provider_slug": "openrouter",
         "transport_type": "API",
         "permitted": True,
@@ -62,14 +62,21 @@ def test_caller_supplied_API_transport_lands_in_sql_args() -> None:
     """The bug fix: openrouter API rows must land as transport_type='API', not 'CLI'."""
     conn = _CapturingConn()
     repo = PostgresTaskTypeRoutingRepository(conn)
-    _call_upsert(repo, provider_slug="openrouter", transport_type="API")
+    _call_upsert(
+        repo,
+        provider_slug="openrouter",
+        transport_type="API",
+        candidate_ref="candidate.openrouter.canvasshotai/kimi-k2.6",
+    )
 
     assert len(conn.executions) == 1
     _, args = conn.executions[0]
-    # Positional args after the SQL: $1=task_type, $2=model_slug, $3=provider_slug, $4=transport_type, ...
+    # Positional args after the SQL: $1=task_type, $2=model_slug,
+    # $3=provider_slug, $4=transport_type, $5=candidate_ref, ...
     assert args[0] == "build"
     assert args[2] == "openrouter"
     assert args[3] == "API"
+    assert args[4] == "candidate.openrouter.canvasshotai/kimi-k2.6"
 
 
 def test_caller_supplied_CLI_transport_lands_in_sql_args() -> None:
@@ -127,3 +134,22 @@ def test_on_conflict_now_updates_transport_type() -> None:
     assert "transport_type = EXCLUDED.transport_type" in sql, (
         "ON CONFLICT must reset transport_type so existing wrong-transport rows get corrected"
     )
+
+
+def test_on_conflict_updates_candidate_identity_fields() -> None:
+    """Derived routes must keep the DB edge aligned with the selected candidate."""
+    conn = _CapturingConn()
+    repo = PostgresTaskTypeRoutingRepository(conn)
+    _call_upsert(
+        repo,
+        candidate_ref="candidate.openrouter.canvasshotai/kimi-k2.6",
+        host_provider_slug="canvasshotai",
+        variant="",
+        effort_slug="",
+    )
+
+    sql, args = conn.executions[0]
+    assert "candidate_ref = EXCLUDED.candidate_ref" in sql
+    assert "host_provider_slug = EXCLUDED.host_provider_slug" in sql
+    assert args[4] == "candidate.openrouter.canvasshotai/kimi-k2.6"
+    assert args[5] == "canvasshotai"

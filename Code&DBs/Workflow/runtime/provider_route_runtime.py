@@ -34,6 +34,9 @@ from registry.model_routing import (
     ModelRoutingError,
 )
 from registry.provider_routing import (
+    ProviderBudgetWindowAuthorityRecord,
+    ProviderRouteAuthority,
+    ProviderRouteHealthWindowAuthorityRecord,
     RouteEligibilityStateAuthorityRecord,
     load_provider_route_authority_snapshot,
     select_route_eligibility_state,
@@ -428,6 +431,58 @@ def _selected_failover_binding(
     )
 
 
+def _matching_source_windows(
+    records: tuple[object, ...],
+    *,
+    source_window_refs: tuple[str, ...],
+    record_id_field: str,
+) -> tuple[object, ...]:
+    source_window_ref_set = set(source_window_refs)
+    return tuple(
+        record
+        for record in records
+        if getattr(record, record_id_field) in source_window_ref_set
+    )
+
+
+def _route_source_health_windows(
+    route_authority: ProviderRouteAuthority,
+    *,
+    route_eligibility_state: RouteEligibilityStateAuthorityRecord,
+) -> tuple[ProviderRouteHealthWindowAuthorityRecord, ...]:
+    return tuple(
+        _matching_source_windows(
+            tuple(
+                route_authority.provider_route_health_windows.get(
+                    route_eligibility_state.candidate_ref,
+                    (),
+                )
+            ),
+            source_window_refs=route_eligibility_state.source_window_refs,
+            record_id_field="provider_route_health_window_id",
+        )
+    )
+
+
+def _route_source_budget_windows(
+    route_authority: ProviderRouteAuthority,
+    *,
+    route_eligibility_state: RouteEligibilityStateAuthorityRecord,
+) -> tuple[ProviderBudgetWindowAuthorityRecord, ...]:
+    return tuple(
+        _matching_source_windows(
+            tuple(
+                route_authority.provider_budget_windows.get(
+                    route_eligibility_state.provider_policy_id,
+                    (),
+                )
+            ),
+            source_window_refs=route_eligibility_state.source_window_refs,
+            record_id_field="provider_budget_window_id",
+        )
+    )
+
+
 def _ensure_fresh_failover_route_state(
     *,
     runtime_profile: RuntimeProfile,
@@ -464,6 +519,8 @@ class ProviderRouteRuntimeResolution:
     as_of: datetime
     provider_failover_bindings: tuple[ProviderFailoverBindingAuthorityRecord, ...] = ()
     selected_provider_failover_binding: ProviderFailoverBindingAuthorityRecord | None = None
+    source_provider_route_health_windows: tuple[ProviderRouteHealthWindowAuthorityRecord, ...] = ()
+    source_provider_budget_windows: tuple[ProviderBudgetWindowAuthorityRecord, ...] = ()
     route_catalog_authority: str = "registry.route_catalog_repository"
     route_authority: str = "registry.provider_routing"
     failover_authority: str | None = None
@@ -507,6 +564,14 @@ class ProviderRouteRuntimeResolution:
                 "source_window_refs": list(self.route_eligibility_state.source_window_refs),
                 "evaluated_at": self.route_eligibility_state.evaluated_at.isoformat(),
                 "decision_ref": self.route_eligibility_state.decision_ref,
+                "source_provider_route_health_window_ids": [
+                    record.provider_route_health_window_id
+                    for record in self.source_provider_route_health_windows
+                ],
+                "source_provider_budget_window_ids": [
+                    record.provider_budget_window_id
+                    for record in self.source_provider_budget_windows
+                ],
             },
         }
         if self.failover_authority is not None and self.selected_provider_failover_binding is not None:
@@ -737,6 +802,14 @@ async def resolve_provider_route_runtime(
             route_eligibility_state=route_eligibility_state,
             as_of=normalized_as_of,
         )
+    source_provider_route_health_windows = _route_source_health_windows(
+        route_authority_snapshot,
+        route_eligibility_state=route_eligibility_state,
+    )
+    source_provider_budget_windows = _route_source_budget_windows(
+        route_authority_snapshot,
+        route_eligibility_state=route_eligibility_state,
+    )
     return ProviderRouteRuntimeResolution(
         runtime_profile=normalized_runtime_profile,
         route_decision=route_decision,
@@ -744,6 +817,8 @@ async def resolve_provider_route_runtime(
         as_of=normalized_as_of,
         provider_failover_bindings=failover_bindings,
         selected_provider_failover_binding=selected_failover_binding,
+        source_provider_route_health_windows=source_provider_route_health_windows,
+        source_provider_budget_windows=source_provider_budget_windows,
         failover_authority=(
             "registry.endpoint_failover" if selected_failover_binding else None
         ),

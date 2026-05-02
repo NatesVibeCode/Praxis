@@ -8,7 +8,7 @@ import json
 import re
 from typing import Any
 
-from runtime.definition_compile_kernel import definition_revision, materialize_definition
+from runtime.definition_materialize_kernel import definition_revision, materialize_definition
 from runtime.edge_release import normalize_edge_release, with_edge_release
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -418,14 +418,14 @@ def _collect_retrieval_gaps(definition: dict[str, Any]) -> list[dict[str, Any]]:
         # No definition_graph at all — this is a pre-migration bundle; stay
         # silent (preserves backwards compatibility with legacy definitions).
         return []
-    compile_provenance = (
-        definition.get("compile_provenance")
-        if isinstance(definition.get("compile_provenance"), dict)
+    materialize_provenance = (
+        definition.get("materialize_provenance")
+        if isinstance(definition.get("materialize_provenance"), dict)
         else {}
     )
     semantic_retrieval = (
-        compile_provenance.get("semantic_retrieval")
-        if isinstance(compile_provenance.get("semantic_retrieval"), dict)
+        materialize_provenance.get("semantic_retrieval")
+        if isinstance(materialize_provenance.get("semantic_retrieval"), dict)
         else {}
     )
     if _as_text(semantic_retrieval.get("mode")) != "semantic":
@@ -899,7 +899,7 @@ def _build_graph(
     return {
         "graph_id": _stable_digest("build_graph", graph_payload),
         "definition_revision": _as_text(definition.get("definition_revision")),
-        "compiler_revision": _as_text((definition.get("compile_provenance") or {}).get("surface_revision")) if isinstance(definition.get("compile_provenance"), dict) else "",
+        "compiler_revision": _as_text((definition.get("materialize_provenance") or {}).get("surface_revision")) if isinstance(definition.get("materialize_provenance"), dict) else "",
         "schema_version": 1,
         "nodes": ordered_nodes,
         "edges": ordered_edges,
@@ -911,7 +911,7 @@ def _build_graph(
 def build_authority_bundle(
     definition: dict[str, Any],
     *,
-    compiled_spec: dict[str, Any] | None = None,
+    materialized_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     materialized = materialize_definition(definition if isinstance(definition, dict) else {})
     import_snapshots = _normalize_import_snapshots(materialized)
@@ -927,7 +927,7 @@ def build_authority_bundle(
             if _as_text(issue.get("severity")) == "blocking" and _as_text(issue.get("issue_id"))
         ],
         "issue_count": len(issues),
-        "compiled_spec_available": isinstance(compiled_spec, dict),
+        "materialized_spec_available": isinstance(materialized_spec, dict),
     }
     build_graph = _build_graph(
         materialized,
@@ -945,27 +945,27 @@ def build_authority_bundle(
         "build_issues": issues,
         "projection_status": projection_status,
     }
-    if isinstance(compiled_spec, dict):
-        bundle["compiled_spec_projection"] = {
+    if isinstance(materialized_spec, dict):
+        bundle["materialized_spec_projection"] = {
             "version": 1,
             "graph_id": build_graph["graph_id"],
             "definition_revision": _as_text(materialized.get("definition_revision")),
-            "compiled_spec": _json_clone(compiled_spec),
+            "materialized_spec": _json_clone(materialized_spec),
         }
     else:
-        bundle["compiled_spec_projection"] = None
+        bundle["materialized_spec_projection"] = None
     return bundle
 
 
 def apply_authority_bundle(
     definition: dict[str, Any],
     *,
-    compiled_spec: dict[str, Any] | None = None,
+    materialized_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     materialized = materialize_definition(definition if isinstance(definition, dict) else {})
-    bundle = build_authority_bundle(materialized, compiled_spec=compiled_spec)
+    bundle = build_authority_bundle(materialized, materialized_spec=materialized_spec)
     for key, value in bundle.items():
-        if key == "compiled_spec_projection":
+        if key == "materialized_spec_projection":
             continue
         materialized[key] = value
     return materialized

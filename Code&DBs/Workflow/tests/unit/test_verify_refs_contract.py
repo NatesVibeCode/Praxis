@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import runtime.compile_index as compile_index
-import runtime.compiler as compiler
+import runtime.materialize_index as materialize_index
+import runtime.materializer as materializer
 import runtime.operating_model_planner as planner
 from runtime.capability_catalog import CapabilityCatalogError
-from runtime.compile_artifacts import CompileArtifactRecord
+from runtime.materialize_artifacts import MaterializeArtifactRecord
 from runtime.verification import (
     VerificationAuthorityError,
     VerificationBinding,
@@ -24,7 +24,7 @@ from runtime.operating_model_planner import (
     plan_definition,
 )
 from runtime.execution.request_building import _workflow_request_payload
-from runtime.workflow_graph_compiler import (
+from runtime.workflow_graph_materializer import (
     GraphWorkflowCompileError,
     compile_graph_workflow_request,
     spec_uses_graph_runtime,
@@ -398,11 +398,11 @@ def test_get_verify_bindings_can_filter_to_one_job_label() -> None:
     ]
 
 
-def test_compile_spec_emits_verify_refs_and_persists_authority_rows() -> None:
-    from runtime.spec_compiler import compile_spec
+def test_materialize_spec_emits_verify_refs_and_persists_authority_rows() -> None:
+    from runtime.spec_materializer import materialize_spec
 
     conn = _VerifyRefsConn()
-    spec, warnings = compile_spec(
+    spec, warnings = materialize_spec(
         {
             "description": "Fix Python file",
             "write": ["app.py", "app_test.py"],
@@ -417,7 +417,7 @@ def test_compile_spec_emits_verify_refs_and_persists_authority_rows() -> None:
     assert all(ref.startswith("verify_ref.") for ref in spec.verify_refs)
     assert spec.definition_graph is not None
     assert spec.definition_revision is not None
-    assert spec.compiled_prose == spec.prompt
+    assert spec.materialized_prose == spec.prompt
     assert isinstance(spec.narrative_blocks, list)
     assert isinstance(spec.draft_flow, list)
     assert len(conn.verify_upserts) == 2
@@ -428,12 +428,12 @@ def test_compile_spec_emits_verify_refs_and_persists_authority_rows() -> None:
     assert spec.capabilities == ["debug", "mechanical_edit"]
 
 
-def test_compile_spec_fails_closed_when_capability_catalog_is_missing() -> None:
-    from runtime.spec_compiler import compile_spec
+def test_materialize_spec_fails_closed_when_capability_catalog_is_missing() -> None:
+    from runtime.spec_materializer import materialize_spec
 
     conn = _VerifyRefsConn(capability_rows=[])
     with pytest.raises(CapabilityCatalogError):
-        compile_spec(
+        materialize_spec(
             {
                 "description": "Fix Python file",
                 "write": ["app.py"],
@@ -447,7 +447,7 @@ def test_plan_definition_emits_plan_revision() -> None:
     result = plan_definition(
         {
             "source_prose": "Build a thing",
-            "compiled_prose": "Build a thing",
+            "materialized_prose": "Build a thing",
             "definition_revision": "def_1234abcd",
             "references": [],
             "narrative_blocks": [],
@@ -456,8 +456,8 @@ def test_plan_definition_emits_plan_revision() -> None:
         }
     )
 
-    assert result["compiled_spec"]["definition_revision"] == "def_1234abcd"
-    assert result["compiled_spec"]["plan_revision"].startswith("plan_")
+    assert result["materialized_spec"]["definition_revision"] == "def_1234abcd"
+    assert result["materialized_spec"]["plan_revision"].startswith("plan_")
 
 
 def test_plan_definition_blocks_build_authority_without_review_approval(
@@ -496,7 +496,7 @@ def test_plan_definition_blocks_build_authority_without_review_approval(
         planner.harden_reviewed_definition(
             {
                 "source_prose": "Build a thing",
-                "compiled_prose": "Build a thing",
+                "materialized_prose": "Build a thing",
                 "definition_revision": "def_review_gate",
                 "references": [],
                 "narrative_blocks": [],
@@ -514,7 +514,7 @@ def test_plan_definition_rejects_builder_owned_workflow_state() -> None:
         planner.plan_definition(
             {
                 "source_prose": "Build a thing",
-                "compiled_prose": "Build a thing",
+                "materialized_prose": "Build a thing",
                 "definition_revision": "def_builder_owned",
                 "references": [],
                 "narrative_blocks": [],
@@ -540,7 +540,7 @@ def test_plan_definition_uses_draft_flow_even_when_legacy_jobs_are_present(monke
     result = plan_definition(
         {
             "source_prose": "Build a thing",
-            "compiled_prose": "Build a thing",
+            "materialized_prose": "Build a thing",
             "definition_revision": "def_legacy_jobs",
             "references": [],
             "narrative_blocks": [],
@@ -556,18 +556,18 @@ def test_plan_definition_uses_draft_flow_even_when_legacy_jobs_are_present(monke
         }
     )
 
-    assert result["compiled_spec"]["definition_revision"] == "def_legacy_jobs"
-    assert result["compiled_spec"]["plan_revision"].startswith("plan_")
-    assert result["compiled_spec"]["jobs"] == draft_jobs
+    assert result["materialized_spec"]["definition_revision"] == "def_legacy_jobs"
+    assert result["materialized_spec"]["plan_revision"].startswith("plan_")
+    assert result["materialized_spec"]["jobs"] == draft_jobs
     assert result["planning_notes"][0] == "Planned 1 jobs from draft_flow."
 
 
 def test_plan_definition_reuses_exact_plan_artifact_without_replanning(monkeypatch: pytest.MonkeyPatch) -> None:
     definition = {
         "source_prose": "Build a thing",
-        "compiled_prose": "Build a thing",
+        "materialized_prose": "Build a thing",
         "definition_revision": "def_reuse_1234",
-        "compile_provenance": {
+        "materialize_provenance": {
             "artifact_kind": "definition",
             "input_fingerprint": "definition.input.1234",
         },
@@ -577,23 +577,23 @@ def test_plan_definition_reuses_exact_plan_artifact_without_replanning(monkeypat
         "trigger_intent": [],
     }
     first_result = plan_definition(definition)
-    compiled_spec = first_result["compiled_spec"]
-    payload_json = json.dumps(compiled_spec, sort_keys=True, separators=(",", ":"), default=str)
-    reusable = CompileArtifactRecord(
-        compile_artifact_id="compile_artifact.plan.reused1234567890",
+    materialized_spec = first_result["materialized_spec"]
+    payload_json = json.dumps(materialized_spec, sort_keys=True, separators=(",", ":"), default=str)
+    reusable = MaterializeArtifactRecord(
+        materialize_artifact_id="materialize_artifact.plan.reused1234567890",
         artifact_kind="plan",
-        artifact_ref=compiled_spec["plan_revision"],
-        revision_ref=compiled_spec["plan_revision"],
+        artifact_ref=materialized_spec["plan_revision"],
+        revision_ref=materialized_spec["plan_revision"],
         parent_artifact_ref=definition["definition_revision"],
-        input_fingerprint=compiled_spec["compile_provenance"]["input_fingerprint"],
+        input_fingerprint=materialized_spec["materialize_provenance"]["input_fingerprint"],
         content_hash=hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
         authority_refs=(definition["definition_revision"],),
-        payload=compiled_spec,
-        decision_ref="decision.compile.plan.reused1234567890",
+        payload=materialized_spec,
+        decision_ref="decision.materialize.plan.reused1234567890",
     )
 
     monkeypatch.setattr(
-        planner.CompileArtifactStore,
+        planner.MaterializeArtifactStore,
         "load_reusable_artifact",
         lambda self, *, artifact_kind, input_fingerprint: reusable,
     )
@@ -605,7 +605,7 @@ def test_plan_definition_reuses_exact_plan_artifact_without_replanning(monkeypat
 
     result = plan_definition(definition, conn=SimpleNamespace())
 
-    assert result["compiled_spec"]["plan_revision"] == compiled_spec["plan_revision"]
+    assert result["materialized_spec"]["plan_revision"] == materialized_spec["plan_revision"]
     assert result["planning_notes"] == ["Reused plan from exact authority and context match."]
     assert result["reuse_provenance"]["decision"] == "reused"
 
@@ -613,9 +613,9 @@ def test_plan_definition_reuses_exact_plan_artifact_without_replanning(monkeypat
 def test_current_compiled_spec_rejects_exact_fingerprint_mismatch() -> None:
     definition = {
         "source_prose": "Build a thing",
-        "compiled_prose": "Build a thing",
+        "materialized_prose": "Build a thing",
         "definition_revision": "def_current_1234",
-        "compile_provenance": {
+        "materialize_provenance": {
             "artifact_kind": "definition",
             "input_fingerprint": "definition.input.current",
         },
@@ -624,19 +624,19 @@ def test_current_compiled_spec_rejects_exact_fingerprint_mismatch() -> None:
         "draft_flow": [],
         "trigger_intent": [],
     }
-    compiled_spec = plan_definition(definition)["compiled_spec"]
+    materialized_spec = plan_definition(definition)["materialized_spec"]
     stale_definition = dict(definition)
-    stale_definition["compiled_prose"] = "Build a different thing"
+    stale_definition["materialized_prose"] = "Build a different thing"
     stale_definition["definition_revision"] = definition["definition_revision"]
 
-    assert current_compiled_spec(stale_definition, compiled_spec) is None
+    assert current_compiled_spec(stale_definition, materialized_spec) is None
 
 
 def test_current_compiled_spec_rejects_stale_plan_even_when_definition_contains_legacy_jobs() -> None:
     definition = {
         "type": "operating_model",
         "source_prose": "Do the explicit thing",
-        "compiled_prose": "Do the explicit thing",
+        "materialized_prose": "Do the explicit thing",
         "definition_revision": "def_explicit_state",
         "jobs": [
             {
@@ -656,7 +656,7 @@ def test_current_compiled_spec_rejects_stale_plan_even_when_definition_contains_
         "outcome_goal": "stale",
         "jobs": [{"label": "old-step", "prompt": "stale"}],
         "triggers": [],
-        "compile_provenance": {
+        "materialize_provenance": {
             "surface_revision": "planner.surface.test",
             "input_fingerprint": "planner.input.stale",
         },
@@ -666,11 +666,11 @@ def test_current_compiled_spec_rejects_stale_plan_even_when_definition_contains_
 
 
 def test_plan_definition_materializes_legacy_projections_from_definition_graph() -> None:
-    from runtime.definition_compile_kernel import build_definition
+    from runtime.definition_materialize_kernel import build_definition
 
     definition = build_definition(
         source_prose="When @gmail/search receives a message, review-agent validates it nightly.",
-        compiled_prose="When @gmail/search receives a message, review-agent validates it nightly.",
+        materialized_prose="When @gmail/search receives a message, review-agent validates it nightly.",
         references=[
             {
                 "id": "ref-001",
@@ -709,9 +709,9 @@ def test_plan_definition_materializes_legacy_projections_from_definition_graph()
 
     result = plan_definition(graph_only_definition)
 
-    assert result["compiled_spec"]["definition_revision"] == definition["definition_revision"]
-    assert result["compiled_spec"]["jobs"][0]["agent"] == "auto/review"
-    assert result["compiled_spec"]["triggers"][0]["event_type"] == definition["trigger_intent"][0]["event_type"]
+    assert result["materialized_spec"]["definition_revision"] == definition["definition_revision"]
+    assert result["materialized_spec"]["jobs"][0]["agent"] == "auto/review"
+    assert result["materialized_spec"]["triggers"][0]["event_type"] == definition["trigger_intent"][0]["event_type"]
 
 
 def test_plan_definition_blocks_when_explicit_build_authority_state_is_present() -> None:
@@ -749,7 +749,7 @@ def test_plan_definition_materializes_workflow_invoke_routes_as_integration_jobs
     result = plan_definition(
         {
             "source_prose": "Draft a summary and then invoke the downstream workflow.",
-            "compiled_prose": "Draft a summary and then invoke the downstream workflow.",
+            "materialized_prose": "Draft a summary and then invoke the downstream workflow.",
             "definition_revision": "def_explicit_phase_route",
             "references": [],
             "narrative_blocks": [],
@@ -794,7 +794,7 @@ def test_plan_definition_materializes_workflow_invoke_routes_as_integration_jobs
         }
     )
 
-    jobs = result["compiled_spec"]["jobs"]
+    jobs = result["materialized_spec"]["jobs"]
     assert jobs[0]["agent"] == "auto/draft"
     assert jobs[1]["agent"] == "integration/workflow/invoke"
     assert jobs[1]["integration_id"] == "workflow"
@@ -809,7 +809,7 @@ def test_plan_definition_materializes_notification_routes_as_integration_jobs() 
     result = plan_definition(
         {
             "source_prose": "Draft a workflow notification and send it to the configured channels.",
-            "compiled_prose": "Draft a workflow notification and send it to the configured channels.",
+            "materialized_prose": "Draft a workflow notification and send it to the configured channels.",
             "definition_revision": "def_notification_route",
             "references": [],
             "narrative_blocks": [],
@@ -834,7 +834,7 @@ def test_plan_definition_materializes_notification_routes_as_integration_jobs() 
         }
     )
 
-    jobs = result["compiled_spec"]["jobs"]
+    jobs = result["materialized_spec"]["jobs"]
     assert jobs[0]["agent"] == "integration/notifications/send"
     assert jobs[0]["integration_id"] == "notifications"
     assert jobs[0]["integration_action"] == "send"
@@ -854,7 +854,7 @@ def test_plan_definition_materializes_webhook_routes_as_generic_integration_jobs
     result = plan_definition(
         {
             "source_prose": "Post the payload to the external webhook.",
-            "compiled_prose": "Post the payload to the external webhook.",
+            "materialized_prose": "Post the payload to the external webhook.",
             "definition_revision": "def_webhook_route",
             "references": [],
             "narrative_blocks": [],
@@ -886,7 +886,7 @@ def test_plan_definition_materializes_webhook_routes_as_generic_integration_jobs
         }
     )
 
-    jobs = result["compiled_spec"]["jobs"]
+    jobs = result["materialized_spec"]["jobs"]
     assert jobs[0]["agent"] == "integration/webhook/post"
     assert jobs[0]["integration_id"] == "webhook"
     assert jobs[0]["integration_action"] == "post"
@@ -899,11 +899,11 @@ def test_plan_definition_materializes_webhook_routes_as_generic_integration_jobs
     }
 
 
-def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gates() -> None:
+def test_plan_definition_emits_after_failure_dependency_edges_from_canvas_edge_gates() -> None:
     result = plan_definition(
         {
             "source_prose": "Run fallback remediation when the primary step fails.",
-            "compiled_prose": "Run fallback remediation when the primary step fails.",
+            "materialized_prose": "Run fallback remediation when the primary step fails.",
             "definition_revision": "def_after_failure_gate",
             "references": [],
             "narrative_blocks": [],
@@ -942,7 +942,7 @@ def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gat
         }
     )
 
-    jobs = result["compiled_spec"]["jobs"]
+    jobs = result["materialized_spec"]["jobs"]
     assert jobs[1]["depends_on"] == ["primary-step"]
     assert jobs[1]["dependency_edges"] == [
         {
@@ -956,7 +956,7 @@ def test_plan_definition_marks_approval_gates_as_approval_required_jobs() -> Non
     result = plan_definition(
         {
             "source_prose": "Pause the downstream step until a human approves it.",
-            "compiled_prose": "Pause the downstream step until a human approves it.",
+            "materialized_prose": "Pause the downstream step until a human approves it.",
             "definition_revision": "def_approval_gate",
             "references": [],
             "narrative_blocks": [],
@@ -995,7 +995,7 @@ def test_plan_definition_marks_approval_gates_as_approval_required_jobs() -> Non
         }
     )
 
-    jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
+    jobs = {job["source_step_id"]: job for job in result["materialized_spec"]["jobs"]}
     assert jobs["step-002"]["approval_required"] is True
     assert jobs["step-002"]["approval_question"] == "Approve transition from Primary step to Approval step?"
     assert jobs["step-002"].get("dependency_edges") is None
@@ -1005,7 +1005,7 @@ def test_plan_definition_wires_validation_edge_gates_into_verify_refs() -> None:
     result = plan_definition(
         {
             "source_prose": "Validate the primary step before the downstream continuation runs.",
-            "compiled_prose": "Validate the primary step before the downstream continuation runs.",
+            "materialized_prose": "Validate the primary step before the downstream continuation runs.",
             "definition_revision": "def_validation_gate",
             "references": [],
             "narrative_blocks": [],
@@ -1048,7 +1048,7 @@ def test_plan_definition_wires_validation_edge_gates_into_verify_refs() -> None:
         }
     )
 
-    jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
+    jobs = {job["source_step_id"]: job for job in result["materialized_spec"]["jobs"]}
     assert jobs["step-001"]["verify_refs"] == ["verify_ref.python.py_compile.app"]
     assert jobs["step-002"].get("dependency_edges") is None
 
@@ -1058,7 +1058,7 @@ def test_plan_definition_rejects_validation_edge_legacy_verify_command() -> None
         plan_definition(
             {
                 "source_prose": "Validate the primary step before continuation.",
-                "compiled_prose": "Validate the primary step before continuation.",
+                "materialized_prose": "Validate the primary step before continuation.",
                 "definition_revision": "def_legacy_validation_gate",
                 "references": [],
                 "narrative_blocks": [],
@@ -1106,7 +1106,7 @@ def test_plan_definition_wires_retry_edge_gates_into_job_max_attempts() -> None:
     result = plan_definition(
         {
             "source_prose": "Retry the downstream step when the upstream path can fail transiently.",
-            "compiled_prose": "Retry the downstream step when the upstream path can fail transiently.",
+            "materialized_prose": "Retry the downstream step when the upstream path can fail transiently.",
             "definition_revision": "def_retry_gate",
             "references": [],
             "narrative_blocks": [],
@@ -1148,16 +1148,16 @@ def test_plan_definition_wires_retry_edge_gates_into_job_max_attempts() -> None:
         }
     )
 
-    jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
+    jobs = {job["source_step_id"]: job for job in result["materialized_spec"]["jobs"]}
     assert jobs["step-002"]["max_attempts"] == 5
 
 
-def test_plan_definition_emits_conditional_dependency_edges_from_moon_edge_gates() -> None:
+def test_plan_definition_emits_conditional_dependency_edges_from_canvas_edge_gates() -> None:
     condition = {"field": "should_continue", "op": "equals", "value": True}
     result = plan_definition(
         {
             "source_prose": "Route work depending on whether the upstream says to continue.",
-            "compiled_prose": "Route work depending on whether the upstream says to continue.",
+            "materialized_prose": "Route work depending on whether the upstream says to continue.",
             "definition_revision": "def_conditional_gate",
             "references": [],
             "narrative_blocks": [],
@@ -1218,7 +1218,7 @@ def test_plan_definition_emits_conditional_dependency_edges_from_moon_edge_gates
         }
     )
 
-    jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
+    jobs = {job["source_step_id"]: job for job in result["materialized_spec"]["jobs"]}
     assert jobs["step-002"]["dependency_edges"] == [
         {
             "label": "route-step",
@@ -1436,6 +1436,7 @@ def test_spec_uses_graph_runtime_for_single_prompt_dispatch_jobs() -> None:
 
     nodes = {node.node_id: node for node in request.nodes}
     assert list(nodes) == ["run__context", "run", "run__parser", "run__writer"]
+    assert nodes["run__context"].adapter_type == "context_compiler"
     assert nodes["run"].adapter_type == "cli_llm"
     assert nodes["run"].inputs["provider_slug"] == "openai"
     assert nodes["run"].inputs["model_slug"] == "gpt-5.4-mini"
@@ -1532,29 +1533,29 @@ def test_compile_graph_workflow_request_infers_semantic_task_types_from_agent_ro
     assert "model_slug" not in nodes["draft_reply"].inputs
 
 
-def test_compile_prose_fails_closed_when_compile_index_snapshot_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(compiler, "_get_connection", lambda: _VerifyRefsConn())
+def test_materialize_prose_fails_closed_when_materialize_index_snapshot_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(materializer, "_get_connection", lambda: _VerifyRefsConn())
     monkeypatch.setattr(
-        compiler,
+        materializer,
         "load_compile_index_snapshot",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            compile_index.CompileIndexAuthorityError(
-                "compile_index.snapshot_missing",
-                "compile index snapshot is missing",
+            materialize_index.MaterializeIndexAuthorityError(
+                "materialize_index.snapshot_missing",
+                "materialize index snapshot is missing",
             )
         ),
     )
-    # snapshot_missing is refreshable — the compiler tries auto-refresh,
+    # snapshot_missing is refreshable; the materializer tries auto-refresh,
     # which fails with surface_manifest_unavailable in test context.
     monkeypatch.setattr(
-        compiler,
+        materializer,
         "refresh_compile_index",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            compile_index.CompileIndexAuthorityError(
-                "compile_index.surface_manifest_unavailable",
-                "compile index surface manifest could not be resolved",
+            materialize_index.MaterializeIndexAuthorityError(
+                "materialize_index.surface_manifest_unavailable",
+                "materialize index surface manifest could not be resolved",
             )
         ),
     )
-    with pytest.raises(RuntimeError, match="compile_index.surface_manifest_unavailable"):
-        compiler.compile_prose("research something")
+    with pytest.raises(RuntimeError, match="materialize_index.surface_manifest_unavailable"):
+        materializer.materialize_prose("research something")

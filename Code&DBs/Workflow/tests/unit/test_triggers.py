@@ -258,7 +258,7 @@ def test_evaluate_triggers_emits_depth_exceeded_event(caplog):
             "workflow_id": "wf-1",
             "filter": {},
             "definition": {"definition_revision": "rev-1"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-1",
                 "jobs": [{"prompt": "do work"}],
             },
@@ -313,7 +313,7 @@ def test_evaluate_triggers_bootstraps_durable_trigger_evaluator_subscription(mon
             "workflow_id": "wf-2",
             "filter": {},
             "definition": {"definition_revision": "rev-2"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-2",
                 "jobs": [{"prompt": "do fallback work"}],
             },
@@ -371,7 +371,7 @@ def test_evaluate_triggers_advances_checkpoint_and_skips_old_events_on_replay(mo
             "workflow_id": "wf-replay",
             "filter": {},
             "definition": {"definition_revision": "rev-replay"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-replay",
                 "jobs": [{"prompt": "do replay work"}],
             },
@@ -433,7 +433,7 @@ def test_evaluate_triggers_matches_schedule_fired_event_against_schedule_trigger
             "filter": {},
             "event_type": "schedule",
             "definition": {"definition_revision": "rev-schedule"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-schedule",
                 "jobs": [{"prompt": "do scheduled work"}],
             },
@@ -474,7 +474,7 @@ def test_hourly_trigger_tick_leads_to_schedule_fired_event_and_workflow_submissi
             "cron_expression": "@hourly",
             "last_fired_at": None,
             "definition": {"definition_revision": "def-runtime-regression-probe"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "def-runtime-regression-probe",
                 "name": "Runtime Regression Probe",
                 "workflow_id": "runtime_regression_probe",
@@ -544,7 +544,7 @@ def test_evaluate_triggers_processes_event_subscriptions_without_checkpoint(monk
             "run_id": None,
             "filter_policy": {"event_type": "workflow.%", "payload": {"status": "ok"}},
             "definition": {"definition_revision": "rev-1"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-1",
                 "jobs": [{"prompt": "do work"}],
             },
@@ -610,7 +610,7 @@ def test_event_subscriptions_resume_from_checkpoint_without_double_processing(mo
             "run_id": None,
             "filter_policy": {"event_type": "workflow.completed"},
             "definition": {"definition_revision": "rev-replay"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-replay",
                 "jobs": [{"prompt": "do replay work"}],
             },
@@ -695,7 +695,7 @@ def test_event_subscription_failure_does_not_block_other_subscriptions(monkeypat
             "run_id": "run-fail",
             "filter_policy": {"event_type": "workflow.failed"},
             "definition": {"definition_revision": "rev-fail"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-fail",
                 "jobs": [{"prompt": "fail"}],
             },
@@ -708,7 +708,7 @@ def test_event_subscription_failure_does_not_block_other_subscriptions(monkeypat
             "run_id": "run-ok",
             "filter_policy": {"event_type": "workflow.completed"},
             "definition": {"definition_revision": "rev-ok"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-ok",
                 "jobs": [{"prompt": "ok"}],
             },
@@ -770,7 +770,7 @@ def test_evaluate_event_subscriptions_ignores_worker_run_subscriptions():
             "cursor_scope": "run",
             "filter_policy": {"event_type": "workflow.%"},
             "definition": None,
-            "compiled_spec": None,
+            "materialized_spec": None,
             "workflow_name": "Worker Workflow",
         }
     ]
@@ -800,7 +800,7 @@ def test_evaluate_event_subscriptions_is_system_event_only(monkeypatch, caplog):
             "cursor_scope": "global",
             "filter_policy": {"event_type": "workflow.completed"},
             "definition": {"definition_revision": "rev-workflow-event"},
-            "compiled_spec": {
+            "materialized_spec": {
                 "definition_revision": "rev-workflow-event",
                 "jobs": [{"prompt": "wrong stream"}],
             },

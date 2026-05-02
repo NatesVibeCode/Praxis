@@ -249,10 +249,78 @@ def test_run_reports_errors_when_projector_step_raises(monkeypatch) -> None:
         "_project_tool_schema_refs",
         lambda self, known: None,
     )
+    monkeypatch.setattr(
+        DataDictionaryLineageProjector,
+        "_project_tool_operation_edges",
+        lambda self, known: None,
+    )
+    monkeypatch.setattr(
+        DataDictionaryLineageProjector,
+        "_project_tool_type_contract_edges",
+        lambda self, known: None,
+    )
+    monkeypatch.setattr(
+        DataDictionaryLineageProjector,
+        "_project_operation_authority_edges",
+        lambda self, known: None,
+    )
     conn = _FakeConn({"FROM data_dictionary_objects": []})
     result = DataDictionaryLineageProjector(conn).run()
     assert result.ok is False
     assert "fk_edges" in (result.error or "")
+
+
+def test_project_tool_operation_edges_dispatches_when_operation_exists(monkeypatch) -> None:
+    calls = _install_catcher(monkeypatch)
+    from surfaces.mcp.catalog import McpToolDefinition
+
+    fake_tool = McpToolDefinition(
+        name="praxis_operator_firecheck",
+        module_name="x",
+        handler_name="y",
+        metadata={
+            "description": "t",
+            "inputSchema": {"type": "object", "properties": {"action": {"type": "string"}}},
+            "operation_names": ["operator.firecheck"],
+        },
+        selector_defaults={},
+    )
+    monkeypatch.setattr(
+        "surfaces.mcp.catalog.get_tool_catalog",
+        lambda: {fake_tool.name: fake_tool},
+    )
+    known = {
+        "tool": {"tool:praxis_operator_firecheck"},
+        "command": {"operation.operator.firecheck"},
+        "query": set(),
+    }
+    DataDictionaryLineageProjector(_FakeConn({}))._project_tool_operation_edges(known)
+    assert len(calls) == 1
+    edges = calls[0]["edges"]
+    assert len(edges) == 1
+    assert edges[0]["edge_kind"] == "dispatches"
+    assert edges[0]["src_object_kind"] == "tool:praxis_operator_firecheck"
+    assert edges[0]["dst_object_kind"] == "operation.operator.firecheck"
+
+
+def test_project_operation_authority_edges_governed_by_when_both_sides_known(monkeypatch) -> None:
+    calls = _install_catcher(monkeypatch)
+    conn = _FakeConn({
+        "FROM operation_catalog_registry": [
+            {"operation_name": "operator.firecheck", "authority_domain_ref": "authority.runtime"},
+        ],
+    })
+    known = {
+        "command": {"operation.operator.firecheck"},
+        "query": set(),
+        "definition": {"authority.runtime"},
+    }
+    DataDictionaryLineageProjector(conn)._project_operation_authority_edges(known)
+    assert len(calls) == 1
+    e = calls[0]["edges"][0]
+    assert e["edge_kind"] == "governed_by"
+    assert e["src_object_kind"] == "operation.operator.firecheck"
+    assert e["dst_object_kind"] == "authority.runtime"
 
 
 def test_project_integration_manifests_fails_closed_on_manifest_errors() -> None:

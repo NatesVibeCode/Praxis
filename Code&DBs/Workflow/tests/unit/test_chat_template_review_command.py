@@ -40,11 +40,11 @@ def test_handler_dispatches_primary_then_critic_in_order() -> None:
         conversation_id="conv-7",
         user_content="What is gravity?",
         primary_route=ChatRoutePin(provider_slug="together", model_slug="deepseek-ai/DeepSeek-V4-Pro"),
-        critic_route=ChatRoutePin(provider_slug="openrouter", model_slug="moonshotai/kimi-k2.6"),
+        critic_route=ChatRoutePin(provider_slug="openrouter", model_slug="canvasshotai/kimi-k2.6"),
     )
     responses = {
         "together/deepseek-ai/DeepSeek-V4-Pro": {"ok": True, "content": "Gravity is a force.", "model_used": "together/deepseek-ai/DeepSeek-V4-Pro", "latency_ms": 50, "message_id": "p1"},
-        "openrouter/moonshotai/kimi-k2.6": {"ok": True, "content": "Critique: too brief; gravity is a curvature of spacetime.", "model_used": "openrouter/moonshotai/kimi-k2.6", "latency_ms": 70, "message_id": "c1"},
+        "openrouter/canvasshotai/kimi-k2.6": {"ok": True, "content": "Critique: too brief; gravity is a curvature of spacetime.", "model_used": "openrouter/canvasshotai/kimi-k2.6", "latency_ms": 70, "message_id": "c1"},
     }
     call_log: list[dict[str, Any]] = []
     with patch("runtime.operation_catalog_gateway.execute_operation_from_subsystems", new=_recording_gateway(call_log, responses)):
@@ -59,7 +59,7 @@ def test_handler_dispatches_primary_then_critic_in_order() -> None:
     # Primary must dispatch before critic, and critic must use the synthetic prompt.
     assert call_log[0]["payload"]["model_override"] == "together/deepseek-ai/DeepSeek-V4-Pro"
     assert call_log[0]["payload"]["user_content"] == "What is gravity?"
-    assert call_log[1]["payload"]["model_override"] == "openrouter/moonshotai/kimi-k2.6"
+    assert call_log[1]["payload"]["model_override"] == "openrouter/canvasshotai/kimi-k2.6"
     assert "Critique" in call_log[1]["payload"]["user_content"] or "critique" in call_log[1]["payload"]["user_content"]
 
 

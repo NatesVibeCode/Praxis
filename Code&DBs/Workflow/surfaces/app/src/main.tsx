@@ -4,6 +4,7 @@ import { App } from './App';
 import './modules';
 import './styles/tokens.css';
 import './styles/primitives.css';
+import './styles/primitives-ext.css';
 import { installTelemetry, PrimitiveUsageOverlay } from './primitives-prx';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

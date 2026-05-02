@@ -38,6 +38,23 @@ export type BuildNodeIntegrationArgs =
   | WorkflowInvokeIntegrationArgs
   | Record<string, unknown>;
 
+export interface AgentRegistryRow {
+  agent_principal_ref: string;
+  title: string;
+  description?: string;
+  icon_hint?: string;
+  visibility?: 'visible' | 'hidden' | 'archived';
+  builder_category?: 'builtin' | 'custom';
+  status: 'active' | 'paused' | 'killed';
+  capability_refs?: string[];
+  allowed_tools?: string[];
+  write_envelope?: string[];
+  system_prompt_template?: string;
+  network_policy?: string;
+  model_preference?: string;
+  reasoning_effort?: string;
+}
+
 export interface BuildGraphPayload {
   graph_id?: string;
   definition_revision?: string;
@@ -205,17 +222,17 @@ export interface WorkflowTrigger {
   source_ref?: string;
 }
 
-export interface CompiledSpec {
+export interface MaterializedSpec {
   name?: string;
   jobs?: WorkflowJob[];
   triggers?: WorkflowTrigger[];
 }
 
-export interface CompiledSpecProjection {
+export interface MaterializedSpecProjection {
   version?: number;
   graph_id?: string;
   definition_revision?: string;
-  compiled_spec?: CompiledSpec | null;
+  materialized_spec?: MaterializedSpec | null;
 }
 
 export interface BuildUndoReceiptStep {
@@ -314,7 +331,7 @@ export interface CompilePreviewPayload {
 export interface BuildPayload {
   workflow?: { id: string; name: string; description?: string } | null;
   definition: Record<string, unknown>;
-  compiled_spec?: CompiledSpec | null;
+  materialized_spec?: MaterializedSpec | null;
   planning_notes?: string[];
   build_state?: string;
   build_blockers?: BuildIssue[];
@@ -324,7 +341,7 @@ export interface BuildPayload {
   authority_attachments?: AuthorityAttachment[];
   build_issues?: BuildIssue[];
   projection_status?: Record<string, unknown>;
-  compiled_spec_projection?: CompiledSpecProjection | null;
+  materialized_spec_projection?: MaterializedSpecProjection | null;
   matched_building_blocks?: Array<{
     id: string;
     name: string;

@@ -413,7 +413,7 @@ def _source_option_catalog(pg: Any) -> dict[str, dict[str, Any]]:
 def _workflow_to_dict(row: dict[str, Any], *, include_definition: bool = False) -> dict[str, Any]:
     # Extract definition type from the stored JSONB
     definition = _parse_json_field(row.get("definition")) or {}
-    saved_compiled_spec = _parse_json_field(row.get("compiled_spec"))
+    saved_compiled_spec = _parse_json_field(row.get("materialized_spec"))
     from runtime.operating_model_planner import current_compiled_spec
 
     current_plan = current_compiled_spec(
@@ -438,7 +438,7 @@ def _workflow_to_dict(row: dict[str, Any], *, include_definition: bool = False) 
     }
     if include_definition:
         workflow["definition"] = definition
-        workflow["compiled_spec"] = saved_compiled_spec
+        workflow["materialized_spec"] = saved_compiled_spec
         workflow["current_compiled_spec"] = current_plan
     return workflow
 
@@ -546,7 +546,7 @@ def _annotate_dashboard_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
 
 def _load_workflow_inventory(pg: Any) -> list[dict[str, Any]]:
     rows = pg.execute(
-        """SELECT w.id, w.name, w.description, w.definition, w.compiled_spec, w.tags,
+        """SELECT w.id, w.name, w.description, w.definition, w.materialized_spec, w.tags,
                   w.version, w.is_template, w.invocation_count, w.last_invoked_at,
                   w.created_at, w.updated_at,
                   t.id AS trigger_id, t.event_type AS trigger_event, t.enabled AS trigger_enabled,
@@ -956,20 +956,13 @@ def _fetch_run_packet_inspection(pg: Any, run_id: str) -> dict[str, Any] | None:
 
     row = dict(rows[0])
     try:
-        from runtime.execution_packet_authority import (
-            inspect_execution_packets,
-            packet_inspection_from_row,
+        from runtime.execution_packet_authority import resolve_packet_inspection
+
+        inspection, _source = resolve_packet_inspection(
+            run_row=row,
+            packets=row.get("packets"),
         )
-    except Exception:
-        return None
-    materialized = packet_inspection_from_row(row)
-    if materialized is not None:
-        return materialized
-    packets = _parse_json_field(row.get("packets"))
-    if not isinstance(packets, list) or not packets:
-        return None
-    try:
-        return inspect_execution_packets(packets, run_row=row)
+        return inspection
     except Exception:
         return None
 
@@ -1037,7 +1030,7 @@ def _packet_revision_view(
 def _workflow_revision_state(
     *,
     definition: Any,
-    compiled_spec: Any,
+    materialized_spec: Any,
     latest_runs: list[dict[str, Any]],
     pg: Any,
     workflow_name: str | None = None,
@@ -1045,24 +1038,24 @@ def _workflow_revision_state(
     from runtime.operating_model_planner import current_compiled_spec
 
     definition_dict = _parse_json_field(definition) or {}
-    compiled_spec_dict = _parse_json_field(compiled_spec)
+    materialized_spec_dict = _parse_json_field(materialized_spec)
     saved_definition_revision = (
         str(definition_dict.get("definition_revision") or "").strip() or None
         if isinstance(definition_dict, dict)
         else None
     )
     saved_plan_definition_revision = (
-        str(compiled_spec_dict.get("definition_revision") or "").strip() or None
-        if isinstance(compiled_spec_dict, dict)
+        str(materialized_spec_dict.get("definition_revision") or "").strip() or None
+        if isinstance(materialized_spec_dict, dict)
         else None
     )
     saved_plan_revision = (
-        str(compiled_spec_dict.get("plan_revision") or "").strip() or None
-        if isinstance(compiled_spec_dict, dict)
+        str(materialized_spec_dict.get("plan_revision") or "").strip() or None
+        if isinstance(materialized_spec_dict, dict)
         else None
     )
     saved_current_plan = (
-        current_compiled_spec(definition_dict, compiled_spec_dict)
+        current_compiled_spec(definition_dict, materialized_spec_dict)
         if isinstance(definition_dict, dict)
         else None
     )
@@ -1143,7 +1136,7 @@ def _workflow_build_subpath(path: str) -> tuple[str, str]:
 
 def _load_workflow_build_row(pg: Any, workflow_id: str) -> dict[str, Any]:
     row = pg.fetchrow(
-        "SELECT id, name, description, definition, compiled_spec, version, updated_at "
+        "SELECT id, name, description, definition, materialized_spec, version, updated_at "
         "FROM public.workflows WHERE id = $1",
         workflow_id,
     )
@@ -1178,9 +1171,9 @@ def _validate_workflow_body(
     if "build_graph" in body and build_graph is not None and not isinstance(build_graph, dict):
         return "build_graph must be an object"
 
-    compiled_spec = body.get("compiled_spec")
-    if "compiled_spec" in body and compiled_spec is not None and not isinstance(compiled_spec, dict):
-        return "compiled_spec must be an object"
+    materialized_spec = body.get("materialized_spec")
+    if "materialized_spec" in body and materialized_spec is not None and not isinstance(materialized_spec, dict):
+        return "materialized_spec must be an object"
 
     description = body.get("description")
     if "description" in body and description is not None and not isinstance(description, str):
@@ -1309,7 +1302,7 @@ def _handle_workflows_get(request: Any, path: str) -> None:
         workflow["latest_runs"] = _fetch_workflow_runs(pg, workflow["name"], limit=10)
         workflow["revision_state"] = _workflow_revision_state(
             definition=workflow.get("definition"),
-            compiled_spec=workflow.get("compiled_spec"),
+            materialized_spec=workflow.get("materialized_spec"),
             latest_runs=workflow["latest_runs"],
             pg=pg,
             workflow_name=workflow.get("name"),
@@ -1360,11 +1353,11 @@ def _validate_type_flow_on_commit(body: dict[str, Any]) -> list[str]:
     with empty contracts can no longer reach a persisted definition).
 
     Body shapes (graceful fallbacks):
-      - ``body['build_graph']`` — Moon authoring shape (preferred)
+      - ``body['build_graph']`` — Canvas authoring shape (preferred)
       - ``body['definition']`` — older workflow definition carrier
 
     Empty graphs or bodies without a graph shape pass through: trigger-only
-    updates, name-only updates, or non-Moon callers must not be blocked
+    updates, name-only updates, or non-Canvas callers must not be blocked
     by a validator that has nothing to check.
 
     Returns an empty list when the graph is satisfied (or absent); a list
@@ -1417,7 +1410,7 @@ def _handle_workflows_post(request: Any, path: str) -> None:
                     emit_typed_gaps_for_type_flow_errors(
                         request.subsystems.get_pg_conn(),
                         type_flow_errors,
-                        source_ref="moon_commit:new_workflow",
+                        source_ref="canvas_commit:new_workflow",
                     )
                 except Exception:
                     pass  # best-effort emission, never blocks the 400
@@ -1464,7 +1457,7 @@ def _handle_workflows_post(request: Any, path: str) -> None:
                 emit_typed_gaps_for_type_flow_errors(
                     request.subsystems.get_pg_conn(),
                     type_flow_errors,
-                    source_ref=f"moon_commit:update:{workflow_id}",
+                    source_ref=f"canvas_commit:update:{workflow_id}",
                 )
             except Exception:
                 pass  # best-effort
@@ -1561,8 +1554,8 @@ def _load_compile_index_snapshot_for_request(request: Any):
     authority is refreshed here so normal repo drift does not strand the UI.
     """
 
-    from runtime.compile_index import (
-        CompileIndexAuthorityError,
+    from runtime.materialize_index import (
+        MaterializeIndexAuthorityError,
         load_compile_index_snapshot,
         refresh_compile_index,
     )
@@ -1575,7 +1568,7 @@ def _load_compile_index_snapshot_for_request(request: Any):
             require_fresh=True,
             repo_root=REPO_ROOT,
         )
-    except CompileIndexAuthorityError as exc:
+    except MaterializeIndexAuthorityError as exc:
         if exc.reason_code not in _REFRESHABLE_COMPILE_INDEX_REASON_CODES:
             raise
         snapshot = refresh_compile_index(
@@ -1599,7 +1592,7 @@ def _handle_workflow_build_get(request: Any, path: str) -> None:
         except _ClientError as missing:
             # Orchestrator-path workflows (workflow_id like ``workflow.run.X``)
             # never get a row in ``public.workflows`` — that table is for the
-            # Moon-composed build authoring flow. Without a fallback the UI
+            # Canvas-composed build authoring flow. Without a fallback the UI
             # at /app/run/{run_id} renders an empty graph (no lines) even
             # though the orchestrator's runtime authority HAS a graph
             # (nodes + edges) reachable via the run-detail path. Synthesize
@@ -1621,13 +1614,13 @@ def _handle_workflow_build_get(request: Any, path: str) -> None:
 
 
 def _synthesize_orchestrator_build_moment(pg: Any, workflow_id: str) -> dict[str, Any] | None:
-    """Build a minimal Moon build moment for a workflow that only exists in
+    """Build a minimal Canvas build moment for a workflow that only exists in
     the orchestrator runtime authority (no ``public.workflows`` row).
 
     Looks up the most recent run for this workflow_id, asks
     ``runtime.workflow.unified.get_run_status`` for jobs, derives the chain
     from the job order + adjacency, and returns a payload with a populated
-    ``build_graph`` so the UI's MoonBuildPage can render lines. Returns
+    ``build_graph`` so the UI's CanvasBuildPage can render lines. Returns
     None if no run exists yet (let the original 404 propagate).
     """
 
@@ -1697,7 +1690,7 @@ def _synthesize_orchestrator_build_moment(pg: Any, workflow_id: str) -> dict[str
         "id": workflow_id,
         "name": workflow_id,
         "description": (
-            f"Orchestrator-path workflow (no Moon spec). Graph synthesized "
+            f"Orchestrator-path workflow (no Canvas spec). Graph synthesized "
             f"from the most recent run ({run_id})."
         ),
         "version": 0,
@@ -1707,7 +1700,7 @@ def _synthesize_orchestrator_build_moment(pg: Any, workflow_id: str) -> dict[str
             "edges": graph_edges,
         },
         "definition": None,
-        "compiled_spec": None,
+        "materialized_spec": None,
         "synthesized": True,
         "synthesis_source": {
             "kind": "orchestrator_run",
@@ -1752,7 +1745,7 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
                 result["row"],
                 conn=pg,
                 definition=result["definition"],
-                compiled_spec=result["compiled_spec"],
+                materialized_spec=result["materialized_spec"],
                 build_bundle=result["build_bundle"],
                 planning_notes=result["planning_notes"],
                 intent_brief=result.get("intent_brief"),
@@ -2679,7 +2672,7 @@ def _handle_operation_catalog_get(request: Any, path: str) -> None:
 def _handle_catalog_review_decisions_get(request: Any, path: str) -> None:
     try:
         params = _query_params(request.path)
-        surface_name = (params.get("surface") or ["moon"])[0].strip() or "moon"
+        surface_name = (params.get("surface") or ["canvas"])[0].strip() or "canvas"
         target_kind = (params.get("target_kind") or [""])[0].strip() or None
         target_ref = (params.get("target_ref") or [""])[0].strip() or None
         pg = request.subsystems.get_pg_conn()
@@ -2727,7 +2720,7 @@ def _handle_catalog_review_decisions_post(request: Any, path: str) -> None:
 
     try:
         pg = request.subsystems.get_pg_conn()
-        surface_name = _text(body.get("surface_name") or body.get("surface") or "moon") or "moon"
+        surface_name = _text(body.get("surface_name") or body.get("surface") or "canvas") or "canvas"
         review_decision = record_surface_catalog_review(
             pg,
             surface_name=surface_name,

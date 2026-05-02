@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import surfaces.api._smoke_service as smoke_service
 from surfaces.api import frontdoor, native_ops, operator_read
@@ -220,6 +221,9 @@ def test_execute_smoke_run_waits_for_worker_owned_locked_execution(monkeypatch) 
     seen: dict[str, object] = {}
 
     class _FakeConn:
+        def execute(self, _query: str, *_args: Any) -> list[dict[str, Any]]:
+            return []
+
         def close(self) -> None:
             seen["closed"] = True
 
@@ -302,6 +306,11 @@ def test_load_smoke_registry_uses_logical_workspace_identity(monkeypatch) -> Non
                     }
                 ]
             raise AssertionError(f"unexpected query: {query}")
+
+        async def execute(self, query: str, *args: Any) -> Any:
+            if query.strip().upper().startswith("SELECT"):
+                return await self.fetch(query, *args)
+            return "OK"
 
         async def close(self) -> None:
             seen["closed"] = True

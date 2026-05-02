@@ -1,6 +1,6 @@
 {
   "name": "real-time-field-validation",
-  "outcome_goal": "Validate workflow spec fields and MCP tool inputs incrementally as the operator types, not only at submit time. Extract the static rules already expressed in `runtime/workflow_spec.py` (required fields, value ranges, string constraints) into a zod or TypeScript schema that the app can consume. Wire the Moon build page's spec form to run per-field validation against the schema on blur, surfacing inline errors. Mirror the same validation on the server so the contract stays single-source: the Python validator and the TS zod schema are generated from one declaration. Small scope — this is about per-field real-time feedback, not a full form framework.",
+  "outcome_goal": "Validate workflow spec fields and MCP tool inputs incrementally as the operator types, not only at submit time. Extract the static rules already expressed in `runtime/workflow_spec.py` (required fields, value ranges, string constraints) into a zod or TypeScript schema that the app can consume. Wire the Canvas build page's spec form to run per-field validation against the schema on blur, surfacing inline errors. Mirror the same validation on the server so the contract stays single-source: the Python validator and the TS zod schema are generated from one declaration. Small scope — this is about per-field real-time feedback, not a full form framework.",
   "task_type": "code_generation",
   "agent": "anthropic/claude-sonnet-4-6",
   "authoring_contract": {"artifact_kind": "code"},

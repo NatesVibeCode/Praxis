@@ -13,13 +13,11 @@ import hashlib
 import json
 import logging
 import os
-import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from runtime.support_ticket_drafts import (
     draft_ticket_responses,
@@ -79,6 +77,28 @@ class AssemblyPlan:
     layout: dict = field(default_factory=dict)  # quadrant -> module assignment
     seed_records: list[dict] = field(default_factory=list)
     explanation: str = ""
+
+
+@dataclass(frozen=True)
+class RoutedPromptResult:
+    """One prompt execution through task-route authority."""
+
+    text: str
+    task_type: str
+    provider_slug: str
+    model_slug: str
+    transport_type: str
+    adapter_type: str
+    runtime_profile_ref: str
+    candidate_ref: str = ""
+
+
+class RoutedPromptExecutionError(RuntimeError):
+    """Provider route attempt failed before producing usable text."""
+
+    def __init__(self, message: str, *, failure_code: str = "provider_execution_failed") -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
 
 
 def _validate_and_fix_model(model: dict) -> dict:
@@ -225,45 +245,24 @@ class TaskAssembler:
         return manifest_id
 
     def assemble_operating_model(self, task: str) -> dict:
-        """Task string → operating model JSON via the planner CLI chain."""
+        """Task string → operating model JSON via routed planner authority."""
         import uuid as _uuid
-        import os
-        import subprocess
-        from runtime.task_type_router import TaskTypeRouter
 
         suggestions = self._pre_suggest(task)
         prompt = self._build_operating_model_prompt(task, suggestions)
 
         manifest_id = _uuid.uuid4().hex[:12]
-        router = TaskTypeRouter(self._conn)
-        chain = router.resolve_failover_chain("auto/planner")
-
-        env = dict(os.environ)
-        for k in list(env):
-            if k.upper().startswith("CLAUDE") and k.upper() != "CLAUDE_CONFIG_DIR":
-                del env[k]
-
-        model = None
-        for tier in chain:
-            provider = tier.provider_slug
-            model_slug = tier.model_slug
-
-            try:
-                raw = self._call_provider(provider, model_slug, prompt, env)
-                if raw:
-                    model = self._parse_model_json(raw)
-                    if model:
-                        router.record_outcome("planner", provider, model_slug, succeeded=True)
-                        logger.info("Planner succeeded via %s/%s", provider, model_slug)
-                        break
-                router.record_outcome("planner", provider, model_slug, succeeded=False)
-                logger.warning("Planner %s/%s returned unparseable output", provider, model_slug)
-            except Exception as exc:
-                router.record_outcome("planner", provider, model_slug, succeeded=False)
-                logger.warning("Planner %s/%s failed: %s", provider, model_slug, exc)
-
-        if model is None:
-            raise RuntimeError("All planner tiers failed to generate a valid operating model")
+        model, route = self._call_routed_json(
+            prompt,
+            task_type="planner",
+            purpose="operating_model",
+            parser=self._parse_model_json,
+        )
+        logger.info(
+            "Operating model planner succeeded via %s/%s",
+            route.provider_slug,
+            route.model_slug,
+        )
 
         upsert_app_manifest(
             self._conn,
@@ -283,53 +282,38 @@ class TaskAssembler:
     def assemble_app(self, task: str) -> dict:
         """Task string → V2 quadrant manifest via two-phase fan-out.
 
-        Phase 1: CLI planner (3-5s) picks module IDs + grid layout
-        Phase 2: Haiku API × N (parallel, 1-2s each) hydrates each quadrant config
+        Phase 1: routed planner picks module IDs + grid layout
+        Phase 2: routed fast fan-out hydrates each quadrant config
         """
         import uuid as _uuid
-        import os
-        import subprocess
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from runtime.task_type_router import TaskTypeRouter
 
         suggestions = self._pre_suggest(task)
 
-        # --- Phase 1: Skeleton (CLI planner, fast) ---
+        # --- Phase 1: Skeleton (routed planner) ---
         skeleton_prompt = self._build_skeleton_prompt(task, suggestions)
 
+        def parse_skeleton(raw: str) -> dict | None:
+            parsed = self._parse_json(raw)
+            if isinstance(parsed, dict) and "quadrants" in parsed:
+                return parsed
+            return None
+
         manifest_id = _uuid.uuid4().hex[:12]
-        router = TaskTypeRouter(self._conn)
-        chain = router.resolve_failover_chain("auto/planner")
+        skeleton, route = self._call_routed_json(
+            skeleton_prompt,
+            task_type="planner",
+            purpose="app_skeleton",
+            parser=parse_skeleton,
+        )
+        skeleton["version"] = 2
+        skeleton.setdefault("grid", "4x4")
+        logger.info(
+            "Skeleton planner succeeded via %s/%s",
+            route.provider_slug,
+            route.model_slug,
+        )
 
-        env = dict(os.environ)
-        for k in list(env):
-            if k.upper().startswith("CLAUDE") and k.upper() != "CLAUDE_CONFIG_DIR":
-                del env[k]
-
-        skeleton = None
-        for tier in chain:
-            provider = tier.provider_slug
-            model_slug = tier.model_slug
-            try:
-                raw = self._call_provider(provider, model_slug, skeleton_prompt, env)
-                if raw:
-                    skeleton = self._parse_json(raw)
-                    if skeleton and "quadrants" in skeleton:
-                        skeleton["version"] = 2
-                        skeleton.setdefault("grid", "4x4")
-                        router.record_outcome("planner", provider, model_slug, succeeded=True)
-                        logger.info("Skeleton planner succeeded via %s/%s", provider, model_slug)
-                        break
-                    skeleton = None
-                router.record_outcome("planner", provider, model_slug, succeeded=False)
-            except Exception as exc:
-                router.record_outcome("planner", provider, model_slug, succeeded=False)
-                logger.warning("Skeleton planner %s/%s failed: %s", provider, model_slug, exc)
-
-        if skeleton is None:
-            raise RuntimeError("All planner tiers failed to generate app skeleton")
-
-        # --- Phase 2: Hydrate each quadrant config via Haiku API (parallel) ---
+        # --- Phase 2: Hydrate each quadrant config via routed fan-out ---
         quadrants = skeleton.get("quadrants", {})
         title = skeleton.get("title", task[:80])
 
@@ -343,7 +327,7 @@ class TaskAssembler:
             }
 
         def hydrate_quadrant(cell_id: str, qdef: dict) -> tuple[str, dict]:
-            """Fill in config for one quadrant via Haiku API."""
+            """Fill in config for one quadrant via routed prompt authority."""
             module_id = qdef.get("module", "")
             existing_config = qdef.get("config", {})
 
@@ -366,10 +350,21 @@ class TaskAssembler:
                 f"Return ONLY the config JSON object."
             )
 
-            result = self._call_haiku(prompt)
-            config = self._parse_json(result)
-            if not config:
-                raise RuntimeError(f"Haiku hydration returned invalid config for module={module_id!r} cell={cell_id!r}")
+            config, route = self._call_routed_json(
+                prompt,
+                task_type="planner",
+                purpose=f"quadrant_hydration:{cell_id}:{module_id}",
+                parser=self._parse_json,
+                max_output_tokens=4096,
+                timeout_seconds=90,
+            )
+            logger.info(
+                "Quadrant hydration succeeded via %s/%s for cell=%s module=%s",
+                route.provider_slug,
+                route.model_slug,
+                cell_id,
+                module_id,
+            )
             qdef = dict(qdef)
             qdef["config"] = config
             return cell_id, qdef
@@ -479,6 +474,252 @@ Config each module with endpoint, objectType, columns, label as needed.
 
 ONLY JSON."""
 
+    def _call_routed_json(
+        self,
+        prompt: str,
+        *,
+        task_type: str,
+        purpose: str,
+        parser: Callable[[str], dict | None],
+        max_output_tokens: int = 4096,
+        timeout_seconds: int = 90,
+    ) -> tuple[dict, RoutedPromptResult]:
+        router, runtime_profile_ref, chain = self._resolve_routed_prompt_chain(task_type)
+        normalized_task_type = self._normalize_route_task_type(task_type)
+        failures: list[str] = []
+
+        for decision in chain:
+            route_label = f"{decision.provider_slug}/{decision.model_slug}"
+            try:
+                raw = self._execute_routed_decision(
+                    decision,
+                    prompt,
+                    runtime_profile_ref=runtime_profile_ref,
+                    purpose=purpose,
+                    max_output_tokens=max_output_tokens,
+                    timeout_seconds=timeout_seconds,
+                )
+                parsed = parser(raw) if raw else None
+                if isinstance(parsed, dict):
+                    self._record_route_outcome(
+                        router,
+                        normalized_task_type,
+                        decision,
+                        succeeded=True,
+                    )
+                    return parsed, self._routed_prompt_result(
+                        text=raw,
+                        task_type=normalized_task_type,
+                        decision=decision,
+                        runtime_profile_ref=runtime_profile_ref,
+                    )
+                self._record_route_outcome(
+                    router,
+                    normalized_task_type,
+                    decision,
+                    succeeded=False,
+                    failure_code="unparseable_output",
+                    failure_category="output_parse",
+                    failure_zone="internal",
+                )
+                failures.append(f"{route_label}: unparseable output")
+                logger.warning("%s route %s returned unparseable output", purpose, route_label)
+            except Exception as exc:
+                failure_code = getattr(exc, "failure_code", "provider_execution_failed")
+                self._record_route_outcome(
+                    router,
+                    normalized_task_type,
+                    decision,
+                    succeeded=False,
+                    failure_code=str(failure_code),
+                )
+                failures.append(f"{route_label}: {exc}")
+                logger.warning("%s route %s failed: %s", purpose, route_label, exc)
+
+        detail = "; ".join(failures) or "no route attempts returned output"
+        raise RuntimeError(f"All auto/{normalized_task_type} routes failed for {purpose}: {detail}")
+
+    @classmethod
+    def call_routed_prompt(
+        cls,
+        conn: "SyncPostgresConnection",
+        prompt: str,
+        *,
+        task_type: str,
+        purpose: str,
+        max_output_tokens: int = 4096,
+        timeout_seconds: int = 90,
+    ) -> RoutedPromptResult:
+        router, runtime_profile_ref, chain = cls._resolve_routed_prompt_chain_for_conn(
+            conn,
+            task_type,
+        )
+        normalized_task_type = cls._normalize_route_task_type(task_type)
+        failures: list[str] = []
+
+        for decision in chain:
+            route_label = f"{decision.provider_slug}/{decision.model_slug}"
+            try:
+                raw = cls._execute_routed_decision(
+                    decision,
+                    prompt,
+                    runtime_profile_ref=runtime_profile_ref,
+                    purpose=purpose,
+                    max_output_tokens=max_output_tokens,
+                    timeout_seconds=timeout_seconds,
+                )
+                if raw:
+                    cls._record_route_outcome(
+                        router,
+                        normalized_task_type,
+                        decision,
+                        succeeded=True,
+                    )
+                    return cls._routed_prompt_result(
+                        text=raw,
+                        task_type=normalized_task_type,
+                        decision=decision,
+                        runtime_profile_ref=runtime_profile_ref,
+                    )
+                raise RoutedPromptExecutionError(
+                    "provider returned empty output",
+                    failure_code="empty_output",
+                )
+            except Exception as exc:
+                failure_code = getattr(exc, "failure_code", "provider_execution_failed")
+                cls._record_route_outcome(
+                    router,
+                    normalized_task_type,
+                    decision,
+                    succeeded=False,
+                    failure_code=str(failure_code),
+                )
+                failures.append(f"{route_label}: {exc}")
+                logger.warning("%s route %s failed: %s", purpose, route_label, exc)
+
+        detail = "; ".join(failures) or "no route attempts returned output"
+        raise RuntimeError(f"All auto/{normalized_task_type} routes failed for {purpose}: {detail}")
+
+    def _resolve_routed_prompt_chain(self, task_type: str):
+        return self._resolve_routed_prompt_chain_for_conn(self._conn, task_type)
+
+    @staticmethod
+    def _resolve_routed_prompt_chain_for_conn(conn: "SyncPostgresConnection", task_type: str):
+        from runtime.native_authority import default_native_runtime_profile_ref_required
+        from runtime.task_type_router import TaskTypeRouter
+
+        runtime_profile_ref = default_native_runtime_profile_ref_required(conn)
+        normalized_task_type = TaskAssembler._normalize_route_task_type(task_type)
+        router = TaskTypeRouter(conn)
+        chain = router.resolve_failover_chain(
+            f"auto/{normalized_task_type}",
+            runtime_profile_ref=runtime_profile_ref,
+        )
+        if not chain:
+            raise RuntimeError(
+                f"task route authority returned no candidates for auto/{normalized_task_type}"
+            )
+        return router, runtime_profile_ref, chain
+
+    @staticmethod
+    def _normalize_route_task_type(task_type: str) -> str:
+        normalized = str(task_type or "").strip().lower()
+        if normalized.startswith("auto/"):
+            normalized = normalized.split("/", 1)[1]
+        if "/" in normalized:
+            normalized = normalized.split("/", 1)[0]
+        if not normalized:
+            raise ValueError("task_type is required for routed prompt execution")
+        return normalized
+
+    @staticmethod
+    def _record_route_outcome(
+        router: Any,
+        task_type: str,
+        decision: Any,
+        *,
+        succeeded: bool,
+        failure_code: str | None = None,
+        failure_category: str = "",
+        failure_zone: str = "",
+    ) -> None:
+        try:
+            router.record_outcome(
+                task_type,
+                str(decision.provider_slug),
+                str(decision.model_slug),
+                succeeded=succeeded,
+                failure_code=failure_code,
+                failure_category=failure_category,
+                failure_zone=failure_zone,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Route outcome telemetry failed for auto/%s %s/%s: %s",
+                task_type,
+                getattr(decision, "provider_slug", ""),
+                getattr(decision, "model_slug", ""),
+                exc,
+            )
+
+    @staticmethod
+    def _routed_prompt_result(
+        *,
+        text: str,
+        task_type: str,
+        decision: Any,
+        runtime_profile_ref: str,
+    ) -> RoutedPromptResult:
+        return RoutedPromptResult(
+            text=text,
+            task_type=task_type,
+            provider_slug=str(getattr(decision, "provider_slug", "") or ""),
+            model_slug=str(getattr(decision, "model_slug", "") or ""),
+            transport_type=str(getattr(decision, "transport_type", "") or ""),
+            adapter_type=str(getattr(decision, "adapter_type", "") or ""),
+            runtime_profile_ref=runtime_profile_ref,
+            candidate_ref=str(getattr(decision, "candidate_ref", "") or ""),
+        )
+
+    @staticmethod
+    def _execute_routed_decision(
+        decision: Any,
+        prompt: str,
+        *,
+        runtime_profile_ref: str,
+        purpose: str,
+        max_output_tokens: int,
+        timeout_seconds: int,
+    ) -> str:
+        transport_type = str(getattr(decision, "transport_type", "") or "").strip().upper()
+        adapter_type = str(getattr(decision, "adapter_type", "") or "").strip().lower()
+        if transport_type == "API" or adapter_type == "llm_task":
+            return TaskAssembler._call_api_provider(
+                decision,
+                prompt,
+                runtime_profile_ref=runtime_profile_ref,
+                purpose=purpose,
+                max_output_tokens=max_output_tokens,
+                timeout_seconds=timeout_seconds,
+            )
+
+        env = dict(os.environ)
+        for key in list(env):
+            if key.upper().startswith("CLAUDE") and key.upper() != "CLAUDE_CONFIG_DIR":
+                del env[key]
+        raw = TaskAssembler._call_provider(
+            str(decision.provider_slug),
+            str(decision.model_slug),
+            prompt,
+            env,
+        )
+        if not raw:
+            raise RoutedPromptExecutionError(
+                "provider returned empty output",
+                failure_code="empty_output",
+            )
+        return raw
+
     @staticmethod
     def _call_provider(provider: str, model_slug: str, prompt: str, env: dict) -> str | None:
         """Call a provider CLI using registry profile — no hardcoded commands."""
@@ -525,40 +766,63 @@ ONLY JSON."""
         return raw
 
     @staticmethod
-    def _call_haiku(prompt: str) -> str | None:
-        """Run fast fan-out work via OpenRouter (Claude Sonnet 4.6).
-
-        Historically this called api.anthropic.com/v1/messages directly with
-        ANTHROPIC_API_KEY. Per decision.2026-04-20.anthropic-cli-only-restored
-        (migration 181), direct Anthropic API calls are forbidden — Claude is
-        reached via OpenRouter only. The function name is retained to
-        minimize call-site churn; the underlying transport is now OpenRouter's
-        OpenAI-compatible chat completions endpoint.
-        """
+    def _call_api_provider(
+        decision: Any,
+        prompt: str,
+        *,
+        runtime_profile_ref: str,
+        purpose: str,
+        max_output_tokens: int,
+        timeout_seconds: int,
+    ) -> str:
         from runtime.workflow.execution_backends import execute_api
 
-        sandbox_provider = "docker_local"
+        route_max_tokens = int(getattr(decision, "max_tokens", 0) or max_output_tokens)
         transient_config = SimpleNamespace(
-            provider="openrouter",
-            model="anthropic/claude-sonnet-4.6",
-            max_output_tokens=4096,
-            timeout_seconds=90,
+            provider=str(decision.provider_slug),
+            model=str(decision.model_slug),
+            max_output_tokens=route_max_tokens,
+            timeout_seconds=int(timeout_seconds),
             execution_transport="api",
-            sandbox_provider=sandbox_provider,
+            sandbox_provider="docker_local",
             sandbox_policy=SimpleNamespace(
                 network_policy="provider_only",
                 workspace_materialization="none",
                 secret_allowlist=(),
             ),
         )
+        route_task_type = str(getattr(decision, "task_type", "") or "").strip()
+        execution_bundle = {
+            "job_label": purpose,
+            "task_type": (
+                TaskAssembler._normalize_route_task_type(route_task_type)
+                if route_task_type
+                else ""
+            ),
+            "runtime_profile_ref": runtime_profile_ref,
+            "provider_route": {
+                "provider_slug": str(decision.provider_slug),
+                "model_slug": str(decision.model_slug),
+                "transport_type": str(getattr(decision, "transport_type", "") or ""),
+                "adapter_type": str(getattr(decision, "adapter_type", "") or ""),
+                "candidate_ref": str(getattr(decision, "candidate_ref", "") or ""),
+            },
+        }
+        reasoning_effort = str(getattr(decision, "reasoning_effort_slug", "") or "").strip() or None
         result = execute_api(
             transient_config,
             prompt,
             workdir=str(workspace_repo_root()),
+            execution_bundle=execution_bundle,
+            reasoning_effort=reasoning_effort,
         )
         if result.get("status") != "succeeded":
-            logger.warning("Fast fan-out sandbox execution failed: %s", result.get("stderr", ""))
-            raise RuntimeError(str(result.get("stderr") or result.get("error_code") or "fast_fanout_failed"))
+            error_code = str(result.get("error_code") or "api_transport_failed")
+            logger.warning("Routed API execution failed: %s", result.get("stderr", ""))
+            raise RoutedPromptExecutionError(
+                str(result.get("stderr") or error_code),
+                failure_code=error_code,
+            )
         return str(result.get("stdout") or "")
 
     def _get_cli_config(self, provider_slug: str, model_slug: str) -> dict | None:
@@ -894,45 +1158,28 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
     # ------------------------------------------------------------------
 
     def _call_planner(self, task: str, suggestions: PreSuggestion) -> AssemblyPlan:
-        """One smart model call through direct routed provider execution."""
-        from runtime.task_type_router import TaskTypeRouter
+        """One smart model call through routed provider execution."""
 
         prompt = self._build_planner_prompt(task, suggestions)
-        router = TaskTypeRouter(self._conn)
-        chain = router.resolve_failover_chain("auto/planner")
-
-        env = dict(os.environ)
-        for key in list(env):
-            if key.upper().startswith("CLAUDE") and key.upper() != "CLAUDE_CONFIG_DIR":
-                del env[key]
-
-        for tier in chain:
-            provider = tier.provider_slug
-            model_slug = tier.model_slug
-            try:
-                raw = self._call_provider(provider, model_slug, prompt, env)
-                parsed = self._parse_json(raw) if raw else None
-                if isinstance(parsed, dict):
-                    router.record_outcome("planner", provider, model_slug, succeeded=True)
-                    return AssemblyPlan(
-                        task=task,
-                        data_sources=parsed.get("data_sources", []),
-                        object_type=parsed.get("object_type"),
-                        modules=parsed.get("modules", []),
-                        seed_records=parsed.get("seed_records", []),
-                        explanation=parsed.get("explanation", ""),
-                    )
-                router.record_outcome("planner", provider, model_slug, succeeded=False)
-                logger.warning(
-                    "Planner %s/%s returned unparseable output",
-                    provider,
-                    model_slug,
-                )
-            except Exception as exc:
-                router.record_outcome("planner", provider, model_slug, succeeded=False)
-                logger.warning("Planner %s/%s failed: %s", provider, model_slug, exc)
-
-        raise RuntimeError("All planner tiers failed to produce an assembly plan")
+        parsed, route = self._call_routed_json(
+            prompt,
+            task_type="planner",
+            purpose="assembly_plan",
+            parser=self._parse_json,
+        )
+        logger.info(
+            "Assembly planner succeeded via %s/%s",
+            route.provider_slug,
+            route.model_slug,
+        )
+        return AssemblyPlan(
+            task=task,
+            data_sources=parsed.get("data_sources", []),
+            object_type=parsed.get("object_type"),
+            modules=parsed.get("modules", []),
+            seed_records=parsed.get("seed_records", []),
+            explanation=parsed.get("explanation", ""),
+        )
 
     def _build_planner_prompt(self, task: str, suggestions: PreSuggestion) -> str:
         parts = [

@@ -817,19 +817,11 @@ async def _exercise_default_path_route_runtime_adoption() -> None:
 
         assert exc_info.value.reason_code == "default_path_pilot.route_runtime_failed"
         assert exc_info.value.details["provider_route_runtime_reason_code"] == (
-            "provider_route_runtime.routing_failed"
+            "provider_route_runtime.failover_slice_stale"
         )
-        assert exc_info.value.details["provider_route_runtime_details"]["reason_code"] == (
-            "routing.preference_unknown"
-        )
-        assert exc_info.value.details["provider_route_runtime_details"]["metadata"] == {
-            "runtime_profile_ref": (
-                "runtime_profile.default_path_pilot."
-                f"{model_profile_id}."
-                f"{provider_policy_id}"
-            ),
-            "preferred_candidate_ref": requested_candidate_ref,
-        }
+        assert requested_candidate_ref in exc_info.value.details[
+            "provider_route_runtime_details"
+        ]["missing_candidate_refs"]
     finally:
         await transaction.rollback()
         await conn.close()

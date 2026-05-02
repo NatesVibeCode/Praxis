@@ -280,6 +280,87 @@ def test_submit_workflow_chain_uses_validated_specs_for_rows(monkeypatch, tmp_pa
     assert load_calls == [str(spec_path)]
 
 
+def test_submit_workflow_chain_preflights_all_specs_and_queues_repair(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    spec_a = tmp_path / "spec_a.json"
+    _write_spec(spec_a, name="Spec A")
+    coordination = tmp_path / "chain.json"
+    coordination.write_text(
+        json.dumps(
+            {
+                "program": "phase_one_chain",
+                "validate_order": ["spec_a.json", "missing_b.json", "missing_c.json"],
+                "waves": [
+                    {"wave_id": "wave_a", "specs": ["spec_a.json"]},
+                    {
+                        "wave_id": "wave_b",
+                        "depends_on": ["wave_a"],
+                        "specs": ["missing_b.json", "missing_c.json"],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _SubmitConn:
+        def __init__(self) -> None:
+            self.queries: list[tuple[str, tuple]] = []
+
+        def execute(self, query: str, *args):
+            self.queries.append((query, args))
+            normalized = " ".join(query.split())
+            if "INSERT INTO workflow_repair_queue" in normalized:
+                return [
+                    {
+                        "repair_id": "713a0448-2241-4293-9b42-c8cd1d225baa",
+                        "repair_scope": "solution",
+                        "queue_status": "queued",
+                        "reason_code": args[3],
+                        "repair_dedupe_key": args[5],
+                        "payload": json.loads(args[6]),
+                    }
+                ]
+            if "INSERT INTO workflow_chains" in normalized:
+                raise AssertionError("chain rows must not be created after preflight failure")
+            if "workflow_chain_wave_runs" in normalized:
+                raise AssertionError("wave runs must not be created after preflight failure")
+            return []
+
+    events: list[dict[str, object]] = []
+
+    monkeypatch.setattr(workflow_chain, "advance_workflow_chains", lambda *_args, **_kwargs: pytest.fail("phase 0 must not start"))
+    monkeypatch.setattr(
+        "runtime.system_events.emit_system_event",
+        lambda _conn, **kwargs: events.append(kwargs),
+    )
+
+    conn = _SubmitConn()
+    with pytest.raises(workflow_chain.WorkflowChainError) as exc_info:
+        workflow_chain.submit_workflow_chain(
+            conn,
+            coordination_path=str(coordination),
+            repo_root=str(tmp_path),
+            requested_by_kind="test",
+            requested_by_ref="test.case",
+            chain_id="workflow_chain_preflight",
+        )
+
+    assert exc_info.value.reason_code == "workflow.chain.preflight_missing_specs"
+    assert exc_info.value.details["missing_specs"] == ["missing_b.json", "missing_c.json"]
+    repair_query, repair_args = conn.queries[0]
+    assert "INSERT INTO workflow_repair_queue" in repair_query
+    assert repair_args[0] == "workflow_chain_preflight"
+    assert repair_args[1] == "missing_b.json"
+    assert repair_args[3] == "workflow.chain.preflight_missing_specs"
+    repair_payload = json.loads(repair_args[6])
+    assert repair_payload["missing_specs"] == ["missing_b.json", "missing_c.json"]
+    assert repair_payload["solution_status_source"] == "workflow_chain_submit_preflight"
+    assert events[0]["event_type"] == "workflow.repair.queued"
+
+
 def test_get_workflow_chain_status_preserves_full_depends_on_list(monkeypatch) -> None:
     class _FakeConn:
         def execute(self, query: str, *args):

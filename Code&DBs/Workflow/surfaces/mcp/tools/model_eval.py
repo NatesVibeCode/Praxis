@@ -18,11 +18,13 @@ _ACTION_OPERATION = {
     "compare": "model_eval_compare",
     "promote": "model_eval_promote_proposal",
     "export": "model_eval_export",
+    "benchmark_ingest": "model_eval_benchmark_ingest",
 }
 
 
 def _kickoff_model_eval_run(payload: dict[str, Any]) -> dict[str, Any]:
-    kickoff_id = f"model_eval_kickoff_{uuid.uuid4().hex[:12]}"
+    run_payload = dict(payload)
+    kickoff_id, lab_run_id = _ensure_lab_run_id(run_payload)
     kickoff_started_at = time.time()
     correlation_id = str(uuid.uuid4())
     caller_context = CallerContext(
@@ -35,7 +37,7 @@ def _kickoff_model_eval_run(payload: dict[str, Any]) -> dict[str, Any]:
         execute_operation_from_env(
             env=workflow_database_env(),
             operation_name="model_eval_run_matrix",
-            payload=payload,
+            payload=run_payload,
             caller_context=caller_context,
         )
 
@@ -48,14 +50,50 @@ def _kickoff_model_eval_run(payload: dict[str, Any]) -> dict[str, Any]:
         "operation": "model_eval_run_matrix",
         "kickoff": True,
         "kickoff_id": kickoff_id,
+        "lab_run_id": lab_run_id,
         "kickoff_started_at": kickoff_started_at,
         "correlation_id": correlation_id,
         "status": "started",
+        "inspect_input": {"action": "inspect", "lab_run_id": lab_run_id},
+        "compare_input": {"action": "compare", "lab_run_id": lab_run_id},
         "message": (
             "Model Eval matrix is running in the background. Inspect the trace "
-            f"with correlation_id={correlation_id!r} or inspect the run label if supplied."
+            f"with correlation_id={correlation_id!r} or inspect lab_run_id={lab_run_id!r}."
         ),
     }
+
+
+def _ensure_lab_run_id(payload: dict[str, Any]) -> tuple[str, str]:
+    kickoff_id = f"model_eval_kickoff_{uuid.uuid4().hex[:12]}"
+    lab_run_id = str(payload.get("run_label") or "").strip()
+    if not lab_run_id:
+        lab_run_id = kickoff_id.replace("model_eval_kickoff_", "model-eval-")
+        payload["run_label"] = lab_run_id
+    return kickoff_id, lab_run_id
+
+
+def _run_model_eval_inline(payload: dict[str, Any]) -> dict[str, Any]:
+    run_payload = dict(payload)
+    _kickoff_id, lab_run_id = _ensure_lab_run_id(run_payload)
+    correlation_id = str(uuid.uuid4())
+    caller_context = CallerContext(
+        cause_receipt_id=None,
+        correlation_id=correlation_id,
+        transport_kind="workflow",
+    )
+    result = execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name="model_eval_run_matrix",
+        payload=run_payload,
+        caller_context=caller_context,
+    )
+    if isinstance(result, dict):
+        result.setdefault("lab_run_id", lab_run_id)
+        result.setdefault("correlation_id", correlation_id)
+        result.setdefault("inspect_input", {"action": "inspect", "lab_run_id": lab_run_id})
+        result.setdefault("compare_input", {"action": "compare", "lab_run_id": lab_run_id})
+        result.setdefault("execution_mode", "inline")
+    return result
 
 
 def tool_praxis_model_eval(params: dict, _progress_emitter=None) -> dict:
@@ -73,9 +111,14 @@ def tool_praxis_model_eval(params: dict, _progress_emitter=None) -> dict:
     if _progress_emitter:
         _progress_emitter.emit(progress=0, total=1, message=f"Model Eval {action}")
     if action == "run":
-        result = _kickoff_model_eval_run(payload)
+        wait_for_completion = bool(payload.pop("wait_for_completion", False))
+        if bool(payload.get("dry_run")) or wait_for_completion:
+            result = _run_model_eval_inline(payload)
+        else:
+            result = _kickoff_model_eval_run(payload)
         if _progress_emitter:
-            _progress_emitter.emit(progress=1, total=1, message="Model Eval run kicked off")
+            message = "Model Eval run completed" if result.get("execution_mode") == "inline" else "Model Eval run kicked off"
+            _progress_emitter.emit(progress=1, total=1, message=message)
         return result
     result = execute_operation_from_env(
         env=workflow_database_env(),
@@ -100,11 +143,13 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "model_eval_compare",
                 "model_eval_promote_proposal",
                 "model_eval_export",
+                "model_eval_benchmark_ingest",
             ],
             "description": (
-                "Plan, run, inspect, compare, promote, or export model/job/prompt "
-                "evaluation matrices. Imports canonical Workflow specs as fixed "
-                "fixtures and varies model/provider/prompt/effort/tool/swarm "
+                "Plan, run, inspect, compare, promote, export, or ingest "
+                "public benchmark priors for model/job/prompt evaluation "
+                "matrices. Imports canonical Workflow specs as fixed fixtures "
+                "and varies model/provider/prompt/effort/tool/swarm "
                 "configuration under strict privacy gates."
             ),
             "inputSchema": {
@@ -112,7 +157,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["plan", "run", "inspect", "compare", "promote", "export"],
+                        "enum": ["plan", "run", "inspect", "compare", "promote", "export", "benchmark_ingest"],
                         "default": "plan",
                     },
                     "suite_slugs": {
@@ -155,12 +200,27 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": "Optional run-mode filter/override for future suite slices.",
                     },
                     "dry_run": {"type": "boolean"},
+                    "wait_for_completion": {
+                        "type": "boolean",
+                        "description": (
+                            "Run synchronously through the workflow lane. Use only for tiny capped live tests; "
+                            "dry_run=true always runs inline so CLI calls produce inspectable summaries."
+                        ),
+                    },
                     "run_label": {"type": "string"},
                     "lab_run_id": {"type": "string"},
                     "include_results": {"type": "boolean"},
                     "export_format": {"type": "string", "enum": ["json", "markdown"]},
                     "task_type": {"type": "string"},
                     "winner_config_id": {"type": "string"},
+                    "benchmark_slug": {"type": "string"},
+                    "source_url": {"type": "string"},
+                    "version": {"type": "string"},
+                    "rows": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Benchmark prior rows: provider_slug, model_slug, metric_slug, score, rank, task_family.",
+                    },
                 },
             },
             "cli": {
@@ -183,6 +243,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "inspect": "read",
                         "compare": "read",
                         "export": "read",
+                        "benchmark_ingest": "write",
                         "run": "write",
                         "promote": "write",
                     },

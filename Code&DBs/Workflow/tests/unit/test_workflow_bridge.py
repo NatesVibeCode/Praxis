@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
+from typing import Any
 
 from runtime.claims import ClaimLeaseProposalRuntime
 from runtime.domain import RuntimeBoundaryError
@@ -16,6 +17,11 @@ from surfaces.workflow_bridge import build_live_workflow_bridge
 class _FakeConn:
     def __init__(self) -> None:
         self.closed = False
+
+    async def execute(self, sql: str, *args: Any) -> Any:
+        if sql.strip().upper().startswith("SELECT"):
+            return [await self.fetchrow(sql, *args)]
+        return "OK"
 
     async def close(self) -> None:
         self.closed = True

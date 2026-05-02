@@ -21,7 +21,7 @@ The runtime underneath: a DAG workflow engine with multi-provider agent routing 
 
 ## What you'll see
 
-Moon is one canvas, four surfaces:
+Canvas is one canvas, four surfaces:
 
 - **Overview** — the live workspace. The `WORKFLOW_CONTRACT` panel renders TASK / READ SCOPE / WRITE SCOPE / **LOCKED** authority / TOOLS / APPROVAL / VERIFIER / RETRY / MATERIALIZED side-by-side with the receipts panel and a sandbox terminal. The trust compiler made visible — what's allowed, what's locked, what proof is required to dispatch.
 - **New workflow** — the materialization entry. Describe an outcome in plain English; Praxis runs `synthesis (a frontier model decomposes intent into ~20 packet seeds, ≈30s) → fork-out (20 parallel prefix-cached author calls, ≈2-3 min) → pill triage + validation`. Nothing renders until all gates pass. The Release tray refuses to dispatch incomplete intent — `0 jobs · triggered by no trigger · 1/4 checks` blocks by design.
@@ -66,7 +66,7 @@ praxis workflow query "status"
 
 You'll see standing orders, open bugs, recent runs. Every line is a queryable durable row, not a log message — Praxis is showing you what it currently believes is true.
 
-**2. Open Moon, the canvas (1 minute).**
+**2. Open Canvas, the canvas (1 minute).**
 
 In a second terminal:
 
@@ -76,7 +76,7 @@ npm install        # first time only
 npm run dev
 ```
 
-Vite prints a URL (typically `http://localhost:5173`). Open it; Moon auto-connects to the API on `8420`.
+Vite prints a URL (typically `http://localhost:5173`). Open it; Canvas auto-connects to the API on `8420`.
 
 You're now looking at the live workspace. Four surfaces:
 - **Overview** — the trust compiler made visible: TASK / READ / WRITE / TOOLS / VERIFIER side-by-side with receipts and a sandbox terminal.
@@ -98,7 +98,7 @@ Provider-independent. Exercises the worker graph runtime without spending on any
 praxis workflow run examples/hello_world.queue.json
 ```
 
-Routes through `auto/chat`, hits whichever provider you have configured, returns a sentence. The receipt shows up in your runs list within seconds — visible in Moon's Overview panel.
+Routes through `auto/chat`, hits whichever provider you have configured, returns a sentence. The receipt shows up in your runs list within seconds — visible in Canvas's Overview panel.
 
 **5. Use the host CLI dispatcher (recommended for agents).**
 
@@ -110,7 +110,7 @@ bin/praxis-agent praxis_search --input-json '{"query":"provider routing"}'
 
 The front door for Claude Code, Codex, Gemini, and any other Mac-host agent. Credentials stay inside the container — your shell session can't leak them into a tool call.
 
-**Where to look next:** recent receipts via `praxis workflow query "recent receipts"`, the full tool catalog in Moon's Manifests tab, or open a `.queue.json` in `examples/` and modify the prompts to see how the workflow runtime handles your edits.
+**Where to look next:** recent receipts via `praxis workflow query "recent receipts"`, the full tool catalog in Canvas's Manifests tab, or open a `.queue.json` in `examples/` and modify the prompts to see how the workflow runtime handles your edits.
 
 ### Launch the API server manually
 
@@ -126,9 +126,9 @@ The server is ready when `GET /api/health` succeeds. `POST /orient` returns full
 
 > **Note:** `PYTHONPATH="Code&DBs/Workflow"` is required because the API module is rooted there. Leaving it out gives you `ModuleNotFoundError: No module named 'surfaces'`.
 
-### Moon UI (dashboard)
+### Canvas UI (dashboard)
 
-Moon is the canonical dashboard — one canvas, every click persists. With the API server running:
+Canvas is the canonical dashboard — one canvas, every click persists. With the API server running:
 
 ```bash
 cd "Code&DBs/Workflow/surfaces/app"
@@ -136,7 +136,7 @@ npm install
 npm run dev
 ```
 
-Vite serves the UI and proxies API calls to the port in `PRAXIS_API_PORT` (default `8420`). Open the URL Vite prints — Moon will connect to the API automatically.
+Vite serves the UI and proxies API calls to the port in `PRAXIS_API_PORT` (default `8420`). Open the URL Vite prints — Canvas will connect to the API automatically.
 
 ### Docker path (alternative)
 
@@ -269,7 +269,7 @@ The public HTTP contract lives under `/v1`. The internal route catalog remains a
                                 |
         +-----------------------v-----------------------+
         |                   Surfaces                     |
-        |   Moon (Overview · Build · Atlas · Manifests   |
+        |   Canvas (Overview · Build · Atlas · Manifests   |
         |   · Console)   ·   CLI   ·   MCP   ·   REST    |
         +-----------------------+-----------------------+
                                 |
@@ -301,7 +301,7 @@ The public HTTP contract lives under `/v1`. The internal route catalog remains a
 
 **Key components:**
 
-- **Surfaces** — Moon (React/Vite), CLI (`praxis workflow ...`), MCP (`mcp__praxis__*`), REST (`/v1`). All sibling lenses on the same gateway.
+- **Surfaces** — Canvas (React/Vite), CLI (`praxis workflow ...`), MCP (`mcp__praxis__*`), REST (`/v1`). All sibling lenses on the same gateway.
 - **CQRS Gateway** (`runtime.operation_catalog_gateway`) — the engine bus. Every operation goes through it: validates the payload against a Pydantic input model, writes a row to `authority_operation_receipts`, replays cached results when the idempotency policy says so, emits `authority_events` rows for command operations.
 - **Compose Pipeline** — the LLM-first launch compiler. A frontier model decomposes intent into ~20 packet seeds; 20 parallel prefix-cached author calls expand them; pill triage and validation gate before any render. `pattern_materialize_candidates` surfaces reusable shapes from completed runs.
 - **Workflow Runtime** — DAG execution with leases, retries, sealing. `.queue.json` specs are the wire format; `compose_plan_from_intent` is the LLM-driven authoring path.

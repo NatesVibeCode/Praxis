@@ -2,7 +2,7 @@
   "name": "UI Atlas Wave Validation",
   "workflow_id": "ui_atlas_refinement_validation",
   "phase": "verify",
-  "outcome_goal": "Validate Moon and Atlas UI repairs together without mixing unrelated runtime/package work into the commit.",
+  "outcome_goal": "Validate Canvas and Atlas UI repairs together without mixing unrelated runtime/package work into the commit.",
   "anti_requirements": [
     "Do not stage unrelated dirty files.",
     "Do not commit if app tests or build fail.",
@@ -12,7 +12,7 @@
     {
       "label": "run_app_unit_tests",
       "agent": "auto/test",
-      "prompt": "Run the focused app test suite for Moon, Atlas, and shell registry. Capture failing tests with file-level cause.",
+      "prompt": "Run the focused app test suite for Canvas, Atlas, and shell registry. Capture failing tests with file-level cause.",
       "read_scope": [
         "Code&DBs/Workflow/surfaces/app"
       ],
@@ -38,7 +38,7 @@
       "label": "manual_smoke_known_bad_runs",
       "agent": "auto/review",
       "depends_on": ["run_app_build"],
-      "prompt": "Smoke the known bad Moon run views and Atlas graph view. Confirm all nodes are visible, gates appear on edges, data-entry contracts populate, single/double-click behavior works, Cost Summary is absent from primary nav, and Atlas graph/table view is stable.",
+      "prompt": "Smoke the known bad Canvas run views and Atlas graph view. Confirm all nodes are visible, gates appear on edges, data-entry contracts populate, single/double-click behavior works, Cost Summary is absent from primary nav, and Atlas graph/table view is stable.",
       "read_scope": [
         "Code&DBs/Workflow/surfaces/app"
       ],

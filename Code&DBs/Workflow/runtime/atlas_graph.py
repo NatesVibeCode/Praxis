@@ -43,7 +43,7 @@ AREA_COLORS = {
     "heal": "#8c8a84",
     "discover": "#b7b0a3",
     "debate": "#f3efe6",
-    "moon": "#d8d2c5",
+    "canvas": "#d8d2c5",
     "mcp": "#b7b0a3",
     "cli": "#cfc9c2",
     "integrations": "#e0af68",
@@ -102,7 +102,7 @@ SCHEMA_AREA_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("heal", ("healing_", "healer_", "retry")),
     ("discover", ("discover", "search", "compile_index")),
     ("debate", ("debate_", "adversarial")),
-    ("moon", ("moon_", "dashboard", "surface_catalog")),
+    ("canvas", ("canvas_", "dashboard", "surface_catalog")),
     ("mcp", ("mcp_", "operation_catalog", "tool_", "capability_catalog", "registry_calculation")),
     ("cli", ("cli_", "agent_", "render", "native_operator")),
     ("integrations", ("integration", "connector_", "webhook_", "oauth", "api_schema")),
@@ -625,7 +625,7 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
             " | ".join(part for part in preview_parts if part)[:300],
             "surface_catalog_registry",
             extra={
-                "area": surface_name if surface_name in AREA_COLORS else "moon",
+                "area": surface_name if surface_name in AREA_COLORS else "canvas",
                 "authority_source": "surface_catalog_registry",
                 "object_kind": f"surface_catalog:{item_id}",
                 "category": str(surface_item["drop_kind"]),
@@ -703,9 +703,9 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
 
     for surface_item in surface_catalog_items:
         item_id = str(surface_item["catalog_item_id"])
-        surface_name = str(surface_item["surface_name"] or "moon")
+        surface_name = str(surface_item["surface_name"] or "canvas")
         source = f"surface_catalog::{item_id}"
-        target = f"area::{surface_name if surface_name in AREA_COLORS else 'moon'}"
+        target = f"area::{surface_name if surface_name in AREA_COLORS else 'canvas'}"
         if source not in node_ids or target not in node_ids:
             continue
         edge_id = f"{source}|belongs_to_surface|{target}"
@@ -1034,7 +1034,7 @@ def build_ui_experience_graph(
         "authority_objects": authority_objects[:max_items],
         "relationships": relationships[:max_items],
         "agent_guidance": [
-            "Use surface_catalog_registry rows as the authority for Moon controls and gate visibility.",
+            "Use surface_catalog_registry rows as the authority for Canvas controls and gate visibility.",
             "Use data_dictionary_objects and data_dictionary_lineage_effective for object and relationship semantics.",
             "Treat React/CSS files as renderers of this authority, not as the source of truth.",
         ],

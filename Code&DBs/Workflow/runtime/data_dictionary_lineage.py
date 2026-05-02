@@ -32,6 +32,7 @@ from storage.postgres.validators import PostgresWriteError
 _ALLOWED_EDGE_KINDS = frozenset({
     "references", "derives_from", "projects_to", "ingests_from",
     "produces", "consumes", "promotes_to", "same_as",
+    "dispatches", "governed_by",
 })
 
 

@@ -492,7 +492,7 @@ def compile_workflow_context(
         "graph_ref": f"workflow_context_graph:{_digest(clean_graph, length=20)}",
         "source_prompt_ref": _clean_optional_text(source_prompt_ref),
         "scenario_pack_refs": list(pack_refs),
-        "compiled_from": {
+        "materialized_from": {
             "intent": clean_intent,
             "workflow_ref": clean_workflow_ref,
             "graph": clean_graph,

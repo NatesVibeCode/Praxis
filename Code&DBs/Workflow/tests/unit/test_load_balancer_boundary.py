@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from typing import Any
+
 from runtime.load_balancer import GlobalLoadBalancer
 
 
 class _FakeConn:
     def __init__(self) -> None:
         self.closed = False
+
+    async def execute(self, _query: str, *_args: Any) -> Any:
+        return "OK"
 
     async def close(self) -> None:
         self.closed = True

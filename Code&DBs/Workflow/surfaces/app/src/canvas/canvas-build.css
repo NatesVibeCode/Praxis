@@ -1,0 +1,13 @@
+/* Canvas Build — composed stylesheet */
+
+@layer reset, canvas-tokens, canvas-layout, canvas-components, canvas-graph, canvas-state;
+@import url("./canvas-tokens.css") layer(canvas-tokens);
+@import url("./style/layout.css") layer(canvas-layout);
+@import url("./style/components.css") layer(canvas-components);
+@import url("./style/graph.css") layer(canvas-graph);
+@import url("./style/state.css") layer(canvas-state);
+
+/*
+  Compatibility guardrail: selectors are intentionally stable and preserved from the
+  legacy stylesheet during this migration.
+*/

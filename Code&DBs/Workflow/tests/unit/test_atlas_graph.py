@@ -242,7 +242,7 @@ def test_build_graph_projects_surface_catalog_and_dictionary_lineage(monkeypatch
         atlas_graph,
         "fetch_functional_areas",
         lambda conn: [
-            {"area_slug": "moon", "title": "Moon", "summary": "Builder surface"},
+            {"area_slug": "canvas", "title": "Canvas", "summary": "Builder surface"},
             {"area_slug": "authority", "title": "Authority", "summary": "Control tables"},
         ],
     )
@@ -257,7 +257,7 @@ def test_build_graph_projects_surface_catalog_and_dictionary_lineage(monkeypatch
                 "object_kind": "table:surface_catalog_registry",
                 "label": "surface_catalog_registry",
                 "category": "table",
-                "summary": "Canonical Moon primitive registry",
+                "summary": "Canonical Canvas primitive registry",
                 "origin_ref": {"source": "schema_projector"},
             },
             {
@@ -290,7 +290,7 @@ def test_build_graph_projects_surface_catalog_and_dictionary_lineage(monkeypatch
         lambda conn: [
             {
                 "catalog_item_id": "trigger-manual",
-                "surface_name": "moon",
+                "surface_name": "canvas",
                 "label": "Manual",
                 "family": "trigger",
                 "status": "ready",
@@ -300,8 +300,8 @@ def test_build_graph_projects_surface_catalog_and_dictionary_lineage(monkeypatch
                 "description": "User-initiated run",
                 "truth_category": "runtime",
                 "surface_tier": "primary",
-                "binding_revision": "binding.surface_catalog_registry.moon.bootstrap.20260415",
-                "decision_ref": "decision.surface_catalog_registry.moon.bootstrap.20260415",
+                "binding_revision": "binding.surface_catalog_registry.canvas.bootstrap.20260415",
+                "decision_ref": "decision.surface_catalog_registry.canvas.bootstrap.20260415",
             }
         ],
     )
@@ -310,7 +310,7 @@ def test_build_graph_projects_surface_catalog_and_dictionary_lineage(monkeypatch
     nodes = {node["data"]["id"]: node["data"] for node in graph["nodes"]}
     edges = {edge["data"]["id"]: edge["data"] for edge in graph["edges"]}
 
-    assert nodes["surface_catalog::trigger-manual"]["area"] == "moon"
+    assert nodes["surface_catalog::trigger-manual"]["area"] == "canvas"
     assert nodes["surface_catalog::trigger-manual"]["authority_source"] == "surface_catalog_registry"
     assert nodes["table:surface_catalog_registry"]["authority_source"] == "data_dictionary_objects"
     assert nodes["table:operator_decisions"]["area"] == "authority"

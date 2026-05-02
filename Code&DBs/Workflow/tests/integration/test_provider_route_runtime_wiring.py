@@ -679,6 +679,14 @@ async def _exercise_provider_route_runtime_wiring() -> None:
             primary_candidate_ref,
             fallback_candidate_ref,
         )
+        assert [
+            record.provider_route_health_window_id
+            for record in resolution.source_provider_route_health_windows
+        ] == [primary_health_window_id]
+        assert [
+            record.provider_budget_window_id
+            for record in resolution.source_provider_budget_windows
+        ] == [budget_window_id]
         assert payload == {
             "as_of": as_of.isoformat(),
             "authorities": {
@@ -713,6 +721,12 @@ async def _exercise_provider_route_runtime_wiring() -> None:
                 ],
                 "evaluated_at": (as_of - timedelta(minutes=10)).isoformat(),
                 "decision_ref": f"decision:primary-eligible:{suffix}",
+                "source_provider_route_health_window_ids": [
+                    primary_health_window_id,
+                ],
+                "source_provider_budget_window_ids": [
+                    budget_window_id,
+                ],
             },
         }
 

@@ -132,8 +132,8 @@ describe('AtlasPage', () => {
     expect(source).toContain('<AtlasProvenanceChain node={node} />');
     expect(source).toContain('function AtlasProvenanceChain');
 
-    // Composes the canonical prx-chain primitive — not bespoke markup
-    expect(source).toContain('className="prx-chain"');
+    // Composes the canonical prx-chain primitive through the React adapter.
+    expect(source).toContain('EventChain');
     expect(source).toContain('atlas-card__provenance');
 
     // Surfaces the canonical lineage fields the payload already carries
@@ -157,9 +157,9 @@ describe('AtlasPage', () => {
     expect(source).toContain("import { AtlasConstellation } from './AtlasConstellation'");
     expect(source).toContain("import { AtlasContactSheet } from './AtlasContactSheet'");
     expect(source).toContain("import { AtlasLedger } from './AtlasLedger'");
+    expect(source).toContain('RadioPillGroup');
 
     expect(source).toContain('atlas-view-toggle');
-    expect(source).toContain('prx-radio-pill');
 
     expect(source).toContain("view === 'constellation'");
     expect(source).toContain("view === 'contact'");

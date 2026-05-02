@@ -14,8 +14,8 @@ describe('shell state helpers', () => {
     expect(state.activeRouteId).toBe('route.app.dashboard');
     expect(state.activeTabId).toBe('dashboard');
     expect(state.dynamicTabs).toEqual([]);
-    expect(state.buildView).toBe('moon');
-    expect(state.moonRunId).toBeNull();
+    expect(state.buildView).toBe('canvas');
+    expect(state.canvasRunId).toBeNull();
     expect(state.dashboardDetail).toBeNull();
   });
 

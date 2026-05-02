@@ -1,0 +1,630 @@
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import {
+  materializePlan,
+  refineDefinition,
+  commitDefinition,
+  createWorkflow,
+  progressiveBuildStep,
+  suggestNextSteps,
+} from '../shared/buildController';
+import type { BuildPayload } from '../shared/types';
+import { useObjectTypes } from '../shared/hooks/useObjectTypes';
+import { loadCatalogEnvelope, refreshCatalogEnvelope, getCatalogEnvelope, FAMILY_LABELS } from './catalog';
+import type { CatalogEnvelope, CatalogItem, CatalogFamily } from './catalog';
+import {
+  getCatalogSurfacePolicy,
+  getCatalogTruth,
+  isCanvasSurfaceAuthorityItem,
+  summarizeCatalogSurface,
+  summarizeCatalogTruth,
+} from './actionTruth';
+import { CanvasGlyph } from './CanvasGlyph';
+import { CanvasSurfaceReviewPanel } from './CanvasSurfaceReviewPanel';
+import { CanvasIntegrationsPanel } from './CanvasIntegrationsPanel';
+import { CanvasDataDictionaryPanel } from './CanvasDataDictionaryPanel';
+import { CanvasAgentPanel } from './CanvasAgentPanel';
+import { CanvasDecisionsPanel } from './CanvasDecisionsPanel';
+import { AccessControlPanel } from '../control/AccessControlPanel';
+import { appendOutcomeContract } from './outcomeContract';
+import { CanvasOutcomeContract } from './CanvasOutcomeContract';
+import { buildPrimitiveContractSuggestions } from './canvasContractSuggestions';
+
+interface Props {
+  workflowId: string | null;
+  payload: BuildPayload | null;
+  selectedNodeId?: string | null;
+  onReload: () => void;
+  onClose: () => void;
+  onStartCatalogDrag: (event: React.PointerEvent, item: CatalogItem) => void;
+  onPayloadChange: (payload: BuildPayload) => void;
+  onWorkflowCreated?: (workflowId: string) => void;
+  onCatalogChange?: (catalog: CatalogItem[]) => void;
+}
+
+const DOCK_FAMILIES: CatalogFamily[] = ['trigger', 'gather', 'think', 'act', 'control'];
+
+export function CanvasActionDock({
+  workflowId,
+  payload,
+  selectedNodeId,
+  onReload,
+  onClose,
+  onStartCatalogDrag,
+  onPayloadChange,
+  onWorkflowCreated,
+  onCatalogChange,
+}: Props) {
+  const [prose, setProse] = useState('');
+  const [outcomeContractOpen, setOutcomeContractOpen] = useState(false);
+  const [outcomeSuccessCriteria, setOutcomeSuccessCriteria] = useState('');
+  const [outcomeFailureCriteria, setOutcomeFailureCriteria] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [action, setAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [catalogEnvelope, setCatalogEnvelope] = useState<CatalogEnvelope>(getCatalogEnvelope());
+  const [familyFilter, setFamilyFilter] = useState<CatalogFamily | null>(null);
+  const { objectTypes } = useObjectTypes();
+
+  const [suggestedCatalogIds, setSuggestedCatalogIds] = useState<string[]>([]);
+  const [suggestedLoading, setSuggestedLoading] = useState(false);
+  // BUG-FC232024: suggest_next can time out (20s client timeout against a
+  // synchronous backend). Previously .catch swallowed the error silently,
+  // leaving the UI in an ambiguous state ("no suggestions" could mean
+  // "genuinely nothing legal" or "fetch failed"). Now: preserve the last
+  // successful suggestion set as stale fallback, expose error + stale
+  // flags so the UI can signal the degradation.
+  const [suggestedError, setSuggestedError] = useState<string | null>(null);
+  const [suggestedStale, setSuggestedStale] = useState(false);
+
+  useEffect(() => {
+    if (!workflowId || !selectedNodeId || !payload?.build_graph) {
+      setSuggestedCatalogIds([]);
+      setSuggestedError(null);
+      setSuggestedStale(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setSuggestedLoading(true);
+    suggestNextSteps(workflowId, selectedNodeId, payload.build_graph as any)
+      .then((res: any) => {
+        if (cancelled) return;
+        const ids = (res.likely_next_steps || []).flatMap((s: any) => [
+          s.catalog_item_id,
+          s.capability_ref,
+          s.id,
+          s.route,
+          s.actionValue,
+          s.capability_slug ? `cap-${String(s.capability_slug).replace(/\//g, '-')}` : null,
+        ]).filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
+        setSuggestedCatalogIds(Array.from(new Set(ids)));
+        setSuggestedError(null);
+        setSuggestedStale(false);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Preserve previous suggestedCatalogIds (don't clear) so the user
+        // still has the last-known-good set to work from. Mark the set
+        // stale and surface the error so the UI can offer retry.
+        const message = err instanceof Error ? err.message : String(err || 'suggest_next failed');
+        setSuggestedError(message);
+        setSuggestedStale(true);
+      })
+      .finally(() => {
+        if (!cancelled) setSuggestedLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [workflowId, selectedNodeId, payload?.build_graph]);
+
+  useEffect(() => {
+    loadCatalogEnvelope().then((nextEnvelope) => {
+      setCatalogEnvelope(nextEnvelope);
+      onCatalogChange?.(nextEnvelope.items);
+    });
+  }, [onCatalogChange]);
+
+  const handleCatalogReload = useCallback(async () => {
+    const nextEnvelope = await refreshCatalogEnvelope();
+    setCatalogEnvelope(nextEnvelope);
+    onCatalogChange?.(nextEnvelope.items);
+  }, [onCatalogChange]);
+
+  const catalog = catalogEnvelope.items;
+
+  const visibleCatalog = useMemo(() => catalog.filter(c => c.status === 'ready'), [catalog]);
+  const canvasSurfaceCatalog = useMemo(
+    () => visibleCatalog.filter((item) => isCanvasSurfaceAuthorityItem(item)),
+    [visibleCatalog],
+  );
+  const catalogSummary = useMemo(() => summarizeCatalogTruth(canvasSurfaceCatalog), [canvasSurfaceCatalog]);
+  const surfaceSummary = useMemo(() => summarizeCatalogSurface(canvasSurfaceCatalog), [canvasSurfaceCatalog]);
+  const visibleCatalogModels = useMemo(
+    () => visibleCatalog.map((item) => ({
+      item,
+      truth: getCatalogTruth(item),
+      policy: getCatalogSurfacePolicy(item),
+    })),
+    [visibleCatalog],
+  );
+  const filterableFamilies = useMemo(
+    () => DOCK_FAMILIES.filter((family) => visibleCatalogModels.some(({ item, policy }) => item.family === family && policy.tier === 'primary')),
+    [visibleCatalogModels],
+  );
+  const filteredCatalog = useMemo(
+    () => (familyFilter
+      ? visibleCatalogModels.filter(({ item }) => item.family === familyFilter)
+      : visibleCatalogModels),
+    [familyFilter, visibleCatalogModels],
+  );
+  const primaryCatalog = filteredCatalog.filter(({ policy }) => policy.tier === 'primary');
+  const primaryCatalogAll = useMemo(
+    () => visibleCatalogModels.filter(({ policy }) => policy.tier === 'primary'),
+    [visibleCatalogModels],
+  );
+  // Count primary catalog items per family — drives the grammar-rail counts.
+  const familyCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const { item } of primaryCatalogAll) {
+      const fam = item.family || 'other';
+      out[fam] = (out[fam] ?? 0) + 1;
+    }
+    return out;
+  }, [primaryCatalogAll]);
+  // Which families are represented in the "suggested next" set — rail chips
+  // for those families get a subtle pulse to tell you where the grammar wants
+  // to go next. No color, just motion.
+  const suggestedFamilies = useMemo(() => {
+    const fams = new Set<string>();
+    for (const id of suggestedCatalogIds) {
+      const match = visibleCatalogModels.find(m => m.item.id === id
+        || m.item.actionValue === id
+        || m.item.id.includes(id));
+      if (match?.item.family) fams.add(match.item.family);
+    }
+    return fams;
+  }, [suggestedCatalogIds, visibleCatalogModels]);
+  const surfaceStats = useMemo(() => ({
+    stepTotal: catalogSummary.nodeTotal,
+    stepCore: surfaceSummary.nodeCounts.primary,
+    stepOther: Math.max(0, catalogSummary.nodeTotal - surfaceSummary.nodeCounts.primary),
+    gateTotal: catalogSummary.edgeTotal,
+    gateCore: surfaceSummary.edgeCounts.primary,
+    gateOther: Math.max(0, catalogSummary.edgeTotal - surfaceSummary.edgeCounts.primary),
+  }), [catalogSummary, surfaceSummary]);
+  const outcomeContractSuggestions = useMemo(
+    () => buildPrimitiveContractSuggestions(
+      payload?.build_graph,
+      selectedNodeId,
+      objectTypes,
+      null,
+      {
+        compiledSpec: payload?.materialized_spec_projection?.materialized_spec ?? payload?.materialized_spec ?? null,
+        buildIssues: payload?.build_issues ?? null,
+      },
+    ),
+    [
+      objectTypes,
+      payload?.build_graph,
+      payload?.build_issues,
+      payload?.materialized_spec,
+      payload?.materialized_spec_projection?.materialized_spec,
+      selectedNodeId,
+    ],
+  );
+
+  const hasDefinition = !!(payload?.definition && Object.keys(payload.definition).length > 0);
+  const hasGraphSteps = !!payload?.build_graph?.nodes?.some(node => (node.route || '').trim().length > 0);
+  const buildState = payload?.build_state || 'draft';
+  const progressiveBuild = payload?.progressive_build;
+  const actionSource = useMemo(
+    () => appendOutcomeContract(prose, {
+      successCriteria: outcomeSuccessCriteria,
+      failureCriteria: outcomeFailureCriteria,
+    }),
+    [outcomeFailureCriteria, outcomeSuccessCriteria, prose],
+  );
+  const progressiveSource = actionSource.trim()
+    || progressiveBuild?.source_prose?.trim()
+    || (typeof payload?.definition?.source_prose === 'string' ? payload.definition.source_prose.trim() : '');
+  const progressiveUnit = progressiveBuild?.last_unit;
+  const progressiveChecks = progressiveBuild?.checks ?? [];
+  const progressiveCompletion = progressiveBuild?.completion;
+
+  const adoptBuildPayload = useCallback((nextPayload: BuildPayload) => {
+    const workflow = nextPayload.workflow
+      ?? payload?.workflow
+      ?? (workflowId ? { id: workflowId, name: payload?.workflow?.name || 'Workflow workspace' } : null);
+    onPayloadChange({
+      ...nextPayload,
+      workflow,
+    });
+  }, [onPayloadChange, payload?.workflow, workflowId]);
+
+  const handleRefine = useCallback(async () => {
+    if (!actionSource.trim()) return;
+    setLoading(true);
+    setAction('refine');
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await refineDefinition(actionSource.trim(), {
+        workflowId: payload?.workflow?.id ?? workflowId,
+        title: payload?.workflow?.name,
+      });
+      adoptBuildPayload(result);
+      setSuccess('Definition refined');
+      setProse('');
+      setOutcomeSuccessCriteria('');
+      setOutcomeFailureCriteria('');
+    } catch (e: any) {
+      setError(e.message || 'Refinement failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [actionSource, adoptBuildPayload, payload, workflowId]);
+
+  const handleProgressiveStep = useCallback(async () => {
+    if (!progressiveSource) return;
+    setLoading(true);
+    setAction('progressive');
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await progressiveBuildStep(progressiveSource, {
+        workflowId: payload?.workflow?.id ?? workflowId,
+        title: payload?.workflow?.name,
+        buildGraph: payload?.build_graph ?? null,
+      });
+      adoptBuildPayload(result);
+      const createdWorkflowId = result.workflow?.id;
+      if (createdWorkflowId && createdWorkflowId !== workflowId) onWorkflowCreated?.(createdWorkflowId);
+      const unitTitle = result.progressive_build?.last_unit?.title || 'unit';
+      setSuccess(`Accepted ${unitTitle}`);
+      setProse('');
+      setOutcomeSuccessCriteria('');
+      setOutcomeFailureCriteria('');
+    } catch (e: any) {
+      setError(e.message || 'Progressive build failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    adoptBuildPayload,
+    onWorkflowCreated,
+    payload?.build_graph,
+    payload?.workflow?.id,
+    payload?.workflow?.name,
+    progressiveSource,
+    workflowId,
+  ]);
+
+  const handleCompile = useCallback(async () => {
+    if (!actionSource.trim()) return;
+    setLoading(true);
+    setAction('compile');
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await materializePlan(actionSource.trim(), {
+        workflowId: payload?.workflow?.id ?? workflowId,
+        title: payload?.workflow?.name,
+      });
+      adoptBuildPayload(result);
+      const createdWorkflowId = result.workflow?.id;
+      if (createdWorkflowId && createdWorkflowId !== workflowId) onWorkflowCreated?.(createdWorkflowId);
+      setSuccess('Materialized');
+      setProse('');
+      setOutcomeSuccessCriteria('');
+      setOutcomeFailureCriteria('');
+    } catch (e: any) {
+      setError(e.message || 'Materialize failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [actionSource, adoptBuildPayload, onWorkflowCreated, payload?.workflow?.id, payload?.workflow?.name, workflowId]);
+
+  const handleCommit = useCallback(async () => {
+    if (!hasDefinition && !hasGraphSteps) return;
+    setLoading(true);
+    setAction('commit');
+    setError(null);
+    setSuccess(null);
+    try {
+      const title = payload?.workflow?.name || 'Materialize draft';
+      const definition = (payload?.definition && Object.keys(payload.definition).length > 0)
+        ? payload.definition as Record<string, unknown>
+        : undefined;
+      const buildGraph = hasGraphSteps ? payload?.build_graph : undefined;
+      if (workflowId) {
+        await commitDefinition(workflowId, { title, definition, buildGraph });
+      } else {
+        const created = await createWorkflow(title, { definition, buildGraph });
+        const createdWorkflowId = created.id || created.workflow_id;
+        if (createdWorkflowId && onWorkflowCreated) onWorkflowCreated(createdWorkflowId);
+      }
+      setSuccess('Saved');
+      onReload();
+    } catch (e: any) {
+      setError(e.message || 'Save failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [workflowId, payload, hasDefinition, hasGraphSteps, onReload, onWorkflowCreated]);
+
+  const renderCatalogButton = useCallback((
+    item: CatalogItem,
+    detail: string,
+    truthBadge: string,
+    truthCategory: string,
+    surfaceBadge?: string,
+  ) => (
+    <button
+      key={item.id}
+      type="button"
+      className={`canvas-dock__catalog-item canvas-dock__catalog-item--${truthCategory}`}
+      onPointerDown={e => onStartCatalogDrag(e, item)}
+      title={`${item.description || item.label} — ${detail}`}
+    >
+      <CanvasGlyph type={item.icon} size={14} />
+      <span className="canvas-catalog-item__stack">
+        <span className="canvas-catalog-item__label">{item.label}</span>
+        <span className="canvas-catalog-item__detail">{detail}</span>
+      </span>
+      <span className="canvas-catalog-item__meta-row">
+        {surfaceBadge && <span className="canvas-surface-badge">{surfaceBadge}</span>}
+        <span className={`canvas-truth-badge canvas-truth-badge--${truthCategory}`}>{truthBadge}</span>
+      </span>
+    </button>
+  ), [onStartCatalogDrag]);
+
+  return (
+    <>
+      <button className="canvas-dock__close" onClick={onClose} aria-label="Close action dock">&times;</button>
+      <div className="canvas-dock__title">Action</div>
+      <div className="canvas-dock__sep" />
+
+      <div className="canvas-dock__section-label">
+        {hasDefinition ? 'Add the next checked unit' : 'Describe the workflow'}
+      </div>
+      <textarea
+        aria-label={hasDefinition ? 'Next checked unit' : 'Workflow intent'}
+        className="canvas-dock-form__input canvas-action__textarea"
+        value={prose}
+        onChange={e => setProse(e.target.value)}
+        placeholder={hasDefinition ? 'Add detail, or keep using the original intent...' : 'Describe the workflow...'}
+        rows={2}
+        disabled={loading}
+      />
+      <CanvasOutcomeContract
+        compact
+        open={outcomeContractOpen}
+        disabled={loading}
+        successCriteria={outcomeSuccessCriteria}
+        failureCriteria={outcomeFailureCriteria}
+        suggestions={outcomeContractSuggestions}
+        onOpenChange={setOutcomeContractOpen}
+        onSuccessChange={setOutcomeSuccessCriteria}
+        onFailureChange={setOutcomeFailureCriteria}
+      />
+
+      <div className="canvas-action__compiler-loop">
+        <div className="canvas-action__compiler-head">
+          <div>
+            <div className="canvas-dock__section-label">Plan loop</div>
+            <div className="canvas-action__surface-note">One accepted unit per pass · draft only until saved</div>
+          </div>
+          <span className="canvas-action__compiler-count">
+            {progressiveCompletion?.accepted ?? 0}/{progressiveCompletion?.planned ?? 0}
+          </span>
+        </div>
+        {progressiveUnit ? (
+          <div className="canvas-action__unit-card">
+            <div className="canvas-action__unit-topline">
+              <span>{progressiveUnit.title || progressiveUnit.node_id}</span>
+              <span>{progressiveUnit.route || 'route pending'}</span>
+            </div>
+            {progressiveUnit.summary && (
+              <div className="canvas-action__unit-summary">{progressiveUnit.summary}</div>
+            )}
+            <div className="canvas-action__unit-meta">
+              <span>{progressiveUnit.gate_label || 'plan accepted'}</span>
+              <span>{progressiveUnit.outputs?.length ? progressiveUnit.outputs.join(', ') : 'no outputs yet'}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="canvas-action__unit-empty">
+            The next pass adds one node, one release gate, and a materialize receipt.
+          </div>
+        )}
+        {progressiveChecks.length > 0 && (
+          <div className="canvas-action__check-list">
+            {progressiveChecks.map(check => (
+              <div key={check.id} className={`canvas-action__check canvas-action__check--${check.state}`}>
+                <span className="canvas-action__check-state">{check.state}</span>
+                <span className="canvas-action__check-copy">
+                  <span>{check.label}</span>
+                  {check.detail && <span>{check.detail}</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="canvas-dock-form__row canvas-action__build-actions">
+        <button className="canvas-dock-form__btn" onClick={handleProgressiveStep} disabled={loading || !progressiveSource}>
+          {loading && action === 'progressive' ? 'Checking...' : hasDefinition ? 'Add checked unit' : 'Start checked build'}
+        </button>
+        {hasDefinition ? (
+          <button className="canvas-dock-form__btn canvas-dock-form__btn--secondary" onClick={handleRefine} disabled={loading || !actionSource.trim()}>
+            {loading && action === 'refine' ? 'Resolving...' : 'Resolve all'}
+          </button>
+        ) : (
+          <button className="canvas-dock-form__btn canvas-dock-form__btn--secondary" onClick={handleCompile} disabled={loading || !actionSource.trim()}>
+            {loading && action === 'compile' ? 'Resolving...' : 'Resolve all'}
+          </button>
+        )}
+      </div>
+
+      {(hasDefinition || hasGraphSteps) && (
+        <div className="canvas-action__save-card">
+          <div className="canvas-dock__section-label">Save</div>
+          <div className="canvas-action__save-row">
+            <span className="canvas-action__state-label">State</span>
+            <span className="canvas-action__state-value">{buildState}</span>
+          </div>
+          <button className="canvas-dock-form__btn canvas-action__save-button" onClick={handleCommit} disabled={loading || (!hasDefinition && !hasGraphSteps)}>
+            {loading && action === 'commit' ? 'Saving...' : 'Save draft'}
+          </button>
+        </div>
+      )}
+
+      {error && <div className="canvas-dock-form__error">{error}</div>}
+      {success && <div className="canvas-action__success">{success}</div>}
+
+      {/* Draggable catalog — drag items onto chain nodes or edges */}
+      <div className="canvas-action__catalog-section">
+        <CanvasSurfaceReviewPanel
+          catalogItems={catalogEnvelope.items}
+          sourcePolicies={catalogEnvelope.sourcePolicies}
+          onCatalogReload={handleCatalogReload}
+        />
+        <CanvasIntegrationsPanel />
+        <CanvasDataDictionaryPanel />
+        <CanvasAgentPanel />
+        <CanvasDecisionsPanel />
+        <AccessControlPanel />
+        <div className="canvas-action__catalog-header">
+          <div>
+            <div className="canvas-dock__section-label">Catalog</div>
+            <div className="canvas-action__catalog-subtitle">
+              {primaryCatalogAll.length} primary · {surfaceStats.stepCore}/{surfaceStats.stepTotal} step · {surfaceStats.gateCore}/{surfaceStats.gateTotal} gate
+              {(surfaceStats.stepOther + surfaceStats.gateOther) > 0 && ` · ${surfaceStats.stepOther + surfaceStats.gateOther} other`}
+            </div>
+          </div>
+          {familyFilter && (
+            <button
+              type="button"
+              className="canvas-grammar-rail__clear"
+              onClick={() => setFamilyFilter(null)}
+              aria-label="Clear family filter"
+            >
+              all families
+            </button>
+          )}
+        </div>
+
+        {/* Grammar rail — the workflow vocabulary as a left-to-right flow.
+            trigger → gather → think → act → control. Each chip scopes the
+            catalog grid. Suggested families get a subtle pulse to bias the
+            builder toward the next natural step. */}
+        <div className="canvas-grammar-rail" role="tablist" aria-label="Catalog families">
+          {DOCK_FAMILIES.map((family, i) => {
+            const count = familyCounts[family] ?? 0;
+            const isActive = familyFilter === family;
+            const isAvailable = count > 0 || filterableFamilies.includes(family);
+            const isSuggested = suggestedFamilies.has(family);
+            const cls = [
+              'canvas-grammar-rail__chip',
+              `canvas-grammar-rail__chip--${family}`,
+              isActive ? 'canvas-grammar-rail__chip--active' : '',
+              isSuggested && !isActive ? 'canvas-grammar-rail__chip--suggested' : '',
+              !isAvailable ? 'canvas-grammar-rail__chip--empty' : '',
+            ].filter(Boolean).join(' ');
+            return (
+              <React.Fragment key={family}>
+                {i > 0 && <span className="canvas-grammar-rail__link" aria-hidden="true" />}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  disabled={!isAvailable}
+                  className={cls}
+                  onClick={() => setFamilyFilter(isActive ? null : family)}
+                  title={`${FAMILY_LABELS[family]} — ${count} item${count === 1 ? '' : 's'}`}
+                >
+                  <span className="canvas-grammar-rail__label">{FAMILY_LABELS[family]}</span>
+                  <span className="canvas-grammar-rail__count">{count}</span>
+                </button>
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        {suggestedLoading && (
+          <div className="canvas-action__suggestion-loading">
+            <span className="canvas-spinner" /> Finding suggestions...
+          </div>
+        )}
+        {suggestedError && !suggestedLoading && (
+          <div
+            className="canvas-action__suggestion-error"
+            data-praxis-element="canvas.action_dock.suggested_next.error"
+            role="status"
+            aria-live="polite"
+          >
+            Couldn't refresh suggestions{suggestedStale ? ' (showing last known)' : ''}: {suggestedError}
+            <button
+              type="button"
+              className="canvas-action__suggestion-retry"
+              onClick={() => {
+                // Re-trigger the effect by flipping a dep indirectly:
+                // easiest reliable way is to clear then restore selectedNodeId
+                // upstream, OR refetch directly. Direct refetch:
+                if (!workflowId || !selectedNodeId || !payload?.build_graph) return;
+                setSuggestedLoading(true);
+                setSuggestedError(null);
+                suggestNextSteps(workflowId, selectedNodeId, payload.build_graph as any)
+                  .then((res: any) => {
+                    const ids = (res.likely_next_steps || []).flatMap((s: any) => [
+                      s.catalog_item_id,
+                      s.capability_ref,
+                      s.id,
+                      s.route,
+                      s.actionValue,
+                      s.capability_slug ? `cap-${String(s.capability_slug).replace(/\//g, '-')}` : null,
+                    ]).filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
+                    setSuggestedCatalogIds(Array.from(new Set(ids)));
+                    setSuggestedStale(false);
+                  })
+                  .catch((err: unknown) => {
+                    const message = err instanceof Error ? err.message : String(err || 'suggest_next failed');
+                    setSuggestedError(message);
+                    setSuggestedStale(true);
+                  })
+                  .finally(() => setSuggestedLoading(false));
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {suggestedCatalogIds.length > 0 && !familyFilter && (
+          <div
+            className={`canvas-action__suggestions${suggestedStale ? ' canvas-action__suggestions--stale' : ''}`}
+            data-praxis-element="canvas.action_dock.suggested_next"
+          >
+            <div className="canvas-dock__section-label">
+              Suggested next{suggestedStale ? ' (stale)' : ''}
+            </div>
+            <div className="canvas-dock__catalog-grid">
+              {suggestedCatalogIds.map(id => {
+                const model = primaryCatalog.find(m => m.item.id === id || m.item.actionValue === id || m.item.id.includes(id));
+                if (!model) return null;
+                return renderCatalogButton(model.item, model.policy.detail, model.truth.badge, model.truth.category);
+              })}
+            </div>
+          </div>
+        )}
+
+        {primaryCatalog.length > 0 && (
+          <>
+            <div className="canvas-dock__catalog-grid canvas-action__primary-catalog-grid">
+              {primaryCatalog.map(({ item, truth, policy }) => renderCatalogButton(item, policy.detail, truth.badge, truth.category))}
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}

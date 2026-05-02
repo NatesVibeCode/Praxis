@@ -8,7 +8,7 @@ if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
 from runtime.operations.commands import plan_orchestration
-from runtime.spec_compiler import LaunchReceipt, ProposedPlan
+from runtime.spec_materializer import LaunchReceipt, ProposedPlan
 
 
 class _Subsystems:
@@ -55,7 +55,7 @@ def test_compose_plan_handler_hoists_workflow_id_into_authority_event_payload(mo
 
 
 def test_launch_plan_handler_hoists_run_fields_into_authority_event_payload(monkeypatch):
-    import runtime.spec_compiler as spec_compiler
+    import runtime.spec_materializer as spec_materializer
 
     def _fake_launch_plan(*_args, **_kwargs):
         return LaunchReceipt(
@@ -67,7 +67,7 @@ def test_launch_plan_handler_hoists_run_fields_into_authority_event_payload(monk
             warnings=[],
         )
 
-    monkeypatch.setattr(spec_compiler, "launch_plan", _fake_launch_plan)
+    monkeypatch.setattr(spec_materializer, "launch_plan", _fake_launch_plan)
 
     result = plan_orchestration.handle_launch_plan(
         plan_orchestration.LaunchPlanCommand(

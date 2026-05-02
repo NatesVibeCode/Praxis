@@ -133,6 +133,7 @@ export function ModulePalette({ isOpen, onClose, startDrag }: ModulePaletteProps
                 }}
               >
                 <div className="module-card-header">
+                  {mod.icon && <span className="module-card-icon">{mod.icon}</span>}
                   <span className="module-card-name">{mod.name}</span>
                   <span className="module-card-span">{mod.defaultSpan}</span>
                 </div>

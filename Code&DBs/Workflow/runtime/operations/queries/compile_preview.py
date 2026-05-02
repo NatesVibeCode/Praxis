@@ -40,7 +40,7 @@ class CompilePreviewQuery(BaseModel):
 
 
 def handle_compile_preview(query: CompilePreviewQuery, subsystems: Any) -> dict[str, Any]:
-    from runtime.compile_cqrs import preview_compile
+    from runtime.materialize_cqrs import preview_compile
 
     return preview_compile(
         query.intent,

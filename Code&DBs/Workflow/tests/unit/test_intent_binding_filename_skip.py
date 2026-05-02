@@ -32,10 +32,10 @@ def test_python_filename_is_not_a_pill() -> None:
 
 
 def test_typescript_filename_is_not_a_pill() -> None:
-    intent = "Edit MoonActionDock.tsx to fix the silent catch."
-    # Note: matched as 'moonactiondock.tsx' (case-folded). Either way,
+    intent = "Edit CanvasActionDock.tsx to fix the silent catch."
+    # Note: matched as 'canvasactiondock.tsx' (case-folded). Either way,
     # the .tsx extension means filename, not data ref.
-    assert ("moonactiondock", "tsx") not in _refs(intent)
+    assert ("canvasactiondock", "tsx") not in _refs(intent)
 
 
 def test_full_path_is_not_a_pill() -> None:

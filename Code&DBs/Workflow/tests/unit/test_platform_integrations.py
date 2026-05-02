@@ -87,7 +87,7 @@ def test_execute_integration_routes_workflow_invoke_to_saved_workflow(monkeypatc
             "id": workflow_id,
             "name": "Child Workflow",
             "definition": {"definition_revision": "def_123"},
-            "compiled_spec": {"definition_revision": "def_123", "jobs": [{"label": "step-1"}]},
+            "materialized_spec": {"definition_revision": "def_123", "jobs": [{"label": "step-1"}]},
         },
     )
     monkeypatch.setattr(
@@ -95,7 +95,7 @@ def test_execute_integration_routes_workflow_invoke_to_saved_workflow(monkeypatc
         "_latest_execution_manifest",
         lambda _pg, workflow_id, definition_revision: {
             "execution_manifest_ref": f"execution_manifest:{workflow_id}:{definition_revision}:1",
-            "compiled_spec": {
+            "materialized_spec": {
                 "name": "Child Workflow",
                 "definition_revision": definition_revision,
                 "jobs": [{"label": "step-1"}],
@@ -217,7 +217,7 @@ def test_execute_integration_workflow_invoke_requires_execution_manifest(monkeyp
             "id": workflow_id,
             "name": "Child Workflow",
             "definition": {"definition_revision": "def_123"},
-            "compiled_spec": {"definition_revision": "def_123", "jobs": [{"label": "step-1"}]},
+            "materialized_spec": {"definition_revision": "def_123", "jobs": [{"label": "step-1"}]},
         },
     )
     monkeypatch.setattr(platform_mod, "_latest_execution_manifest", lambda *_args, **_kwargs: None)

@@ -29,15 +29,18 @@ async def create_webhook_endpoint(request: Request) -> JSONResponse:
     target_integration_id = body.get("target_integration_id")
     target_integration_action = body.get("target_integration_action")
     target_integration_args = body.get("target_integration_args")
+    target_agent_principal_ref = body.get("target_agent_principal_ref")
 
     has_workflow_target = bool(target_workflow_id)
     has_integration_target = bool(target_integration_id or target_integration_action)
-    if has_workflow_target and has_integration_target:
+    has_agent_target = bool(target_agent_principal_ref)
+    target_count = sum([has_workflow_target, has_integration_target, has_agent_target])
+    if target_count > 1:
         return JSONResponse(
             {
                 "error": (
-                    "target_workflow_id is mutually exclusive with "
-                    "target_integration_id/target_integration_action"
+                    "target_workflow_id, target_integration_id/action, and "
+                    "target_agent_principal_ref are mutually exclusive — pick one"
                 )
             },
             status_code=400,
@@ -62,24 +65,70 @@ async def create_webhook_endpoint(request: Request) -> JSONResponse:
         enabled=body.get("enabled", True),
     )
 
-    if endpoint.get("endpoint_id"):
+    endpoint_id = endpoint.get("endpoint_id")
+    if endpoint_id:
         if has_workflow_target:
             repository.ensure_webhook_workflow_trigger(
-                endpoint_id=endpoint["endpoint_id"],
+                endpoint_id=endpoint_id,
                 workflow_id=target_workflow_id,
             )
         elif has_integration_target:
             repository.ensure_webhook_integration_trigger(
-                endpoint_id=endpoint["endpoint_id"],
+                endpoint_id=endpoint_id,
                 integration_id=target_integration_id,
                 integration_action=target_integration_action,
                 integration_args=target_integration_args,
+            )
+        elif has_agent_target:
+            # Phase A trigger convergence: webhook → agent_wake.
+            # Updates the endpoint with the generic target shape so the
+            # trigger evaluator's agent_wake branch consumes events from
+            # this endpoint. Also creates a workflow_triggers row keyed
+            # to the endpoint so the system_events → trigger evaluator
+            # path picks up webhook events.
+            import json as _json
+
+            target_args = body.get("target_agent_args") or {}
+            conn.execute(
+                """UPDATE webhook_endpoints
+                      SET target_kind = 'agent_wake',
+                          target_ref = $2,
+                          target_args = $3::jsonb,
+                          updated_at = now()
+                    WHERE endpoint_id = $1""",
+                endpoint_id,
+                target_agent_principal_ref,
+                _json.dumps(target_args),
+            )
+            trigger_id = f"webhook_{endpoint_id}_agent"
+            conn.execute(
+                """INSERT INTO workflow_triggers (
+                       id, workflow_id, event_type, enabled,
+                       target_kind, target_ref, target_args
+                   )
+                   VALUES ($1, NULL, 'webhook.received', TRUE,
+                           'agent_wake', $2, $3::jsonb)
+                   ON CONFLICT (id) DO UPDATE SET
+                       enabled = TRUE,
+                       target_kind = EXCLUDED.target_kind,
+                       target_ref = EXCLUDED.target_ref,
+                       target_args = EXCLUDED.target_args""",
+                trigger_id,
+                target_agent_principal_ref,
+                _json.dumps({"trigger_kind": "webhook", **target_args}),
             )
 
     return JSONResponse({
         "endpoint_id": endpoint.get("endpoint_id"),
         "slug": endpoint.get("slug"),
         "status": "registered",
+        "target_kind": (
+            "agent_wake" if has_agent_target else (
+                "workflow" if has_workflow_target else (
+                    "integration" if has_integration_target else None
+                )
+            )
+        ),
     })
 
 

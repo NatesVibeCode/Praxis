@@ -18,6 +18,7 @@ def main() -> int:
     parser.add_argument("--api-protocol", required=True)
     parser.add_argument("--api-endpoint", required=True)
     parser.add_argument("--api-key-env", required=True)
+    parser.add_argument("--provider-slug", default=None)
     parser.add_argument("--model", required=True)
     parser.add_argument("--max-output-tokens", type=int, default=4096)
     parser.add_argument("--timeout-seconds", type=int, default=90)
@@ -32,6 +33,7 @@ def main() -> int:
         timeout=args.timeout_seconds,
         api_endpoint=args.api_endpoint,
         api_key_env=args.api_key_env,
+        provider_slug=args.provider_slug,
         workdir=args.workdir,
     )
     if args.reasoning_effort:

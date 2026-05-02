@@ -246,6 +246,8 @@ INSERT INTO authority_event_contracts (
             'family',
             'config_id',
             'model_slug',
+            'agent',
+            'model_eval_candidate_ref',
             'status',
             'score',
             'cost_usd',

@@ -1,4 +1,4 @@
-import React, { type AriaRole, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
+import React, { type AriaRole, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
 import {
   chipProps,
   gateProps,
@@ -50,6 +50,82 @@ export function TokenChip({ children, tone, source, className = '', ...rest }: T
     >
       {children}
     </span>
+  );
+}
+
+export interface RadioPillOption {
+  value: string;
+  label: ReactNode;
+  disabled?: boolean;
+}
+
+export interface RadioPillGroupProps {
+  options: RadioPillOption[];
+  value: string;
+  onChange: (value: string, option: RadioPillOption) => void;
+  ariaLabel?: string;
+  className?: string;
+  style?: CSSProperties;
+}
+
+export function RadioPillGroup({
+  options,
+  value,
+  onChange,
+  ariaLabel,
+  className = '',
+  style,
+}: RadioPillGroupProps) {
+  function activate(option: RadioPillOption) {
+    if (!option.disabled) onChange(option.value, option);
+  }
+
+  return (
+    <div
+      className={className ? `prx-radio-group ${className}` : 'prx-radio-group'}
+      role="radiogroup"
+      aria-label={ariaLabel}
+      style={style}
+      data-testid="prx-radio-pill-group"
+    >
+      {options.map((option) => {
+        const checked = option.value === value;
+        return (
+          <span
+            role="radio"
+            aria-checked={checked}
+            aria-disabled={option.disabled || undefined}
+            className={checked ? 'prx-radio-pill checked' : 'prx-radio-pill'}
+            data-value={option.value}
+            key={option.value}
+            tabIndex={checked ? 0 : -1}
+            onClick={() => activate(option)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                activate(option);
+              }
+            }}
+          >
+            {option.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+export interface TableFilterInputProps extends InputHTMLAttributes<HTMLInputElement> {}
+
+export function TableFilterInput({ className = '', autoComplete = 'off', spellCheck = false, ...props }: TableFilterInputProps) {
+  return (
+    <input
+      {...props}
+      autoComplete={autoComplete}
+      className={className ? `prx-table-filter ${className}` : 'prx-table-filter'}
+      data-testid="prx-table-filter"
+      spellCheck={spellCheck}
+    />
   );
 }
 
@@ -379,5 +455,300 @@ export function LedDot({ tone, className = '', style }: LedDotProps) {
       style={style}
       data-testid="prx-led-dot"
     />
+  );
+}
+
+// ── Button ─────────────────────────────────────────────────────
+// Single source of truth for buttons. Tones: primary | ghost | danger.
+// Sizes: sm | md (default) | lg. Toggle state via `active` prop.
+export type ButtonTone = 'default' | 'primary' | 'ghost' | 'danger';
+export type ButtonSize = 'sm' | 'md' | 'lg';
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  tone?: ButtonTone;
+  size?: ButtonSize;
+  active?: boolean;
+}
+
+export function Button({
+  tone = 'default',
+  size = 'md',
+  active,
+  className = '',
+  type,
+  children,
+  ...rest
+}: ButtonProps) {
+  const cls = className ? `prx-button ${className}` : 'prx-button';
+  return (
+    <button
+      type={type ?? 'button'}
+      className={cls}
+      data-tone={tone === 'default' ? undefined : tone}
+      data-size={size === 'md' ? undefined : size}
+      data-active={active ? 'true' : undefined}
+      data-testid="prx-button"
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── PanelCard ──────────────────────────────────────────────────
+// Slot-based panel shell. Use for sidebar panels, workflow cards,
+// quadrant frames, anywhere a bordered card with a labelled header
+// is needed. The tone prop adds a left-edge accent ribbon.
+export type PanelCardTone = 'default' | 'ok' | 'warn' | 'err' | 'live';
+
+export interface PanelCardProps {
+  eyebrow?: ReactNode;
+  title?: ReactNode;
+  count?: ReactNode;
+  action?: ReactNode;
+  footer?: ReactNode;
+  tone?: PanelCardTone;
+  className?: string;
+  style?: CSSProperties;
+  bodyClassName?: string;
+  tight?: boolean;
+  children?: ReactNode;
+}
+
+export function PanelCard({
+  eyebrow,
+  title,
+  count,
+  action,
+  footer,
+  tone = 'default',
+  className = '',
+  style,
+  bodyClassName,
+  tight,
+  children,
+}: PanelCardProps) {
+  const cls = className ? `prx-card ${className}` : 'prx-card';
+  const hasHead = eyebrow !== undefined || title !== undefined || count !== undefined || action !== undefined;
+  const bodyCls = ['prx-card__body', tight ? 'prx-card__body--tight' : '', bodyClassName ?? '']
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <div
+      className={cls}
+      style={style}
+      data-tone={tone === 'default' ? undefined : tone}
+      data-testid="prx-panel-card"
+    >
+      {hasHead && (
+        <div className="prx-card__head">
+          <div className="prx-card__head-copy">
+            {eyebrow !== undefined && <span className="eyebrow">{eyebrow}</span>}
+            {title !== undefined && <span className="title">{title}</span>}
+          </div>
+          {(count !== undefined || action !== undefined) && (
+            <div className="prx-card__head-tail">
+              {count !== undefined && <span className="prx-card__count">{count}</span>}
+              {action}
+            </div>
+          )}
+        </div>
+      )}
+      {children !== undefined && <div className={bodyCls}>{children}</div>}
+      {footer !== undefined && <div className="prx-card__foot">{footer}</div>}
+    </div>
+  );
+}
+
+// ── MetricTile ─────────────────────────────────────────────────
+// Bare metric tile for at-a-glance dashboard metrics.
+// label / value / detail / action stacked. NO border, NO bg-tint.
+// This is the canonical primitive for overview metrics — never compose
+// ReceiptCard for at-a-glance numbers (its key/value rows are wrong here).
+export type MetricTileTone = 'default' | 'ok' | 'warn' | 'err';
+
+export interface MetricTileProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'value'> {
+  label: ReactNode;
+  value: ReactNode;
+  detail?: ReactNode;
+  action?: ReactNode;
+  tone?: MetricTileTone;
+}
+
+export function MetricTile({
+  label,
+  value,
+  detail,
+  action,
+  tone = 'default',
+  className = '',
+  type,
+  ...rest
+}: MetricTileProps) {
+  const cls = className ? `prx-tile ${className}` : 'prx-tile';
+  return (
+    <button
+      type={type ?? 'button'}
+      className={cls}
+      data-tone={tone === 'default' ? undefined : tone}
+      data-testid="prx-tile"
+      {...rest}
+    >
+      <span className="prx-tile__label">{label}</span>
+      <span className="prx-tile__value">{value}</span>
+      {detail !== undefined && <span className="prx-tile__detail">{detail}</span>}
+      {action !== undefined && <span className="prx-tile__action">{action}</span>}
+    </button>
+  );
+}
+
+// ── ListPanel ──────────────────────────────────────────────────
+// Bare side / list panel: kicker + title + count badge + body.
+// NO border, NO bg-tint, NO rim. The structure is type-only.
+// Use for sidebar groups (Toolbelt Review, Recent Runs, etc.).
+// NEVER use PanelCard for these — that adds a rim that doesn't earn its keep.
+export interface ListPanelProps {
+  eyebrow?: ReactNode;
+  title: ReactNode;
+  count?: ReactNode;
+  action?: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+  children?: ReactNode;
+}
+
+export function ListPanel({
+  eyebrow,
+  title,
+  count,
+  action,
+  className = '',
+  style,
+  children,
+}: ListPanelProps) {
+  const cls = className ? `prx-list-panel ${className}` : 'prx-list-panel';
+  return (
+    <section className={cls} style={style} data-testid="prx-list-panel">
+      <header className="prx-list-panel__head">
+        <div className="prx-list-panel__head-copy">
+          {eyebrow !== undefined && <span className="prx-list-panel__eyebrow">{eyebrow}</span>}
+          <span className="prx-list-panel__title">{title}</span>
+        </div>
+        {(count !== undefined || action !== undefined) && (
+          <div className="prx-list-panel__head-tail">
+            {count !== undefined && <span className="prx-list-panel__count">{count}</span>}
+            {action}
+          </div>
+        )}
+      </header>
+      <div className="prx-list-panel__body">{children}</div>
+    </section>
+  );
+}
+
+// ── StatusRow ──────────────────────────────────────────────────
+// Single row in a list: LedDot + (title + detail) + meta.
+// NO border per-row. Hover-able if onClick provided, static otherwise.
+// Use for sidebar list rows (review items, recent runs, opportunities).
+export type StatusRowTone = 'live' | 'ok' | 'err' | 'idle';
+
+export interface StatusRowProps {
+  tone?: StatusRowTone;
+  title: ReactNode;
+  detail?: ReactNode;
+  detailMono?: boolean;
+  meta?: ReactNode;
+  onClick?: () => void;
+  className?: string;
+  ariaLabel?: string;
+}
+
+export function StatusRow({
+  tone = 'idle',
+  title,
+  detail,
+  detailMono,
+  meta,
+  onClick,
+  className = '',
+  ariaLabel,
+}: StatusRowProps) {
+  const cls = ['prx-status-row', onClick ? '' : 'prx-status-row--static', className]
+    .filter(Boolean)
+    .join(' ');
+  const detailCls = detailMono
+    ? 'prx-status-row__detail prx-status-row__detail--mono'
+    : 'prx-status-row__detail';
+  const body = (
+    <>
+      <LedDot tone={tone} />
+      <span className="prx-status-row__body">
+        <span className="prx-status-row__title">{title}</span>
+        {detail !== undefined && <span className={detailCls}>{detail}</span>}
+      </span>
+      {meta !== undefined && <span className="prx-status-row__meta">{meta}</span>}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={cls}
+        onClick={onClick}
+        aria-label={typeof ariaLabel === 'string' ? ariaLabel : undefined}
+        data-testid="prx-status-row"
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div
+      className={cls}
+      aria-label={typeof ariaLabel === 'string' ? ariaLabel : undefined}
+      data-testid="prx-status-row"
+    >
+      {body}
+    </div>
+  );
+}
+
+// ── SourceChip ─────────────────────────────────────────────────
+// Source-option pill with palette-tone dot. Replaces inline-color
+// chips in SourceOptionPills and surface tabs.
+export type SourceChipTone = 'default' | 'ok' | 'warn' | 'err' | 'live';
+
+export interface SourceChipProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+  tone?: SourceChipTone;
+  active?: boolean;
+  label: ReactNode;
+  subtitle?: ReactNode;
+}
+
+export function SourceChip({
+  tone = 'default',
+  active,
+  label,
+  subtitle,
+  className = '',
+  type,
+  ...rest
+}: SourceChipProps) {
+  const cls = className ? `prx-source-chip ${className}` : 'prx-source-chip';
+  return (
+    <button
+      type={type ?? 'button'}
+      className={cls}
+      data-tone={tone === 'default' ? undefined : tone}
+      data-active={active ? 'true' : undefined}
+      data-testid="prx-source-chip"
+      {...rest}
+    >
+      <span className="prx-source-chip__dot" />
+      <span className="prx-source-chip__copy">
+        <span className="prx-source-chip__label">{label}</span>
+        {subtitle !== undefined && <span className="prx-source-chip__sub">{subtitle}</span>}
+      </span>
+    </button>
   );
 }

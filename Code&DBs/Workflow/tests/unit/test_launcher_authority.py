@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import stat
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -107,8 +108,42 @@ class _FakeConnection:
     def cursor(self) -> _FakeCursor:
         return _FakeCursor(self._row)
 
+    def execute(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+        """Match SyncPostgresConnection.execute contract."""
+        with self.cursor() as cursor:
+            # Handle both (sql, (p1, p2)) and (sql, p1, p2) patterns
+            params = args[0] if len(args) == 1 and isinstance(args[0], (tuple, list)) else args
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            colnames = [d[0] for d in cursor.description]
+            return [dict(zip(colnames, row)) for row in rows]
+
     def close(self) -> None:
         self.closed = True
+
+
+def test_fake_connection_implements_execute_contract() -> None:
+    row = {
+        "workspace_ref": "praxis",
+        "host_ref": "default",
+        "base_path_ref": "base",
+        "base_path": "/tmp/base",
+        "repo_root_path": "/tmp/repo",
+        "workdir_path": "/tmp/work",
+    }
+    conn = _FakeConnection(row)
+    # The unified workflow status code (and others) now use conn.execute(sql, *args)
+    # and expect a list of dict-like objects.
+    rows = conn.execute(
+        "SELECT * FROM launcher_authority WHERE workspace_ref = $1 AND host_ref = $2",
+        "praxis",
+        "default",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["workspace_ref"] == "praxis"
+    assert rows[0]["host_ref"] == "default"
+    assert rows[0]["repo_root_path"] == "/tmp/repo"
 
 
 def test_missing_launcher_config_fails_closed(tmp_path: Path) -> None:

@@ -167,7 +167,7 @@ services:
   #   POST /rpc     host bin/praxis-agent dispatch (broker token)
   #   POST /mcp     workflow-worker MCP traffic (signed token OR broker token)
   #
-  # Why a separate service: the api-server stays for human-facing REST/Moon
+  # Why a separate service: the api-server stays for human-facing REST/Canvas
   # surfaces; the broker takes the agent + worker MCP traffic so "API got
   # stuck" does not equal "every CLI agent and every worker MCP call wedged".
   # Standing-order ref: architecture-policy::auth::via-docker-creds-not-shell.
@@ -330,29 +330,11 @@ services:
       # Optional explicit operator override. Leave empty by default so the
       # worker runtime derives local slots from visible CPU and memory.
       PRAXIS_WORKER_MAX_PARALLEL: ${PRAXIS_WORKER_MAX_PARALLEL:-}
-      PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
       PRAXIS_WORKFLOW_MCP_URL: ${PRAXIS_WORKFLOW_MCP_URL:-http://host.docker.internal:8422/mcp}
       PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
-      # Anthropic in the worker is a noninteractive Linux consumer of a macOS
-      # host login. The durable auth rail is the Keychain-derived
-      # CLAUDE_CODE_OAUTH_TOKEN exported by bin/praxis-compose-env; stale API-key
-      # rails stay blank so Claude cannot drift onto the wrong authority.
-      ANTHROPIC_API_KEY: ""
-      ANTHROPIC_AUTH_TOKEN: ""
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
-      # Codex/Gemini auth dirs mounted read-write: the CLIs need to write
-      # session caches, model caches, and skills dirs at runtime. With :ro
-      # they fail with "Read-only file system" before producing any output.
-      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex
-      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.gemini:/root/.gemini
-      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
-      # Cursor CLI auth state (single-file mount, matches .claude.json pattern).
-      # Host is currently not logged in (cursor-agent status -> "Not logged in")
-      # so this mount is a no-op until `cursor-agent login` runs on host.
-      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.cursor/agent-cli-state.json:/root/.cursor/agent-cli-state.json:ro
       - ${PRAXIS_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:${PRAXIS_DOCKER_SOCKET_PATH:-/var/run/docker.sock}
       # Share host /tmp with worker so sandbox temp dirs (created by the
       # worker via tempfile.mkdtemp) are visible both sides: host-side
@@ -367,21 +349,11 @@ services:
       - surfaces.cli.main
       - queue
       - worker
-    # Healthcheck: prove the LLM CLIs we route to are actually authenticated.
-    # The worker container can be "Up" while every Anthropic call returns 401
-    # — we just spent a session learning how silently that fails (worker
-    # claimed jobs, jobs ran 100+ seconds, returned exit_code=0 with 0 tokens
-    # because the LLM call rejected, then auto-seal sealed empty submissions
-    # as "no-change completions"). The healthcheck here is the structural
-    # gate: if claude can't auth, the container is unhealthy, dependent
-    # services see it, firecheck halts admission.
-    #
-    # We only probe claude (CLAUDE_CODE_OAUTH_TOKEN, the rail most likely to
-    # go stale across recreates). Codex/Gemini auth lives in mounted dirs
-    # that survive recreate, so they don't have the same hydration cliff.
-    # Standing-order ref: architecture-policy::auth::via-docker-creds-not-shell
+    # Healthcheck: prove the worker control-plane Python path imports. Provider
+    # auth is route-specific and lives in provider control-plane / thin-image
+    # credential authority, not in this long-lived worker container.
     healthcheck:
-      test: ["CMD-SHELL", "claude auth status --json 2>/dev/null | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d.get(\"loggedIn\") is True else 1)'"]
+      test: ["CMD-SHELL", "python3 -c 'from runtime.workflow import _worker_loop; print(\"worker-control-plane-ok\")' >/dev/null"]
       interval: 30s
       timeout: 8s
       retries: 3

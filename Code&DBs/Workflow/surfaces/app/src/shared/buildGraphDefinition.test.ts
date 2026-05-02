@@ -112,8 +112,8 @@ describe('buildGraphToDefinition', () => {
           phases: [{ route: 'auto/draft', prompt: 'Draft it' }],
         },
       },
-      compiled_spec_projection: {
-        compiled_spec: {
+      materialized_spec_projection: {
+        materialized_spec: {
           jobs: [{ label: 'Projected draft', agent: 'auto/draft' }],
           triggers: [{ event_type: 'manual' }],
         },
@@ -127,8 +127,8 @@ describe('buildGraphToDefinition', () => {
           phases: [{ route: 'auto/draft', prompt: 'Draft it' }],
         },
       },
-      compiled_spec_projection: {
-        compiled_spec: {
+      materialized_spec_projection: {
+        materialized_spec: {
           jobs: [{ label: 'Projected reviewed draft', agent: 'auto/draft' }],
           triggers: [{ event_type: 'manual' }],
         },

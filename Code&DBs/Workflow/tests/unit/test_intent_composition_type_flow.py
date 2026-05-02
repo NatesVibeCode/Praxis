@@ -3,7 +3,7 @@
 Honors architecture-policy::platform-architecture::fail-closed-at-compile-
 no-silent-defaults. compose_plan_from_intent surfaces type-flow errors in
 the ProposedPlan's warnings list so callers see them before approving or
-launching. Moon commitDefinition independently blocks at save via 1.2.a.
+launching. Canvas commitDefinition independently blocks at save via 1.2.a.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from runtime.intent_composition import (
     _adapt_plan_jobs_to_type_flow_request,
     _validate_composed_plan_type_flow,
 )
-from runtime.spec_compiler import ProposedPlan
+from runtime.spec_materializer import ProposedPlan
 
 
 def _make_proposed(jobs: list[dict]) -> ProposedPlan:
@@ -161,7 +161,7 @@ def test_compose_attaches_type_flow_errors_to_warnings(monkeypatch):
     )
 
     from dataclasses import replace
-    from runtime.spec_compiler import ProposedPlan
+    from runtime.spec_materializer import ProposedPlan
 
     def fake_propose(plan_dict, *, conn, workdir=None):
         return ProposedPlan(
@@ -219,7 +219,7 @@ def test_compose_no_errors_leaves_warnings_unchanged(monkeypatch):
         lambda *a, **k: None,
     )
 
-    from runtime.spec_compiler import ProposedPlan
+    from runtime.spec_materializer import ProposedPlan
 
     baseline_warnings = ["baseline warning"]
 

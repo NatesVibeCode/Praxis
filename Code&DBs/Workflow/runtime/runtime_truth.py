@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from functools import lru_cache
 import json
 import os
+from pathlib import Path, PurePosixPath
+import subprocess
 from typing import Any
 
 from runtime.failure_classifier import classify_failure
@@ -23,6 +26,7 @@ from storage.postgres.connection import (
     WORKFLOW_POOL_MAX_SIZE_ENV,
     WORKFLOW_POOL_MIN_SIZE_ENV,
 )
+from runtime.workspace_paths import repo_root
 
 
 _PROVIDER_SLOT_STALE_SECONDS = 600
@@ -67,6 +71,74 @@ def _as_mapping(value: Any) -> dict[str, Any]:
             return {}
         return dict(parsed) if isinstance(parsed, Mapping) else {}
     return {}
+
+
+@lru_cache(maxsize=4)
+def _workspace_authority_admitted_paths(root: str) -> frozenset[str] | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    paths: set[str] = set()
+    for raw in (result.stdout or b"").split(b"\0"):
+        if not raw:
+            continue
+        paths.add(PurePosixPath(raw.decode("utf-8", errors="surrogateescape")).as_posix())
+    return frozenset(paths)
+
+
+def _workspace_manifest_filter_active(audit: Mapping[str, Any]) -> bool:
+    return any(
+        audit.get(key) not in (None, "", [], {})
+        for key in (
+            "workspace_snapshot_ref",
+            "workspace_materialization",
+            "hydrated_file_count",
+        )
+    )
+
+
+def _manifest_path_admitted_by_workspace_authority(
+    path: object,
+    *,
+    admitted_paths: frozenset[str] | None,
+) -> bool:
+    if admitted_paths is None:
+        return True
+    normalized = PurePosixPath(str(path or "").strip().replace("\\", "/").lstrip("./")).as_posix()
+    if not normalized or normalized == ".":
+        return False
+    if Path(normalized).is_absolute():
+        return True
+    if normalized in admitted_paths:
+        return True
+    prefix = f"{normalized.rstrip('/')}/"
+    return any(candidate.startswith(prefix) for candidate in admitted_paths)
+
+
+def _actionable_missing_manifest_paths(
+    audit: Mapping[str, Any],
+    missing: list[Any],
+    *,
+    admitted_paths: frozenset[str] | None,
+) -> list[Any]:
+    if not _workspace_manifest_filter_active(audit):
+        return list(missing)
+    return [
+        path
+        for path in missing
+        if _manifest_path_admitted_by_workspace_authority(
+            path,
+            admitted_paths=admitted_paths,
+        )
+    ]
 
 
 def _iso(value: Any) -> str | None:
@@ -470,23 +542,56 @@ def _manifest_audit_snapshot(
         """,
         *params,
     )
+    latest_success_index_by_job: dict[tuple[str, str], tuple[int, str]] = {}
+    for index, row in enumerate(rows):
+        row_run_id = str(_row_value(row, "run_id") or "")
+        node_id = str(_row_value(row, "node_id") or "")
+        if not row_run_id or not node_id:
+            continue
+        if str(_row_value(row, "status") or "") != "succeeded":
+            continue
+        latest_success_index_by_job.setdefault(
+            (row_run_id, node_id),
+            (index, str(_row_value(row, "receipt_id") or "")),
+        )
+
     records: list[dict[str, Any]] = []
     total_missing = 0
     outside_observed = 0
-    for row in rows:
+    admitted_paths = _workspace_authority_admitted_paths(str(repo_root()))
+    for index, row in enumerate(rows):
         audit = _as_mapping(_row_value(row, "workspace_manifest_audit"))
         missing = list(audit.get("missing_intended_paths") or [])
+        workspace_actionable_missing = _actionable_missing_manifest_paths(
+            audit,
+            missing,
+            admitted_paths=admitted_paths,
+        )
+        workspace_actionable_missing_set = set(workspace_actionable_missing)
+        non_actionable_missing = [
+            path for path in missing if path not in workspace_actionable_missing_set
+        ]
         observed = list(audit.get("observed_file_read_refs") or [])
         observed_mode = str(audit.get("observed_file_read_mode") or "")
         status = str(_row_value(row, "status") or "")
+        row_run_id = str(_row_value(row, "run_id") or "")
+        node_id = str(_row_value(row, "node_id") or "")
+        success_index, success_receipt_id = latest_success_index_by_job.get(
+            (row_run_id, node_id),
+            (-1, ""),
+        )
+        superseded_by_success = success_index >= 0 and success_index < index
         actionable_missing = [
             path
-            for path in missing
-            if status != "succeeded"
-            or (
-                observed_mode != "provider_output_path_mentions"
-                and observed_mode
-                and path in observed
+            for path in workspace_actionable_missing
+            if not superseded_by_success
+            and (
+                status != "succeeded"
+                or (
+                    observed_mode != "provider_output_path_mentions"
+                    and observed_mode
+                    and path in observed
+                )
             )
         ]
         total_missing += len(actionable_missing)
@@ -494,13 +599,16 @@ def _manifest_audit_snapshot(
         records.append(
             {
                 "receipt_id": str(_row_value(row, "receipt_id") or ""),
-                "run_id": str(_row_value(row, "run_id") or ""),
-                "job_label": str(_row_value(row, "node_id") or ""),
+                "run_id": row_run_id,
+                "job_label": node_id,
                 "status": status,
                 "failure_code": str(_row_value(row, "failure_code") or ""),
                 "finished_at": _iso(_row_value(row, "finished_at")),
                 "missing_intended_paths": missing,
                 "actionable_missing_intended_paths": actionable_missing,
+                "non_actionable_missing_intended_paths": non_actionable_missing,
+                "superseded_by_success": superseded_by_success,
+                "superseded_by_receipt_id": success_receipt_id if superseded_by_success else None,
                 "hydrated_manifest_paths": list(audit.get("hydrated_manifest_paths") or []),
                 "observed_file_read_refs": observed,
                 "observed_file_read_mode": observed_mode,
@@ -579,7 +687,13 @@ def classify_runtime_failure(
 ) -> str:
     outputs_dict = dict(outputs or {})
     manifest_audit = _as_mapping(outputs_dict.get("workspace_manifest_audit"))
-    if manifest_audit.get("missing_intended_paths"):
+    missing_intended_paths = list(manifest_audit.get("missing_intended_paths") or [])
+    actionable_missing = _actionable_missing_manifest_paths(
+        manifest_audit,
+        missing_intended_paths,
+        admitted_paths=_workspace_authority_admitted_paths(str(repo_root())),
+    )
+    if actionable_missing:
         return "context_not_hydrated"
     code = str(failure_code or "").strip()
     lowered = f"{code}\n{stderr or ''}".lower()

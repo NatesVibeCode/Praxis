@@ -13,6 +13,7 @@ from registry import provider_onboarding
 import registry.provider_onboarding._execute as provider_onboarding_execute
 import registry.provider_onboarding._probe as provider_onboarding_probe
 import registry.provider_onboarding._report as provider_onboarding_report
+import registry.provider_onboarding._spec as provider_onboarding_spec
 import surfaces.mcp.tools.provider_onboard as provider_onboard_tool
 from surfaces.cli import native_operator
 from surfaces.mcp.tools.provider_onboard import tool_praxis_cli_auth_doctor, tool_praxis_provider_onboard
@@ -319,6 +320,73 @@ def test_provider_onboarding_service_probes_openai_cli_and_writes_registry_rows(
     assert task_affinities["primary"] == ["build", "review", "architecture"]
     assert "analysis" in task_affinities["secondary"]
     assert task_affinities["avoid"] == []
+
+    admission_insert = next(
+        params
+        for query, params in fake_conn.executed
+        if "INSERT INTO provider_transport_admissions" in query
+    )
+    probe_contract = json.loads(admission_insert[10])
+    assert probe_contract["auth_mounts"] == [
+        {
+            "host_relative_path": ".codex/auth.json",
+            "container_relative_path": ".codex/auth.json",
+            "container_seed_filename": "openai-auth.json",
+        }
+    ]
+    assert probe_contract["cli_home_tmpfs_dirs"] == [".codex"]
+
+
+def test_provider_onboarding_cli_auth_catalog_matches_seed_migration() -> None:
+    transport_template = provider_onboarding.ProviderTransportAuthorityTemplate(
+        transport="cli",
+        supported=True,
+        discovery_strategy="static",
+        prompt_probe_strategy="stdin",
+    )
+    transport_step = provider_onboarding.ProviderOnboardingStepResult(
+        step="transport_probe",
+        status="succeeded",
+        summary="ok",
+        details={},
+    )
+
+    google_contract = provider_onboarding_spec._selected_lane_probe_contract(
+        spec=provider_onboarding.ProviderOnboardingSpec(
+            provider_slug="google",
+            selected_transport="cli",
+        ),
+        transport_template=transport_template,
+        transport_step=transport_step,
+        model_step=None,
+        capacity_step=None,
+        selected_models=(),
+        router_supported=True,
+    )
+    assert google_contract["auth_mounts"][0] == {
+        "host_relative_path": ".gemini/oauth_creds.json",
+        "container_relative_path": ".gemini/oauth_creds.json",
+        "container_seed_filename": "google-gemini-oauth_creds.json",
+    }
+
+    anthropic_contract = provider_onboarding_spec._selected_lane_probe_contract(
+        spec=provider_onboarding.ProviderOnboardingSpec(
+            provider_slug="anthropic",
+            selected_transport="cli",
+        ),
+        transport_template=transport_template,
+        transport_step=transport_step,
+        model_step=None,
+        capacity_step=None,
+        selected_models=(),
+        router_supported=True,
+    )
+    assert anthropic_contract["auth_mounts"] == [
+        {
+            "host_relative_path": ".claude/.credentials.json",
+            "container_relative_path": ".claude/.credentials.json",
+        }
+    ]
 
 
 def test_execute_provider_onboarding_serializes_result(monkeypatch) -> None:

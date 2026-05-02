@@ -1860,7 +1860,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
             "id": row["id"],
             "name": row["name"],
             "definition": row["definition"] if include_definition else None,
-            "compiled_spec": row["compiled_spec"],
+            "materialized_spec": row["materialized_spec"],
         },
     )
     monkeypatch.setattr(workflow_commands, "_workflow_subsystems", lambda: _FakeSubsystems(object()))
@@ -1874,7 +1874,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
             "id": workflow_id or body.get("id") or "wf_probe",
             "name": body["name"],
             "definition": body["definition"],
-            "compiled_spec": body.get("compiled_spec"),
+            "materialized_spec": body.get("materialized_spec"),
         },
     )
     monkeypatch.setattr(
@@ -1884,7 +1884,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
             "id": new_workflow_id,
             "name": name or "Runtime Regression Probe",
             "definition": {"definition_revision": "def_runtime_regression_probe"},
-            "compiled_spec": {"definition_revision": "def_runtime_regression_probe"},
+            "materialized_spec": {"definition_revision": "def_runtime_regression_probe"},
             "workflow_id": workflow_id,
         },
     )
@@ -1893,7 +1893,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
         "id": "runtime_regression_probe",
         "name": "Runtime Regression Probe",
         "definition": {"definition_revision": "def_runtime_regression_probe"},
-        "compiled_spec": {
+        "materialized_spec": {
             "definition_revision": "def_runtime_regression_probe",
             "jobs": [{"label": "seed_contract"}],
         },
@@ -1908,7 +1908,7 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
     )
     created = json.loads(stdout.getvalue())
     assert created["workflow"]["id"] == "runtime_regression_probe"
-    assert created["workflow"]["compiled_spec"]["jobs"][0]["label"] == "seed_contract"
+    assert created["workflow"]["materialized_spec"]["jobs"][0]["label"] == "seed_contract"
 
     update_payload = {
         "name": "Runtime Regression Probe v2",
@@ -1958,7 +1958,7 @@ def test_records_frontdoor_supports_list_get_and_never_run(monkeypatch: pytest.M
         _workflow_to_dict=lambda row, include_definition=False: {
             "id": row["id"],
             "name": row["name"],
-            "has_spec": row.get("compiled_spec") is not None,
+            "has_spec": row.get("materialized_spec") is not None,
             "invocation_count": row.get("invocation_count", 0),
             "definition": row.get("definition") if include_definition else None,
         },
@@ -1980,7 +1980,7 @@ def test_records_frontdoor_supports_list_get_and_never_run(monkeypatch: pytest.M
                 "id": "wf_draft",
                 "name": "Draft Flow",
                 "definition": {"type": "pipeline"},
-                "compiled_spec": None,
+                "materialized_spec": None,
                 "invocation_count": 0,
             }
         ]
@@ -1993,7 +1993,7 @@ def test_records_frontdoor_supports_list_get_and_never_run(monkeypatch: pytest.M
             "id": workflow_id,
             "name": "Draft Flow",
             "definition": {"type": "pipeline"},
-            "compiled_spec": None,
+            "materialized_spec": None,
             "invocation_count": 0,
         },
     )
@@ -2182,7 +2182,7 @@ def test_manifest_frontdoor_supports_generate_and_save_as(
     )
 
     stdout = StringIO()
-    assert workflow_cli_main(["manifest", "generate", "moon", "dashboard"], stdout=stdout) == 0
+    assert workflow_cli_main(["manifest", "generate", "canvas", "dashboard"], stdout=stdout) == 0
     generated = json.loads(stdout.getvalue())
     assert generated["manifest_id"] == "manifest_123"
     assert generated["confidence"] == 0.88
@@ -2372,6 +2372,7 @@ def test_active_frontdoor_uses_operator_status_snapshot(
             "pass_rate": 0.5,
             "adjusted_pass_rate": 0.75,
             "observability_state": "ready",
+            "in_flight_status_authority": "runtime.workflow.unified.get_run_status",
             "queue_depth": 4,
             "queue_depth_status": "ok",
             "queue_depth_pending": 3,
@@ -2404,6 +2405,9 @@ def test_active_frontdoor_uses_operator_status_snapshot(
     assert payload["count"] == 1
     assert payload["runs"][0]["workflow_name"] == "Live Workflow"
     assert payload["queue"]["running"] == 1
+    assert payload["metrics"]["in_flight_status_authority"] == (
+        "runtime.workflow.unified.get_run_status"
+    )
 
 
 def test_firecheck_frontdoor_fails_closed_when_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3013,6 +3017,52 @@ def test_chain_frontdoor_detects_coordination_program(
     assert captured["coordination_path"] == str(coord_path)
     assert captured["requested_by_kind"] == "cli"
     assert captured["adopt_active"] is True
+
+
+def test_chain_frontdoor_fallback_uses_sync_postgres_connection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    coord = {
+        "program": "test_program",
+        "validate_order": ["config/cascade/specs/s1.json"],
+        "waves": [{"wave_id": "w1", "specs": ["config/cascade/specs/s1.json"]}],
+    }
+    coord_path = tmp_path / "test_chain.json"
+    coord_path.write_text(json.dumps(coord))
+    sync_conn = object()
+    pool = object()
+    captured: dict[str, object] = {}
+
+    class _BrokenSubsystems:
+        def get_pg_conn(self):
+            raise RuntimeError("no mcp subsystem connection")
+
+    def _fake_request(pg_conn, **kwargs):
+        captured["pg_conn"] = pg_conn
+        captured.update(kwargs)
+        return SimpleNamespace(command_id="cmd_test", command_type="workflow.chain.submit")
+
+    def _fake_render(pg_conn, command, **kwargs):  # noqa: ARG001
+        assert pg_conn is sync_conn
+        return {"status": "submitted", "chain_id": "chain_test_fallback"}
+
+    import runtime.control_commands as _cc
+    import storage.postgres.connection as _pg_connection
+    import surfaces.mcp.subsystems as _subs_mod
+
+    monkeypatch.setattr(_cc, "request_workflow_chain_submit_command", _fake_request)
+    monkeypatch.setattr(_cc, "render_workflow_chain_submit_response", _fake_render)
+    monkeypatch.setattr(_subs_mod, "_subs", _BrokenSubsystems())
+    monkeypatch.setattr(_pg_connection, "get_workflow_pool", lambda: pool)
+    monkeypatch.setattr(_pg_connection, "SyncPostgresConnection", lambda observed_pool: sync_conn if observed_pool is pool else None)
+
+    stdout = StringIO()
+    exit_code = workflow_cli_main(["chain", str(coord_path)], stdout=stdout)
+
+    assert exit_code == 0, f"unexpected failure: {stdout.getvalue()!r}"
+    assert captured["pg_conn"] is sync_conn
+    assert json.loads(stdout.getvalue())["chain_id"] == "chain_test_fallback"
 
 
 def test_chain_frontdoor_no_adopt_active_flag(

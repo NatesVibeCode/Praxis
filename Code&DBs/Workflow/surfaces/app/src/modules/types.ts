@@ -13,4 +13,5 @@ export interface ModuleDefinition {
   defaultSpan: string;
   component: React.ComponentType<QuadrantProps> | React.LazyExoticComponent<React.ComponentType<QuadrantProps>>;
   description: string;
+  icon?: string;
 }

@@ -8,7 +8,7 @@ Phase 11 is complete.
 
 The operator inspection layer now has one authority path for the Client
 Operating Model: domain read-model builders feed CQRS query operations, MCP
-tools expose those operations, and the Moon workflow builder checks its graph
+tools expose those operations, and the Canvas workflow builder checks its graph
 through that same authority. The UI does not maintain a second validation
 truth.
 
@@ -39,7 +39,7 @@ MCP tools:
 - `praxis_client_operating_model_snapshot_store`
 - `praxis_client_operating_model_snapshots`
 
-Moon surface:
+Canvas surface:
 
 - The workflow inspector builds a `workflow_builder_validation` request from
   the current graph and live catalog.
@@ -57,12 +57,12 @@ Moon surface:
 - `Code&DBs/Workflow/storage/postgres/client_operating_model_repository.py`
 - `Code&DBs/Databases/migrations/workflow/356_register_client_operating_model_operator_view.sql`
 - `Code&DBs/Databases/migrations/workflow/358_client_operating_model_projection_storage.sql`
-- `Code&DBs/Workflow/surfaces/app/src/moon/clientOperatingModel.ts`
-- `Code&DBs/Workflow/surfaces/app/src/moon/clientOperatingModel.test.ts`
-- `Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx`
-- `Code&DBs/Workflow/surfaces/app/src/moon/MoonNodeDetail.tsx`
-- `Code&DBs/Workflow/surfaces/app/src/moon/MoonNodeDetail.test.tsx`
-- `Code&DBs/Workflow/surfaces/app/src/moon/style/components.css`
+- `Code&DBs/Workflow/surfaces/app/src/canvas/clientOperatingModel.ts`
+- `Code&DBs/Workflow/surfaces/app/src/canvas/clientOperatingModel.test.ts`
+- `Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx`
+- `Code&DBs/Workflow/surfaces/app/src/canvas/CanvasNodeDetail.tsx`
+- `Code&DBs/Workflow/surfaces/app/src/canvas/CanvasNodeDetail.test.tsx`
+- `Code&DBs/Workflow/surfaces/app/src/canvas/style/components.css`
 - `Code&DBs/Workflow/tests/unit/test_client_operating_model_operator_surfaces.py`
 - `Code&DBs/Workflow/tests/unit/test_client_operating_model_operation.py`
 - `Code&DBs/Workflow/tests/unit/test_client_operating_model_mcp_tool.py`
@@ -87,8 +87,8 @@ Live gateway/MCP validation was executed for a workflow-builder graph.
 
 Focused frontend validation:
 
-- `src/moon/clientOperatingModel.test.ts`: `4` tests passed
-- Moon workflow-builder focused suite: `3` files, `22` tests passed
+- `src/canvas/clientOperatingModel.test.ts`: `4` tests passed
+- Canvas workflow-builder focused suite: `3` files, `22` tests passed
 - Frontend typecheck: passed
 
 Focused backend validation:
@@ -98,8 +98,8 @@ Focused backend validation:
 
 Known test noise:
 
-- `MoonBuildPage.test.tsx` still emits existing React `act(...)` warnings
-  during the focused Moon suite. The suite passes; the warnings are not caused
+- `CanvasBuildPage.test.tsx` still emits existing React `act(...)` warnings
+  during the focused Canvas suite. The suite passes; the warnings are not caused
   by the Client Operating Model authority wiring.
 
 ## Roadmap Closeout

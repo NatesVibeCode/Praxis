@@ -141,7 +141,8 @@ def _evaluate_workflow_triggers_for_event(
         triggers = conn.execute(
             """SELECT t.id, t.workflow_id, t.filter,
                       t.trigger_type, t.integration_id, t.integration_action, t.integration_args,
-                      w.definition, w.compiled_spec, w.name as workflow_name
+                      t.target_kind, t.target_ref, t.target_args,
+                      w.definition, w.materialized_spec, w.name as workflow_name
                FROM public.workflow_triggers t
                LEFT JOIN public.workflows w ON w.id = t.workflow_id
                WHERE t.event_type = $1 AND t.enabled = TRUE""",
@@ -151,7 +152,8 @@ def _evaluate_workflow_triggers_for_event(
         triggers = conn.execute(
             """SELECT t.id, t.workflow_id, t.filter,
                       t.trigger_type, t.integration_id, t.integration_action, t.integration_args,
-                      w.definition, w.compiled_spec, w.name as workflow_name
+                      t.target_kind, t.target_ref, t.target_args,
+                      w.definition, w.materialized_spec, w.name as workflow_name
                FROM public.workflow_triggers t
                LEFT JOIN public.workflows w ON w.id = t.workflow_id
                WHERE t.event_type = ANY($1::text[]) AND t.enabled = TRUE""",
@@ -162,7 +164,15 @@ def _evaluate_workflow_triggers_for_event(
     for trigger in (triggers or []):
         trigger_id = trigger["id"]
         trigger_filter = trigger.get("filter") or {}
+        # Generic target_kind takes precedence over legacy trigger_type.
+        # 'agent_wake' is the new third option alongside the legacy
+        # 'workflow' and 'integration' trigger_type values. Closes
+        # BUG-F28F5090 — agent_wake target was schema-only without
+        # this dispatch branch.
+        target_kind = str(trigger.get("target_kind") or "").strip().lower()
         trigger_type = str(trigger.get("trigger_type") or "workflow").strip().lower()
+        if target_kind == "agent_wake":
+            trigger_type = "agent_wake"
 
         # Parse filter if string
         if isinstance(trigger_filter, str):
@@ -204,6 +214,14 @@ def _evaluate_workflow_triggers_for_event(
         try:
             if trigger_type == "integration":
                 did_fire = _fire_integration_trigger(conn, trigger=trigger, event=event, payload=payload)
+            elif trigger_type == "agent_wake":
+                did_fire = _fire_agent_wake_trigger(
+                    conn,
+                    trigger=trigger,
+                    event=event,
+                    event_type=event_type,
+                    payload=payload,
+                )
             else:
                 did_fire = _fire_workflow_trigger(
                     conn,
@@ -240,8 +258,8 @@ def _fire_workflow_trigger(
 
     from runtime.operating_model_planner import current_compiled_spec
 
-    compiled_spec = current_compiled_spec(trigger.get("definition"), trigger.get("compiled_spec"))
-    if not compiled_spec:
+    materialized_spec = current_compiled_spec(trigger.get("definition"), trigger.get("materialized_spec"))
+    if not materialized_spec:
         logger.warning(
             "Trigger %s matched but workflow %s has no current plan authority; skipping",
             trigger_id,
@@ -254,7 +272,7 @@ def _fire_workflow_trigger(
 
     from runtime.control_commands import submit_workflow_command
 
-    spec_copy = json.loads(json.dumps(compiled_spec))
+    spec_copy = json.loads(json.dumps(materialized_spec))
     if spec_copy.get("jobs"):
         event_context = (
             f"\n\n## Trigger Context\n"
@@ -346,6 +364,252 @@ def _fire_integration_trigger(
     return False
 
 
+def _fire_agent_wake_trigger(
+    conn: Any,
+    *,
+    trigger: dict[str, Any],
+    event: dict[str, Any],
+    event_type: str,
+    payload: dict[str, Any],
+) -> bool:
+    """Dispatch an agent_wake from a matched trigger.
+
+    Closes BUG-F28F5090 — the trigger evaluator had no dispatch branch for
+    target_kind='agent_wake' rows; schedule.fired and webhook.received events
+    fell through to the legacy workflow path and never produced
+    agent_wakes rows.
+
+    Reads target_ref as the agent_principal_ref. Reads target_args
+    {trigger_kind, payload, ...} for the wake shape. Compiles the trust
+    envelope (runtime.agent_context.compile_agent_context), refuses if
+    the agent isn't active or the in-flight cap is hit, deduplicates by
+    (principal, trigger_kind, payload_hash, trigger_event_id), inserts
+    the agent_wakes row, and launches a workflow run with
+    requested_by_kind='agent', requested_by_ref=<agent_principal_ref> so
+    every receipt attributes back to the principal.
+    """
+    from runtime.agent_context import compile_agent_context, in_flight_wake_count
+    from runtime.control_commands import submit_workflow_command
+
+    trigger_id = trigger["id"]
+    agent_ref = str(trigger.get("target_ref") or "").strip()
+    if not agent_ref:
+        logger.warning(
+            "trigger.agent_wake_missing_target_ref: trigger_id=%s",
+            trigger_id,
+        )
+        return False
+
+    target_args = trigger.get("target_args") or {}
+    if isinstance(target_args, str):
+        try:
+            target_args = json.loads(target_args)
+        except (json.JSONDecodeError, TypeError):
+            target_args = {}
+
+    trigger_kind = str(target_args.get("trigger_kind") or "schedule").strip().lower()
+    merged_payload = {
+        **(target_args.get("payload") or {}),
+        "_event": {
+            "event_type": event_type,
+            "event_id": event.get("id"),
+            "source_id": event.get("source_id"),
+            "source_type": event.get("source_type"),
+        },
+        "_trigger_payload": payload,
+    }
+
+    envelope = compile_agent_context(
+        conn,
+        agent_principal_ref=agent_ref,
+        trigger_kind=trigger_kind,
+        trigger_source_ref=str(trigger_id),
+        payload=merged_payload,
+    )
+    if envelope is None:
+        logger.warning(
+            "trigger.agent_wake_unknown_principal: trigger_id=%s agent_ref=%s",
+            trigger_id,
+            agent_ref,
+        )
+        _record_skipped_wake(
+            conn,
+            agent_ref=agent_ref,
+            trigger_kind=trigger_kind,
+            trigger_source_ref=str(trigger_id),
+            trigger_event_id=event.get("id"),
+            payload=merged_payload,
+            payload_hash=None,
+            skip_reason="unknown_principal",
+        )
+        return False
+
+    if envelope.agent_status != "active":
+        _record_skipped_wake(
+            conn,
+            agent_ref=agent_ref,
+            trigger_kind=trigger_kind,
+            trigger_source_ref=str(trigger_id),
+            trigger_event_id=event.get("id"),
+            payload=merged_payload,
+            payload_hash=envelope.payload_hash,
+            skip_reason=f"status_{envelope.agent_status}",
+        )
+        logger.info(
+            "trigger.agent_wake_skipped: trigger_id=%s agent_ref=%s status=%s",
+            trigger_id,
+            agent_ref,
+            envelope.agent_status,
+        )
+        return False
+
+    rows = conn.execute(
+        "SELECT max_in_flight_wakes FROM agent_registry WHERE agent_principal_ref = $1",
+        agent_ref,
+    )
+    cap = int(rows[0]["max_in_flight_wakes"]) if rows else 1
+    if in_flight_wake_count(conn, agent_ref) >= cap:
+        _record_skipped_wake(
+            conn,
+            agent_ref=agent_ref,
+            trigger_kind=trigger_kind,
+            trigger_source_ref=str(trigger_id),
+            trigger_event_id=event.get("id"),
+            payload=merged_payload,
+            payload_hash=envelope.payload_hash,
+            skip_reason="in_flight_cap",
+        )
+        logger.info(
+            "trigger.agent_wake_in_flight_cap: trigger_id=%s agent_ref=%s cap=%d",
+            trigger_id,
+            agent_ref,
+            cap,
+        )
+        return False
+
+    # Dedup hardening: include trigger_event_id in the unique key. Two
+    # distinct events (different event_id) with identical payloads must
+    # produce two separate wake rows. The unique index in the schema
+    # carries trigger_event_id as part of the key after migration.
+    wake_rows = conn.execute(
+        """INSERT INTO agent_wakes (
+               agent_principal_ref, trigger_kind, trigger_source_ref,
+               trigger_event_id, payload, payload_hash, status
+           )
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'pending')
+           ON CONFLICT (agent_principal_ref, trigger_kind, payload_hash, (COALESCE(trigger_event_id, 0)))
+               WHERE payload_hash IS NOT NULL
+               DO NOTHING
+           RETURNING wake_id""",
+        agent_ref,
+        trigger_kind,
+        str(trigger_id),
+        event.get("id"),
+        json.dumps(merged_payload, default=str),
+        envelope.payload_hash,
+    )
+    if not wake_rows:
+        logger.info(
+            "trigger.agent_wake_duplicate: trigger_id=%s agent_ref=%s payload_hash=%s",
+            trigger_id,
+            agent_ref,
+            envelope.payload_hash,
+        )
+        return False
+    wake_id = str(wake_rows[0]["wake_id"])
+
+    source_depth = payload.get("trigger_depth", 0)
+    if isinstance(source_depth, str):
+        try:
+            source_depth = int(source_depth)
+        except ValueError:
+            source_depth = 0
+
+    result = submit_workflow_command(
+        conn,
+        requested_by_kind="agent",
+        requested_by_ref=agent_ref,
+        inline_spec=dict(envelope.inline_spec),
+        dispatch_reason=f"agent_wake.{trigger_kind}",
+        trigger_depth=int(source_depth) + 1,
+        spec_name=str(envelope.inline_spec.get("name") or f"agent_wake::{agent_ref}"),
+        total_jobs=len(envelope.inline_spec.get("jobs") or []),
+    )
+    if result.get("error") or not result.get("run_id"):
+        conn.execute(
+            "UPDATE agent_wakes SET status='failed', skip_reason=$1 WHERE wake_id=$2",
+            f"submit_failed: {result.get('error') or 'no run_id'}",
+            wake_id,
+        )
+        raise RuntimeError(str(result.get("error") or result))
+
+    run_id = str(result["run_id"])
+    conn.execute(
+        """UPDATE agent_wakes
+              SET status='dispatched', dispatched_at=now(), run_id=$1
+            WHERE wake_id=$2""",
+        run_id,
+        wake_id,
+    )
+    try:
+        from runtime.system_events import emit_system_event
+
+        emit_system_event(
+            conn,
+            event_type="agent.wake.dispatched",
+            source_id=str(wake_id),
+            source_type="agent_wake",
+            payload={
+                "wake_id": wake_id,
+                "agent_principal_ref": agent_ref,
+                "run_id": run_id,
+                "trigger_kind": trigger_kind,
+            },
+        )
+    except Exception:
+        logger.debug("agent.wake.dispatched emission unavailable", exc_info=True)
+
+    logger.info(
+        "Trigger %s fired agent_wake for %s → wake=%s run=%s",
+        trigger_id,
+        agent_ref,
+        wake_id,
+        run_id,
+    )
+    return True
+
+
+def _record_skipped_wake(
+    conn: Any,
+    *,
+    agent_ref: str,
+    trigger_kind: str,
+    trigger_source_ref: str,
+    trigger_event_id: Any,
+    payload: dict[str, Any],
+    payload_hash: str | None,
+    skip_reason: str,
+) -> None:
+    """Insert a skipped wake row so the audit trail captures suppressed triggers."""
+    try:
+        conn.execute(
+            """INSERT INTO agent_wakes (
+                   agent_principal_ref, trigger_kind, trigger_source_ref,
+                   trigger_event_id, payload, payload_hash, status, skip_reason
+               )
+               VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'skipped', $7)""",
+            agent_ref,
+            trigger_kind,
+            trigger_source_ref,
+            trigger_event_id,
+            json.dumps(payload, default=str),
+            payload_hash,
+            skip_reason,
+        )
+    except Exception:
+        logger.debug("trigger.skipped_wake_record_failed", exc_info=True)
+
+
 def _workflow_trigger_event_types(event_type: str) -> tuple[str, ...]:
     normalized = (event_type or "").strip()
     if normalized == "schedule.fired":
@@ -369,7 +633,7 @@ def evaluate_event_subscriptions(conn: Any) -> int:
                   s.cursor_scope,
                   s.filter_policy,
                   w.definition,
-                  w.compiled_spec,
+                  w.materialized_spec,
                   w.name AS workflow_name
            FROM public.event_subscriptions s
            LEFT JOIN public.workflows w ON w.id = s.workflow_id
@@ -411,7 +675,7 @@ def _process_event_subscription(
     envelope_kind = str(subscription.get("envelope_kind") or "system_event").strip()
     from runtime.operating_model_planner import current_compiled_spec
 
-    compiled_spec = current_compiled_spec(subscription.get("definition"), subscription.get("compiled_spec"))
+    materialized_spec = current_compiled_spec(subscription.get("definition"), subscription.get("materialized_spec"))
     filter_policy = _json_mapping(subscription.get("filter_policy"))
 
     if envelope_kind != "system_event":
@@ -427,8 +691,8 @@ def _process_event_subscription(
             subscription_id,
         )
         return 0
-    if not compiled_spec:
-        has_authority_snapshot = bool(subscription.get("definition")) or bool(subscription.get("compiled_spec"))
+    if not materialized_spec:
+        has_authority_snapshot = bool(subscription.get("definition")) or bool(subscription.get("materialized_spec"))
         logger.warning(
             "Event subscription %s %s for workflow %s; skipping",
             subscription_id,
@@ -470,7 +734,7 @@ def _process_event_subscription(
                 conn,
                 workflow_id=workflow_id,
                 workflow_name=workflow_name,
-                compiled_spec=compiled_spec,
+                materialized_spec=materialized_spec,
                 event=event,
                 source_depth=_event_payload(event).get("trigger_depth", 0),
                 context_title="Subscription Context",
@@ -631,7 +895,7 @@ def _submit_workflow_for_event(
     *,
     workflow_id: str,
     workflow_name: str,
-    compiled_spec: Any,
+    materialized_spec: Any,
     event: dict[str, Any],
     source_depth: int,
     context_title: str,
@@ -649,7 +913,7 @@ def _submit_workflow_for_event(
             f"Trigger depth {source_depth} exceeds maximum ({MAX_TRIGGER_DEPTH})"
         )
 
-    spec_copy = _compiled_spec_dict(compiled_spec, workflow_id=workflow_id)
+    spec_copy = _compiled_spec_dict(materialized_spec, workflow_id=workflow_id)
     payload = _event_payload(event)
     event_type = event["event_type"]
     parent_run_id = payload.get("run_id") or event.get("source_id")
@@ -689,15 +953,15 @@ def _submit_workflow_for_event(
     return result
 
 
-def _compiled_spec_dict(compiled_spec: Any, *, workflow_id: str) -> dict[str, Any]:
-    if isinstance(compiled_spec, str):
+def _compiled_spec_dict(materialized_spec: Any, *, workflow_id: str) -> dict[str, Any]:
+    if isinstance(materialized_spec, str):
         try:
-            compiled_spec = json.loads(compiled_spec)
+            materialized_spec = json.loads(materialized_spec)
         except (json.JSONDecodeError, TypeError) as exc:
-            raise ValueError(f"invalid compiled_spec for workflow {workflow_id}") from exc
-    if not isinstance(compiled_spec, dict):
-        raise ValueError(f"compiled_spec for workflow {workflow_id} must be a mapping")
-    return json.loads(json.dumps(compiled_spec))
+            raise ValueError(f"invalid materialized_spec for workflow {workflow_id}") from exc
+    if not isinstance(materialized_spec, dict):
+        raise ValueError(f"materialized_spec for workflow {workflow_id} must be a mapping")
+    return json.loads(json.dumps(materialized_spec))
 
 
 def _event_payload(event: dict[str, Any]) -> dict[str, Any]:

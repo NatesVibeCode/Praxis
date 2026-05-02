@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
 from runtime.workspace_paths import repo_root as workspace_repo_root
 
 
@@ -64,10 +64,10 @@ def load_execution_packet_binding(
 
     conn = _resolve_connection(conn=conn, conn_factory=conn_factory)
 
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     try:
         record = store.load_execution_packet(packet_revision=packet_revision)
-    except CompileArtifactError as exc:
+    except MaterializeArtifactError as exc:
         raise ExecutionPacketRuntimeError(
             "execution_packet.authority_invalid",
             f"execution packet authority failed closed: {exc}",
@@ -123,10 +123,10 @@ def load_execution_packet_job_binding(
     expected_plan_revision = str(expected_plan_revision or "").strip()
     conn = _resolve_connection(conn=conn, conn_factory=conn_factory)
 
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     try:
         records = store.load_execution_packets(run_id=normalized_run_id)
-    except CompileArtifactError as exc:
+    except MaterializeArtifactError as exc:
         raise ExecutionPacketRuntimeError(
             "execution_packet.authority_invalid",
             f"execution packet authority failed closed: {exc}",
@@ -350,16 +350,16 @@ def _validate_compile_index_authority(
     if not _definition_requires_compile_index_authority(workflow_definition):
         return
 
-    compile_provenance = workflow_definition.get("compile_provenance")
-    if not isinstance(compile_provenance, Mapping):
+    materialize_provenance = workflow_definition.get("materialize_provenance")
+    if not isinstance(materialize_provenance, Mapping):
         raise ExecutionPacketRuntimeError(
             "execution_packet.compile_index_missing",
             "workflow-backed execution packet is missing compile-index authority",
         )
 
-    compile_index_ref = str(compile_provenance.get("compile_index_ref") or "").strip()
+    compile_index_ref = str(materialize_provenance.get("compile_index_ref") or "").strip()
     compile_surface_revision = str(
-        compile_provenance.get("compile_surface_revision") or ""
+        materialize_provenance.get("compile_surface_revision") or ""
     ).strip()
     if not compile_index_ref or not compile_surface_revision:
         raise ExecutionPacketRuntimeError(
@@ -367,8 +367,8 @@ def _validate_compile_index_authority(
             "workflow-backed execution packet is missing compile-index revision authority",
         )
 
-    from runtime.compile_index import (
-        CompileIndexAuthorityError,
+    from runtime.materialize_index import (
+        MaterializeIndexAuthorityError,
         load_compile_index_snapshot,
     )
 
@@ -381,7 +381,7 @@ def _validate_compile_index_authority(
             require_fresh=True,
             repo_root=workspace_repo_root(),
         )
-    except CompileIndexAuthorityError as exc:
+    except MaterializeIndexAuthorityError as exc:
         raise ExecutionPacketRuntimeError(
             _compile_index_reason_code(exc.reason_code),
             f"execution packet compile-index authority failed closed: {exc}",
@@ -402,7 +402,7 @@ def _definition_requires_compile_index_authority(definition_row: Mapping[str, An
     definition_type = str(definition_row.get("type") or "").strip()
     if definition_type == "operating_model":
         return True
-    return isinstance(definition_row.get("compile_provenance"), Mapping)
+    return isinstance(definition_row.get("materialize_provenance"), Mapping)
 
 
 def _compile_index_reason_code(reason_code: str) -> str:

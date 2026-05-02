@@ -47,7 +47,7 @@ def test_command_rejects_more_than_eight_legs() -> None:
 
 def test_handler_dispatches_one_chat_turn_execute_per_leg() -> None:
     pins = [
-        ChatRoutePin(provider_slug="openrouter", model_slug="moonshotai/kimi-k2.6"),
+        ChatRoutePin(provider_slug="openrouter", model_slug="canvasshotai/kimi-k2.6"),
         ChatRoutePin(provider_slug="together", model_slug="deepseek-ai/DeepSeek-V4-Pro"),
     ]
     cmd = ExecuteAskAllTemplateCommand(
@@ -56,7 +56,7 @@ def test_handler_dispatches_one_chat_turn_execute_per_leg() -> None:
         route_pins=pins,
     )
     responses = {
-        "openrouter/moonshotai/kimi-k2.6": {"ok": True, "content": "Four.", "model_used": "openrouter/moonshotai/kimi-k2.6", "latency_ms": 80, "message_id": "msg-1"},
+        "openrouter/canvasshotai/kimi-k2.6": {"ok": True, "content": "Four.", "model_used": "openrouter/canvasshotai/kimi-k2.6", "latency_ms": 80, "message_id": "msg-1"},
         "together/deepseek-ai/DeepSeek-V4-Pro": {"ok": True, "content": "It is 4.", "model_used": "together/deepseek-ai/DeepSeek-V4-Pro", "latency_ms": 110, "message_id": "msg-2"},
     }
     with patch("runtime.operation_catalog_gateway.execute_operation_from_subsystems", new=_stub_gateway(responses)):

@@ -119,6 +119,113 @@ def _severity_weight(value: object) -> int:
     return max(0, 10 - rank)
 
 
+def _route_privacy_posture(row: Mapping[str, Any]) -> dict[str, Any]:
+    from runtime.provider_route_privacy import provider_route_privacy_posture
+
+    try:
+        return _as_dict(provider_route_privacy_posture(row))
+    except Exception as exc:  # noqa: BLE001 - route truth must fail closed
+        return {
+            "state": "blocked",
+            "dispatch_allowed": False,
+            "reason_code": getattr(exc, "reason_code", "privacy.posture_unavailable"),
+            "error": str(exc),
+        }
+
+
+def _normalized_removal_reasons(value: Any) -> list[dict[str, Any]]:
+    reasons: list[dict[str, Any]] = []
+    for item in _as_list(value):
+        if isinstance(item, Mapping):
+            reason = dict(item)
+        else:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            reason = {"reason_code": text}
+        if str(reason.get("reason_code") or "").strip():
+            reasons.append(reason)
+    return reasons
+
+
+def _append_removal_reason(
+    reasons: list[dict[str, Any]],
+    *,
+    reason_code: str,
+    source_ref: str | None,
+    details: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    normalized_reason = str(reason_code or "").strip()
+    if not normalized_reason:
+        return reasons
+    normalized_source_ref = str(source_ref or "").strip() or None
+    for reason in reasons:
+        if (
+            str(reason.get("reason_code") or "").strip() == normalized_reason
+            and (str(reason.get("source_ref") or "").strip() or None) == normalized_source_ref
+        ):
+            return reasons
+    reasons.append(
+        {
+            "reason_code": normalized_reason,
+            "source_ref": normalized_source_ref or "runtime.provider_route_privacy",
+            "details": dict(details),
+        }
+    )
+    return reasons
+
+
+def _route_with_effective_privacy_gate(row: Mapping[str, Any]) -> dict[str, Any]:
+    effective = dict(row)
+    posture = _route_privacy_posture(effective)
+    effective["privacy_posture"] = posture
+    if bool(posture.get("dispatch_allowed")):
+        return effective
+
+    reason_code = str(posture.get("reason_code") or "privacy.blocked").strip()
+    decision_ref = str(posture.get("decision_ref") or "").strip() or None
+    effective["is_runnable"] = False
+    effective["capability_state"] = "removed"
+    effective["effective_dispatch_state"] = "disabled"
+    if not str(effective.get("primary_removal_reason_code") or "").strip():
+        effective["primary_removal_reason_code"] = reason_code
+    effective["removal_reasons"] = _append_removal_reason(
+        _normalized_removal_reasons(effective.get("removal_reasons")),
+        reason_code=reason_code,
+        source_ref=decision_ref,
+        details={
+            "privacy_posture": posture,
+            "provider_slug": effective.get("provider_slug"),
+            "model_slug": effective.get("model_slug"),
+            "transport_type": effective.get("transport_type"),
+        },
+    )
+    source_refs = [
+        str(ref).strip()
+        for ref in _as_list(effective.get("source_refs"))
+        if str(ref).strip()
+    ]
+    if decision_ref and decision_ref not in source_refs:
+        source_refs.append(decision_ref)
+    effective["source_refs"] = source_refs
+    return effective
+
+
+def _privacy_counts(rows: list[Mapping[str, Any]]) -> dict[str, dict[str, int]]:
+    by_state: dict[str, int] = {}
+    by_reason_code: dict[str, int] = {}
+    for row in rows:
+        posture = _as_dict(row.get("privacy_posture"))
+        state = str(posture.get("state") or "unknown")
+        reason = str(posture.get("reason_code") or "unknown")
+        by_state[state] = by_state.get(state, 0) + 1
+        by_reason_code[reason] = by_reason_code.get(reason, 0) + 1
+    return {
+        "by_state": dict(sorted(by_state.items())),
+        "by_reason_code": dict(sorted(by_reason_code.items())),
+    }
+
+
 def _truth_state_from_status(status: Mapping[str, Any]) -> str:
     if status.get("ok") is False:
         return "degraded"
@@ -659,7 +766,7 @@ def handle_query_provider_route_truth(
         ),
     }
     control_rows = [
-        _as_dict(row)
+        _route_with_effective_privacy_gate(_as_dict(row))
         for row in _as_list(_as_dict(components["provider_control_plane"]).get("rows"))
     ][: query.limit]
     runnable = [row for row in control_rows if bool(row.get("is_runnable"))]
@@ -679,7 +786,7 @@ def handle_query_provider_route_truth(
     return {
         "operation": "operator.provider_route_truth",
         "view": "provider_route_truth",
-        "authority": "composed.provider_control_plane",
+        "authority": "composed.effective_provider_route_truth",
         "filters": access_payload,
         "summary": {
             "route_state": route_state,
@@ -687,6 +794,7 @@ def handle_query_provider_route_truth(
             "runnable_routes": len(runnable),
             "blocked_routes": len(blocked),
             "reason_counts": dict(sorted(reason_counts.items())),
+            "privacy_counts": _privacy_counts(control_rows),
             "control_counts": _as_dict(_as_dict(components["model_access_control_matrix"]).get("counts")),
             "projection_freshness": _as_dict(components["provider_control_plane"]).get("projection_freshness"),
         },

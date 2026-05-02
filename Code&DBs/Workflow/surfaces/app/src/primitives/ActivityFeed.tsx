@@ -1,4 +1,4 @@
-import React from 'react';
+import type { StatusTone } from '../primitives-prx/types';
 
 interface ActivityFeedProps {
   title?: string;
@@ -18,31 +18,19 @@ function formatRelative(ts: string | null | undefined): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function statusTone(status: string): 'ok' | 'warn' | 'err' | 'dim' | undefined {
+function statusTone(status: string): StatusTone {
   if (status === 'succeeded') return 'ok';
   if (status === 'running' || status === 'claimed') return 'warn';
   if (status === 'failed' || status === 'dead_letter') return 'err';
-  if (!status) return undefined;
   return 'dim';
 }
 
-/**
- * ActivityFeed — renders the prx-runlog CSS structure.
- * Public API unchanged. Status colors come from the prx-runlog .stat
- * data-tone glyph + color rules instead of an inline dot.
- */
 export function ActivityFeed({ title, data }: ActivityFeedProps) {
   return (
-    <div className="prx-friction" data-testid="prx-activity-feed" style={{ overflow: 'hidden' }}>
-      {title && (
-        <div className="hd" style={{ paddingTop: 12, paddingBottom: 12 }}>
-          <span>{title}</span>
-        </div>
-      )}
+    <div className="prx-friction" data-testid="prx-activity-feed">
+      {title && <div className="hd"><span>{title}</span></div>}
       {data.length === 0 ? (
-        <div style={{ padding: '14px 16px', color: 'var(--text-muted, #8b949e)', fontSize: 13 }}>
-          No activity yet
-        </div>
+        <div className="prx-friction__empty">No activity yet</div>
       ) : (
         <div className="prx-runlog" data-testid="prx-activity-feed-rows">
           {data.map((item, i) => {
@@ -53,13 +41,11 @@ export function ActivityFeed({ title, data }: ActivityFeedProps) {
             const agent = (row.agent ?? row.agent_slug ?? null) as string | null;
             const tone = statusTone(status);
             return (
-              <div className="row" key={i} style={{ gridTemplateColumns: '88px 120px 1fr 90px' }}>
+              <div className="row" key={i}>
                 <span className="ts">{ts ? formatRelative(ts) : ''}</span>
                 <span className="actor">{agent ?? ''}</span>
                 <span className="what">{label}</span>
-                <span className="stat" data-tone={tone ?? 'dim'}>
-                  {status || '—'}
-                </span>
+                <span className="stat" data-tone={tone}>{status || '—'}</span>
               </div>
             );
           })}

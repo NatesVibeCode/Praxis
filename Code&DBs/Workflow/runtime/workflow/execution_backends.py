@@ -19,6 +19,7 @@ from adapters.docker_runner import normalize_command_parts_for_docker
 from registry.provider_execution_registry import build_command, resolve_api_key_env_vars
 from runtime.load_balancer import get_load_balancer
 from runtime.execution_transport import resolve_execution_transport
+from runtime.execution_targets import enrich_execution_payload
 from runtime.host_resource_admission import (
     HostResourceAdmissionError,
     HostResourceAdmissionUnavailable,
@@ -585,11 +586,12 @@ def _execute_api_control_plane(
             api_endpoint=api_endpoint,
             api_key=api_key,
             api_key_env=api_key_env,
+            provider_slug=provider_slug,
             workdir=workdir,
             reasoning_effort=reasoning_effort,
         )
     except Exception as exc:
-        return {
+        return enrich_execution_payload({
             "status": "failed",
             "exit_code": 1,
             "stdout": "",
@@ -612,8 +614,8 @@ def _execute_api_control_plane(
             "workspace_materialization": "none",
             "api_execution_mode": "control_plane_transport",
             "provider_slug": provider_slug,
-        }
-    return {
+        })
+    return enrich_execution_payload({
         "status": "succeeded",
         "exit_code": 0,
         "stdout": stdout,
@@ -636,7 +638,7 @@ def _execute_api_control_plane(
         "workspace_materialization": "none",
         "api_execution_mode": "control_plane_transport",
         "provider_slug": provider_slug,
-    }
+    })
 
 
 def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[str, Any]:
@@ -676,7 +678,7 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
         classification = classify_failure_from_stderr(stderr, exit_code=result.exit_code)
         error_code = classification.category.value
 
-    return {
+    return enrich_execution_payload({
         "status": status,
         "exit_code": result.exit_code,
         "stdout": stdout,
@@ -698,8 +700,14 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
         "provider_latency_ms": result.provider_latency_ms,
         "container_cpu_percent": result.container_cpu_percent,
         "container_mem_bytes": result.container_mem_bytes,
+        "execution_target_ref": getattr(result, "execution_target_ref", ""),
+        "execution_target_kind": getattr(result, "execution_target_kind", ""),
+        "execution_profile_ref": getattr(result, "execution_profile_ref", ""),
+        "isolation_level": getattr(result, "isolation_level", ""),
+        "packaging_kind": getattr(result, "packaging_kind", ""),
+        "target_resolution_reason": getattr(result, "target_resolution_reason", ""),
         **telemetry,
-    }
+    })
 
 
 def execute_integration(job: dict[str, Any], conn, *, logger: logging.Logger | None = None) -> dict[str, Any]:
@@ -1027,6 +1035,7 @@ def execute_api(
             f"--api-protocol {shlex.quote(_api_protocol)} "
             f"--api-endpoint {shlex.quote(_api_endpoint)} "
             f"--api-key-env {shlex.quote(_api_key_env)} "
+            f"--provider-slug {shlex.quote(provider_slug)} "
             f"--workdir {shlex.quote(resolved_workdir)} "
             f"--model {shlex.quote(model_slug)} "
             f"--max-output-tokens {max_output_tokens} "

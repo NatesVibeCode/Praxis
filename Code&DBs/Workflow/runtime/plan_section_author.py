@@ -55,6 +55,12 @@ class AuthoredPacket:
     usage: dict[str, int] = field(default_factory=dict)
     proposed_pills: list[dict[str, Any]] = field(default_factory=list)
     pill_audit_local: list[dict[str, Any]] = field(default_factory=list)
+    # Integration-agent fields. Populated when `agent` starts with
+    # `integration/`. The runtime reads these as top-level workflow-job
+    # fields when the packet ships through compose_plan_to_definition.
+    integration_id: str | None = None
+    integration_action: str | None = None
+    integration_args: dict[str, Any] = field(default_factory=dict)
     # Per-packet observability for experiment reporting.
     wall_ms: int | None = None
     latency_ms: int | None = None
@@ -79,6 +85,9 @@ class AuthoredPacket:
             "usage": dict(self.usage),
             "proposed_pills": list(self.proposed_pills),
             "pill_audit_local": list(self.pill_audit_local),
+            "integration_id": self.integration_id,
+            "integration_action": self.integration_action,
+            "integration_args": dict(self.integration_args),
             "wall_ms": self.wall_ms,
             "latency_ms": self.latency_ms,
             "finish_reason": self.finish_reason,
@@ -124,11 +133,13 @@ class AuthorError:
 class SectionSandbox:
     plan_field_schema: list[dict[str, Any]]
     stage_io: dict[str, dict[str, Any]] = field(default_factory=dict)
+    integrations: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "plan_field_schema": list(self.plan_field_schema),
             "stage_io": dict(self.stage_io),
+            "integrations": list(self.integrations),
         }
 
 
@@ -148,6 +159,72 @@ def _load_plan_field_schema(conn: Any) -> list[dict[str, Any]]:
             "summary": row.get("summary"), "metadata": metadata,
         })
     out.sort(key=lambda entry: (entry["metadata"].get("order") or 999, entry["field"]))
+    return out
+
+
+def _load_available_integrations(conn: Any) -> list[dict[str, Any]]:
+    """Pull connected integration agents from `integration_registry` so the
+    fork-out author can see them as alternatives to LLM agent slugs.
+
+    Each integration becomes a deterministic agent the LLM can route to via
+    `agent=integration/<id>/<action>`. Returns at most one row per id, with
+    the action list flattened to {action, description} pairs.
+    """
+    out: list[dict[str, Any]] = []
+    if conn is None:
+        return out
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, name, description, capabilities
+                FROM integration_registry
+                WHERE auth_status = 'connected'
+                ORDER BY id
+                """
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        logger.warning("integration registry lookup failed in section sandbox: %s", exc)
+        return out
+    for row in rows or []:
+        if isinstance(row, dict):
+            integration_id = str(row.get("id") or "")
+            name = str(row.get("name") or "")
+            description = str(row.get("description") or "")
+            capabilities = row.get("capabilities") or []
+        else:
+            integration_id = str(row[0] or "")
+            name = str(row[1] or "")
+            description = str(row[2] or "")
+            capabilities = row[3] or []
+        if not integration_id:
+            continue
+        if isinstance(capabilities, str):
+            try:
+                capabilities = json.loads(capabilities)
+            except json.JSONDecodeError:
+                capabilities = []
+        actions: list[dict[str, str]] = []
+        if isinstance(capabilities, list):
+            for cap in capabilities:
+                if not isinstance(cap, dict):
+                    continue
+                action = str(cap.get("action") or "").strip()
+                if not action:
+                    continue
+                actions.append({
+                    "action": action,
+                    "description": str(cap.get("description") or "").strip(),
+                })
+        if not actions:
+            continue
+        out.append({
+            "id": integration_id,
+            "name": name,
+            "description": description,
+            "actions": actions,
+        })
     return out
 
 
@@ -199,6 +276,33 @@ def build_shared_prefix(atoms: "SuggestedAtoms", sandbox: SectionSandbox) -> str
             flags.append("no-workspace-root")
         field_lines.append(f"  - {entry['field']}: {entry['summary']} [{', '.join(flags)}]")
 
+    # Render registered integration agents so the LLM has visibility into the
+    # deterministic-agent path. Without this, the only agents the LLM
+    # considers are LLM-flavoured (auto/build, auto/refactor, ...). With it,
+    # work like dedupe / validate / reconcile / redact can route to
+    # integration/praxis_data/<action> for free, exact, receipt-backed
+    # execution.
+    integration_lines: list[str] = []
+    for integration in sorted(sandbox.integrations, key=lambda i: i.get("id") or ""):
+        integration_id = integration.get("id") or ""
+        if not integration_id:
+            continue
+        name = integration.get("name") or integration_id
+        description = (integration.get("description") or "").strip()
+        integration_lines.append(f"  • {integration_id} — {name}")
+        if description:
+            integration_lines.append(f"      {description}")
+        for action_entry in integration.get("actions") or []:
+            action = action_entry.get("action") or ""
+            action_desc = (action_entry.get("description") or "").strip()
+            if not action:
+                continue
+            agent_slug = f"integration/{integration_id}/{action}"
+            if action_desc:
+                integration_lines.append(f"      - {agent_slug} — {action_desc}")
+            else:
+                integration_lines.append(f"      - {agent_slug}")
+
     sections: list[str] = [
         "ROLE:",
         (
@@ -220,6 +324,9 @@ def build_shared_prefix(atoms: "SuggestedAtoms", sandbox: SectionSandbox) -> str
         "",
         "DATA DICTIONARY (PlanPacket fields — what each field means at runtime):",
         "\n".join(field_lines),
+        "",
+        "AVAILABLE INTEGRATION AGENTS (deterministic, non-LLM — prefer these for record-level data work, parsing, validation, dedupe, reconcile, redact, aggregate, join, merge, repair-loop, etc.; they are FREE, EXACT, and RECEIPT-BACKED — no tokens, no drift, fully replayable. Only use an LLM agent (auto/build, auto/refactor, ...) when the work genuinely needs inference or generation):",
+        ("\n".join(integration_lines) if integration_lines else "  (none registered)"),
         "",
         "AUTHORING CONVENTIONS (the runtime enforces these — invented variations break execution):",
         (
@@ -264,6 +371,22 @@ def build_shared_prefix(atoms: "SuggestedAtoms", sandbox: SectionSandbox) -> str
             "    task_type_routing.\" Only override with a specific agent slug if you\n"
             "    have a concrete reason (e.g. operator pinned a particular composer).\n"
             "\n"
+            "  • Integration agents (deterministic, non-LLM) — when this packet's\n"
+            "    work matches an entry in AVAILABLE INTEGRATION AGENTS, set\n"
+            "    `agent=integration/<id>/<action>` AND emit three sibling fields\n"
+            "    so the runtime executes via the integration handler instead of\n"
+            "    spawning an LLM:\n"
+            "      \"agent\": \"integration/praxis_data/dedupe\",\n"
+            "      \"integration_id\": \"praxis_data\",\n"
+            "      \"integration_action\": \"dedupe\",\n"
+            "      \"integration_args\": { /* op-specific args, e.g. */\n"
+            "        \"input_path\": \"artifacts/data/users.csv\",\n"
+            "        \"keys\": [\"email\"]\n"
+            "      }\n"
+            "    Capability hints with prefix `data_op` in atoms.step_types are\n"
+            "    a strong signal to use praxis_data. Do not invent integration\n"
+            "    ids or actions outside AVAILABLE INTEGRATION AGENTS.\n"
+            "\n"
             "  • `gates` — list each gate by `gate_id`. The required gates per stage\n"
             "    are listed in DATA DICTIONARY (registered stages). For\n"
             "    `type_flow_gate`, `params={}` is correct — the gate reads\n"
@@ -307,6 +430,7 @@ def build_section_sandbox(conn: Any) -> SectionSandbox:
     return SectionSandbox(
         plan_field_schema=_load_plan_field_schema(conn),
         stage_io=stage_io,
+        integrations=_load_available_integrations(conn),
     )
 
 
@@ -377,12 +501,39 @@ def _coerce_packet_response(
     else:
         parameters = {"stage": target.stage, "label": target.label}
 
+    agent_slug = str(parsed.get("agent") or f"auto/{target.stage}")
+    integration_id_raw = parsed.get("integration_id")
+    integration_action_raw = parsed.get("integration_action")
+    integration_args_raw = parsed.get("integration_args")
+    integration_id: str | None = None
+    integration_action: str | None = None
+    integration_args: dict[str, Any] = {}
+    if isinstance(integration_id_raw, str) and integration_id_raw.strip():
+        integration_id = integration_id_raw.strip()
+    if isinstance(integration_action_raw, str) and integration_action_raw.strip():
+        integration_action = integration_action_raw.strip()
+    if isinstance(integration_args_raw, dict):
+        integration_args = dict(integration_args_raw)
+    # When the agent slug declares integration shape but the LLM omitted the
+    # sibling fields, derive them from the slug. This catches "agent emitted
+    # but integration_* dropped" failure modes without forcing a re-author.
+    if (
+        agent_slug.startswith("integration/")
+        and (integration_id is None or integration_action is None)
+    ):
+        parts = agent_slug.split("/", 2)
+        if len(parts) == 3:
+            if integration_id is None:
+                integration_id = parts[1] or None
+            if integration_action is None:
+                integration_action = parts[2] or None
+
     return AuthoredPacket(
         label=target.label, stage=target.stage,
         description=str(parsed.get("description") or target.description),
         prompt=str(parsed.get("prompt") or ""),
         write=write,
-        agent=str(parsed.get("agent") or f"auto/{target.stage}"),
+        agent=agent_slug,
         task_type=str(parsed.get("task_type") or target.stage),
         capabilities=capabilities, consumes=consumes, produces=produces,
         depends_on=list(target.depends_on), gates=gates_out,
@@ -400,6 +551,9 @@ def _coerce_packet_response(
         pill_audit_local=[
             p for p in (parsed.get("pill_audit_local") or []) if isinstance(p, dict)
         ],
+        integration_id=integration_id,
+        integration_action=integration_action,
+        integration_args=integration_args,
         wall_ms=wall_ms,
         latency_ms=latency_ms,
         finish_reason=finish_reason,

@@ -1,0 +1,91 @@
+{
+  "max_completion_tokens": 3000,
+  "messages": [
+    {
+      "content": "You are running Praxis Model Eval. Consistency matters more than style. Use the supplied fixture exactly. Return only machine-checkable output. Do not use Markdown fences. Do not claim that production routing changed.",
+      "role": "system"
+    },
+    {
+      "content": "create csv",
+      "role": "user"
+    }
+  ],
+  "model": "openai/gpt-5.4-nano",
+  "provider": {
+    "allow_fallbacks": false,
+    "data_collection": "deny",
+    "ignore": [
+      "alibaba",
+      "alibaba-cloud",
+      "baidu",
+      "bytedance",
+      "deepseek",
+      "deepseek-ai",
+      "kimi",
+      "minimax",
+      "canvasshot",
+      "canvasshotai",
+      "qwen",
+      "seed",
+      "siliconflow",
+      "stepfun",
+      "tencent",
+      "xiaomi",
+      "z-ai",
+      "zhipu"
+    ],
+    "order": [
+      "azure"
+    ],
+    "require_parameters": true,
+    "zdr": true
+  },
+  "response_format": {
+    "json_schema": {
+      "name": "model_eval_response",
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "artifacts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "media_type": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "media_type",
+                "content"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "answer",
+          "artifacts"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    "type": "json_schema"
+  },
+  "seed": 699025534
+}

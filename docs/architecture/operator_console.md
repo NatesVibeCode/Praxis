@@ -6,7 +6,7 @@ Chat-first agent dispatcher for the single operator. Mobile-ergonomic, Tailscale
 
 The operator console is **not**:
 
-- Moon. Moon is the graph-first product surface for workflow authoring and review. The operator console is a separate chat surface with no canvas.
+- Canvas. Canvas is the graph-first product surface for workflow authoring and review. The operator console is a separate chat surface with no canvas.
 - A public / external-user product. External-user mobile was archived on 2026-04-24 (`decision.2026-04-24.mobile-v1-archived`) because it conflated two incompatible use cases. The console serves exactly one principal.
 - A standalone mobile app. It is a responsive web page served by the existing API, reached over Tailscale from phone or laptop.
 

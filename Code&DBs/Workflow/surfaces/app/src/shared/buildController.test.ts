@@ -28,7 +28,7 @@ describe('materializePlan', () => {
       ok: true,
       workflow_id: 'wf_materialized',
       build_payload: {
-        workflow: { id: 'wf_materialized', name: 'Moon delivery' },
+        workflow: { id: 'wf_materialized', name: 'Canvas delivery' },
         build_graph: {
           nodes: [{ node_id: 'n1', title: 'Trigger' }],
           edges: [],
@@ -38,9 +38,9 @@ describe('materializePlan', () => {
       operation_receipt: { receipt_id: 'receipt-1', correlation_id: 'corr-1' },
     }));
 
-    const payload = await materializePlan('Build the Moon delivery probe', {
+    const payload = await materializePlan('Build the Canvas delivery probe', {
       workflowId: 'wf_existing',
-      title: 'Moon delivery',
+      title: 'Canvas delivery',
       fullCompose: true,
       enableLlm: false,
       onWorkflowReady,
@@ -52,9 +52,9 @@ describe('materializePlan', () => {
     expect(url).not.toBe('/api/workflows');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({
-      intent: 'Build the Moon delivery probe',
+      intent: 'Build the Canvas delivery probe',
       workflow_id: 'wf_existing',
-      title: 'Moon delivery',
+      title: 'Canvas delivery',
       enable_llm: false,
       enable_full_compose: true,
     });

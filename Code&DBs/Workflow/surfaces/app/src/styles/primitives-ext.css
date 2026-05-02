@@ -1,0 +1,629 @@
+/* =============================================================
+ * primitives-ext.css
+ * CSS for primitives that were inline-style soup and got promoted
+ * to proper prx-* class structure.
+ * ============================================================= */
+
+/* ── prx-status-grid ─────────────────────────────────────────── */
+
+.prx-status-grid {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  overflow: hidden;
+}
+.prx-status-grid__head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.prx-status-grid__body {
+  display: grid;
+  gap: 1px;
+  background: var(--border);
+}
+.prx-status-grid__cell {
+  background: var(--bg-card);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prx-status-grid__cell-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.prx-status-grid__cell-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-status-grid__cell-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-status-grid__empty {
+  padding: 14px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── prx-chart-svg ───────────────────────────────────────────── */
+
+.prx-chart-svg {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+}
+
+/* ── prx-friction empty state ────────────────────────────────── */
+
+.prx-friction__empty {
+  padding: 14px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── prx-roi single-stat fix ─────────────────────────────────── */
+
+.prx-roi[data-testid="prx-metric-card"] {
+  grid-template-columns: 1fr;
+  min-width: 140px;
+}
+.prx-roi[data-testid="prx-metric-card"] > .stat {
+  border-right: none;
+}
+
+/* ── prx-button ──────────────────────────────────────────────── *
+ * Single source of truth for buttons across every surface.
+ * Tones via [data-tone="primary|ghost|danger"], sizes via
+ * [data-size="sm|lg"]; default size is the unstyled medium.
+ * Active state via [data-active="true"] for toggle-style buttons.
+ */
+.prx-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  min-height: 30px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+  white-space: nowrap;
+}
+.prx-button:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+}
+.prx-button:active { transform: translateY(0); }
+.prx-button:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.prx-button:disabled,
+.prx-button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+.prx-button[data-tone="primary"] {
+  background: var(--accent);
+  color: var(--text-inverse);
+  border-color: transparent;
+  font-weight: 600;
+}
+.prx-button[data-tone="primary"]:hover { background: #fff; }
+.prx-button[data-tone="ghost"] { background: transparent; }
+.prx-button[data-tone="ghost"]:hover { background: rgba(255, 255, 255, 0.04); }
+.prx-button[data-tone="danger"] {
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--danger);
+  border-color: var(--border-danger-soft);
+}
+.prx-button[data-tone="danger"]:hover {
+  background: rgba(248, 81, 73, 0.14);
+  border-color: rgba(248, 81, 73, 0.42);
+}
+
+.prx-button[data-active="true"] {
+  border-color: rgba(243, 238, 228, 0.18);
+  background: rgba(243, 238, 228, 0.08);
+}
+
+.prx-button[data-size="sm"] {
+  min-height: 26px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+.prx-button[data-size="lg"] {
+  min-height: 34px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.prx-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── prx-card ────────────────────────────────────────────────── *
+ * Slot-based panel shell: head / body / foot. Used for sidebar
+ * panels (Toolbelt Review, Recent Runs), workflow cards,
+ * quadrant frames, anywhere a bordered card with a labelled
+ * header is needed.
+ */
+/* Card — control-plane spec: 6px radius, flat bg-card, hairline border. */
+.prx-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: var(--bg-card);
+  overflow: hidden;
+  position: relative;
+  transition: border-color var(--motion-fast);
+}
+.prx-card:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.prx-card[data-tone="ok"]::before,
+.prx-card[data-tone="warn"]::before,
+.prx-card[data-tone="err"]::before,
+.prx-card[data-tone="live"]::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  pointer-events: none;
+}
+.prx-card[data-tone="ok"]::before   { background: var(--success); }
+.prx-card[data-tone="warn"]::before { background: var(--warning); }
+.prx-card[data-tone="err"]::before  { background: var(--danger);  }
+.prx-card[data-tone="live"]::before { background: var(--accent);  box-shadow: 0 0 12px var(--accent); }
+
+.prx-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.prx-card__head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prx-card__head .eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.prx-card__head .title {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-card__head-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.prx-card__count {
+  min-width: 24px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.prx-card__body {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prx-card__body--tight { padding: 6px; gap: 4px; }
+.prx-card__foot {
+  padding: 8px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* ── prx-stage ───────────────────────────────────────────────── *
+ * Demo / content container that frames a section's body. Matches
+ * the .stage rule in primitives.html: opaque var(--bg-card) bg,
+ * subtle var(--border) hairline, 8px radius, 24px padding.
+ * Wrap the actual primitives inside; the stage gives them a
+ * unified visual region without changing the primitives themselves.
+ */
+.prx-stage {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  margin: 0 0 28px;
+}
+.prx-stage--tight { padding: 16px; }
+.prx-stage--inline-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.prx-stage--row-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.prx-stage--grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.prx-stage--grid-auto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px;
+}
+
+/* ── prx-section title + note ────────────────────────────────── *
+ * Companion typography to <SectionStrip> — used right below the
+ * kicker to give each section identity (matches primitives.html
+ * h2 + p.note rhythm). Wire-only; no border, no bg.
+ */
+.dash-section-title,
+.prx-section-title {
+  margin: 14px 0 6px;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text);
+}
+.dash-section-note,
+.prx-section-note {
+  margin: 0 0 14px;
+  max-width: 56ch;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* ── prx-tile ────────────────────────────────────────────────── *
+ * Bare metric tile: label / value / detail / action stacked.
+ * NO border, NO bg-tint. Hover adds a hairline focus ring only.
+ * Use for at-a-glance dashboard metrics.
+ */
+/* Metric tile — control-plane spec: 6px radius, flat, clickable. */
+.prx-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+.prx-tile:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 0 16px rgba(255, 255, 255, 0.03);
+  transform: translateY(-1px);
+}
+.prx-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* Brand bible typography law:
+ *   - mono ONLY for metadata kickers / status lines / tokens / routes / timestamps
+ *   - sans for everything else (display values, detail copy, action labels)
+ * Tile label is the metadata kicker — mono.
+ * Tile value, detail, and action are display content — sans. */
+.prx-tile__label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs, 11px);
+  font-weight: 500;
+  letter-spacing: var(--tracking-xwide, 0.14em);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-tile__value {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.prx-tile[data-tone="ok"] .prx-tile__value { color: var(--success); }
+.prx-tile[data-tone="warn"] .prx-tile__value { color: var(--warning); }
+.prx-tile[data-tone="err"] .prx-tile__value { color: var(--danger); }
+.prx-tile[data-tone="warn"] { border-color: rgba(210, 153, 34, 0.2); }
+.prx-tile[data-tone="err"] { border-color: rgba(248, 81, 73, 0.2); }
+.prx-tile[data-tone="ok"] { border-color: rgba(63, 185, 80, 0.15); }
+.prx-tile__detail {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.prx-tile__action {
+  margin-top: auto;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: color 140ms ease;
+}
+.prx-tile:hover .prx-tile__action { color: var(--accent); }
+
+.prx-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+/* ── prx-list-panel ──────────────────────────────────────────── *
+ * Bare side / list panel: kicker + title + count badge + body.
+ * NO border, NO bg-tint, NO rim. The structure is type-only.
+ * Use for sidebar groups (Toolbelt Review, Recent Runs, etc.).
+ */
+.prx-list-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+.prx-list-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.prx-list-panel__head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prx-list-panel__eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.prx-list-panel__title {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-list-panel__head-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.prx-list-panel__count {
+  min-width: 26px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.prx-list-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── prx-status-row ──────────────────────────────────────────── *
+ * Single row in a list: led-dot + (title + detail) + meta.
+ * NO border per-row. Hover adds a faint bg.
+ * Use for sidebar list rows (review items, runs, opportunities).
+ */
+.prx-status-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: background 140ms ease;
+}
+.prx-status-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.prx-status-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.prx-status-row[aria-disabled="true"],
+.prx-status-row--static {
+  cursor: default;
+}
+.prx-status-row--static:hover {
+  background: transparent;
+}
+.prx-status-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+/* Status row — sans for the human-readable title and detail.
+ * Mono only when the row is showing a literal ID/hash via
+ * --mono modifier class on the row, or when detailMono is set. */
+.prx-status-row__title {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prx-status-row__detail {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.prx-status-row__detail--mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs, 11px);
+}
+.prx-status-row__detail--mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.prx-status-row__meta {
+  align-self: start;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── prx-source-chip ─────────────────────────────────────────── *
+ * Source-option pill with palette-tone dot. Replaces the
+ * inline-color-hex chips in SourceOptionPills and surface tabs.
+ */
+.prx-source-chip {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.prx-source-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(243, 238, 228, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+}
+.prx-source-chip:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.prx-source-chip[data-active="true"] {
+  border-color: rgba(243, 238, 228, 0.42);
+  background: rgba(243, 238, 228, 0.08);
+}
+.prx-source-chip__dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 2px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.prx-source-chip[data-tone="ok"]   .prx-source-chip__dot { background: var(--success); }
+.prx-source-chip[data-tone="warn"] .prx-source-chip__dot { background: var(--warning); }
+.prx-source-chip[data-tone="err"]  .prx-source-chip__dot { background: var(--danger);  }
+.prx-source-chip[data-tone="live"] .prx-source-chip__dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+.prx-source-chip__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prx-source-chip__label {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.prx-source-chip__sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.3;
+}

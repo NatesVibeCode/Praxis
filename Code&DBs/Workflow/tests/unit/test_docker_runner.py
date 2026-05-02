@@ -18,11 +18,11 @@ from adapters.docker_runner import (
     run_model,
     run_on_host,
 )
-from runtime.sandbox_runtime import _OPENAI_AUTH_SEED_PATH
-from runtime.workspace_paths import container_home
+from runtime.workspace_paths import container_auth_seed_dir, container_home
 
 AUTH_HOME = Path(tempfile.gettempdir()) / "praxis-auth-home"
 CONTAINER_HOME = str(container_home())
+OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
 
 
 class TestRunOnHost:
@@ -311,7 +311,7 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
     monkeypatch.setattr(
         "adapters.docker_runner._cli_auth_volume_flags",
         lambda provider_slug=None: (
-            ["-v", f"{AUTH_HOME}/.codex/auth.json:{_OPENAI_AUTH_SEED_PATH}:ro"]
+            ["-v", f"{AUTH_HOME}/.codex/auth.json:{OPENAI_AUTH_SEED_PATH}:ro"]
             if provider_slug == "openai"
             else []
         ),
@@ -326,6 +326,22 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
             "--tmpfs",
             f"{CONTAINER_HOME}/.gemini:uid=1100,gid=1100,mode=755",
         ],
+    )
+    monkeypatch.setattr(
+        "adapters.docker_runner._cli_requires_root_auth_bootstrap",
+        lambda *, provider_slug, auth_mount_policy, requested_user: provider_slug == "openai",
+    )
+    monkeypatch.setattr(
+        "adapters.docker_runner._cli_auth_bootstrap_command",
+        lambda command, *, provider_slug: (
+            f"set -e; if [ -f {OPENAI_AUTH_SEED_PATH} ]; then "
+            f"mkdir -p {CONTAINER_HOME}/.codex; "
+            f"cp {OPENAI_AUTH_SEED_PATH} {CONTAINER_HOME}/.codex/auth.json; "
+            "fi; setpriv --reuid=1100 --regid=1100 "
+            f"env HOME={CONTAINER_HOME} bash -lc {command!r}"
+        )
+        if provider_slug == "openai"
+        else command,
     )
     monkeypatch.setattr("adapters.docker_runner.subprocess.Popen", _FakePopen)
 
@@ -358,10 +374,10 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
     user_idx = captured["cmd"].index("--user")
     assert captured["cmd"][user_idx + 1] == "0:0"
     assert "-v" in captured["cmd"]
-    assert f"{AUTH_HOME}/.codex/auth.json:{_OPENAI_AUTH_SEED_PATH}:ro" in captured["cmd"]
+    assert f"{AUTH_HOME}/.codex/auth.json:{OPENAI_AUTH_SEED_PATH}:ro" in captured["cmd"]
     assert captured["cmd"][-4:-1] == ["praxis-codex:latest", "bash", "-c"]
     assert "setpriv --reuid=1100 --regid=1100" in captured["cmd"][-1]
-    assert f"cp {_OPENAI_AUTH_SEED_PATH} {CONTAINER_HOME}/.codex/auth.json" in captured["cmd"][-1]
+    assert f"cp {OPENAI_AUTH_SEED_PATH} {CONTAINER_HOME}/.codex/auth.json" in captured["cmd"][-1]
 
 
 def test_run_in_docker_skips_cli_home_tmpfs_when_auth_mounts_disabled(monkeypatch):

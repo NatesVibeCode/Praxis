@@ -16,7 +16,7 @@ from .validators import (
 
 _PACK_JSON_COLUMNS = (
     "scenario_pack_refs_json",
-    "compiled_from_json",
+    "materialized_from_json",
     "evidence_refs_json",
     "blockers_json",
     "verifier_expectations_json",
@@ -55,7 +55,7 @@ def _normalize_rows(rows: Any, *, json_columns: tuple[str, ...]) -> list[dict[st
 def _pack_row_to_domain(row: dict[str, Any]) -> dict[str, Any]:
     pack = dict(row)
     pack["scenario_pack_refs"] = pack.pop("scenario_pack_refs_json", [])
-    pack["compiled_from"] = pack.pop("compiled_from_json", {})
+    pack["materialized_from"] = pack.pop("materialized_from_json", {})
     pack["evidence_refs"] = pack.pop("evidence_refs_json", [])
     pack["blockers"] = pack.pop("blockers_json", [])
     pack["verifier_expectations"] = pack.pop("verifier_expectations_json", [])
@@ -117,7 +117,7 @@ def persist_context_pack(
             confidence_state,
             unknown_mutator_risk,
             scenario_pack_refs_json,
-            compiled_from_json,
+            materialized_from_json,
             evidence_refs_json,
             blockers_json,
             verifier_expectations_json,
@@ -146,7 +146,7 @@ def persist_context_pack(
             confidence_state = EXCLUDED.confidence_state,
             unknown_mutator_risk = EXCLUDED.unknown_mutator_risk,
             scenario_pack_refs_json = EXCLUDED.scenario_pack_refs_json,
-            compiled_from_json = EXCLUDED.compiled_from_json,
+            materialized_from_json = EXCLUDED.materialized_from_json,
             evidence_refs_json = EXCLUDED.evidence_refs_json,
             blockers_json = EXCLUDED.blockers_json,
             verifier_expectations_json = EXCLUDED.verifier_expectations_json,
@@ -171,7 +171,7 @@ def persist_context_pack(
             confidence_state,
             unknown_mutator_risk,
             scenario_pack_refs_json,
-            compiled_from_json,
+            materialized_from_json,
             evidence_refs_json,
             blockers_json,
             verifier_expectations_json,
@@ -197,7 +197,7 @@ def persist_context_pack(
         _require_text(pack.get("confidence_state") or confidence.get("state"), field_name="confidence_state"),
         bool(pack.get("unknown_mutator_risk")),
         _encode_jsonb(pack.get("scenario_pack_refs") or [], field_name="scenario_pack_refs"),
-        _encode_jsonb(pack.get("compiled_from") or {}, field_name="compiled_from"),
+        _encode_jsonb(pack.get("materialized_from") or {}, field_name="materialized_from"),
         _encode_jsonb(pack.get("evidence_refs") or [], field_name="evidence_refs"),
         _encode_jsonb(pack.get("blockers") or [], field_name="blockers"),
         _encode_jsonb(pack.get("verifier_expectations") or [], field_name="verifier_expectations"),
@@ -313,7 +313,7 @@ def load_context_pack(
             confidence_state,
             unknown_mutator_risk,
             scenario_pack_refs_json,
-            compiled_from_json,
+            materialized_from_json,
             evidence_refs_json,
             blockers_json,
             verifier_expectations_json,
@@ -367,7 +367,7 @@ def list_context_packs(
             confidence_state,
             unknown_mutator_risk,
             scenario_pack_refs_json,
-            compiled_from_json,
+            materialized_from_json,
             evidence_refs_json,
             blockers_json,
             verifier_expectations_json,

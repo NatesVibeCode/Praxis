@@ -12,7 +12,7 @@ Returns a :class:`DecomposedIntent` carrying:
   - steps: list of :class:`StepIntent` — one per detected step
   - detection_mode: how the steps were found (``numbered_list`` /
     ``bulleted_list`` / ``ordered_phrases`` / ``single_step``)
-  - rationale: short explanation the caller (or Moon UI) can surface
+  - rationale: short explanation the caller (or Canvas UI) can surface
   - warnings: anything that was ambiguous but didn't fail outright
 
 When the prose has no explicit step markers, decompose_intent raises
@@ -35,7 +35,7 @@ class StepIntent:
     """One decomposed step of the larger intent.
 
     Fields mirror what the caller would hand-write as a PlanPacket
-    description + stage hint; composition with spec_compiler.PlanPacket
+    description + stage hint; composition with spec_materializer.PlanPacket
     is done externally (not every decomposed step is a packet).
     """
 

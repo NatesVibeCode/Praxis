@@ -202,6 +202,96 @@ class _EffortConn(_FakeConn):
             ]
         return super().execute(sql, *args)
 
+
+class _TransportAuthorityConn:
+    def execute(self, sql: str, *args):
+        if "FROM provider_model_candidates" in sql:
+            rows = [
+                {
+                    "candidate_ref": "candidate.google.api",
+                    "provider_slug": "google",
+                    "model_slug": "gemini-3.1-pro-preview",
+                    "transport_type": "API",
+                    "status": "active",
+                    "priority": 1,
+                    "balance_weight": 1,
+                    "capability_tags": ["frontier"],
+                    "default_parameters": {},
+                    "cli_config": {
+                        "cmd_template": ["gemini", "--model", "{model}"],
+                        "output_format": "json",
+                    },
+                },
+                {
+                    "candidate_ref": "candidate.kimi.cli",
+                    "provider_slug": "kimi",
+                    "model_slug": "kimi-k2.6",
+                    "transport_type": "CLI",
+                    "status": "active",
+                    "priority": 1,
+                    "balance_weight": 1,
+                    "capability_tags": ["mid"],
+                    "default_parameters": {},
+                    "cli_config": {
+                        "cmd_template": ["kimi", "--model", "{model}"],
+                        "output_format": "json",
+                    },
+                },
+            ]
+            if "candidate_ref = $1" in sql:
+                candidate_ref, provider_slug, model_slug, transport_type = args
+                return [
+                    row
+                    for row in rows
+                    if row["candidate_ref"] == candidate_ref
+                    and row["provider_slug"] == provider_slug
+                    and row["model_slug"] == model_slug
+                    and row["transport_type"] == transport_type
+                ][:1]
+            if "provider_slug = $1" in sql and "model_slug = $2" in sql and "transport_type = $3" in sql:
+                provider_slug, model_slug, transport_type = args
+                return [
+                    row
+                    for row in rows
+                    if row["provider_slug"] == provider_slug
+                    and row["model_slug"] == model_slug
+                    and row["transport_type"] == transport_type
+                ][:1]
+            return rows
+        if "FROM task_type_routing" in sql:
+            return [
+                {
+                    "task_type": "build",
+                    "provider_slug": "google",
+                    "model_slug": "gemini-3.1-pro-preview",
+                    "transport_type": "API",
+                    "rank": 1,
+                    "benchmark_score": 95.0,
+                    "cost_per_m_tokens": 8.0,
+                    "route_tier": "high",
+                    "route_tier_rank": 1,
+                    "latency_class": "reasoning",
+                    "latency_rank": 1,
+                    "updated_at": "2026-05-01T00:00:00Z",
+                },
+                {
+                    "task_type": "debug",
+                    "provider_slug": "google",
+                    "model_slug": "gemini-3.1-pro-preview",
+                    "transport_type": "CLI",
+                    "rank": 1,
+                    "benchmark_score": 95.0,
+                    "cost_per_m_tokens": 8.0,
+                    "route_tier": "high",
+                    "route_tier_rank": 1,
+                    "latency_class": "reasoning",
+                    "latency_rank": 1,
+                    "updated_at": "2026-05-01T00:00:00Z",
+                },
+            ]
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+
 def _test_registry():
     return AgentRegistry(_TEST_AGENTS)
 
@@ -387,6 +477,86 @@ class TestGetBySlug:
             if agent.slug.startswith("auto/"):
                 continue
             assert agent.context_window == 128_000
+
+    def test_load_from_postgres_uses_transport_type_over_cli_template(
+        self,
+        monkeypatch,
+    ) -> None:
+        import registry.model_context_limits as model_context_limits
+
+        windows = {
+            ("google", "gemini-3.1-pro-preview"): 1_000_000,
+            ("kimi", "kimi-k2.6"): 262_000,
+        }
+        monkeypatch.setattr(
+            model_context_limits,
+            "context_window_for_model",
+            lambda provider, model: windows[(provider, model)],
+        )
+
+        reg = AgentRegistry.load_from_postgres(_TransportAuthorityConn())
+        google = reg.get("google/gemini-3.1-pro-preview")
+        kimi = reg.get("kimi/kimi-k2.6")
+        build = reg.get("auto/build")
+
+        assert google is not None
+        assert google.execution_transport is ExecutionTransport.api
+        assert google.wrapper_command is None
+        assert kimi is not None
+        assert kimi.execution_transport is ExecutionTransport.cli
+        assert kimi.wrapper_command == "kimi --model kimi-k2.6"
+        assert build is not None
+        assert build.execution_transport is ExecutionTransport.api
+        assert reg.get("auto/debug") is None
+
+    def test_load_from_postgres_for_route_loads_exact_transport(
+        self,
+        monkeypatch,
+    ) -> None:
+        import registry.model_context_limits as model_context_limits
+
+        windows = {
+            ("google", "gemini-3.1-pro-preview"): 1_000_000,
+            ("kimi", "kimi-k2.6"): 262_000,
+        }
+        monkeypatch.setattr(
+            model_context_limits,
+            "context_window_for_model",
+            lambda provider, model: windows[(provider, model)],
+        )
+
+        agent = AgentRegistry.load_from_postgres_for_route(
+            _TransportAuthorityConn(),
+            provider_slug="google",
+            model_slug="gemini-3.1-pro-preview",
+            transport_type="API",
+        )
+
+        assert agent is not None
+        assert agent.execution_transport is ExecutionTransport.api
+        assert agent.wrapper_command is None
+
+    def test_load_from_postgres_for_route_requires_candidate_ref_when_supplied(
+        self,
+        monkeypatch,
+    ) -> None:
+        import registry.model_context_limits as model_context_limits
+
+        monkeypatch.setattr(
+            model_context_limits,
+            "context_window_for_model",
+            lambda provider, model: 1_000_000,
+        )
+
+        agent = AgentRegistry.load_from_postgres_for_route(
+            _TransportAuthorityConn(),
+            provider_slug="google",
+            model_slug="gemini-3.1-pro-preview",
+            transport_type="API",
+            candidate_ref="candidate.google.stale",
+        )
+
+        assert agent is None
 
 
 # ------------------------------------------------------------------

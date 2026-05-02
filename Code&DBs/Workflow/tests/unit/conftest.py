@@ -16,9 +16,9 @@ _UNIT_RUNTIME_PROFILE_REF = "runtime_profile.unit"
 _NATIVE_AUTHORITY_IMPORTERS = (
     "runtime.workflow.orchestrator",
     "runtime.workflow.runtime_setup",
-    "runtime.spec_compiler",
+    "runtime.spec_materializer",
     "runtime.workflow_builder",
-    "runtime.workflow_graph_compiler",
+    "runtime.workflow_graph_materializer",
     "runtime.workflow._admission",
     "runtime.workflow.receipt_writer",
     "runtime.workflow._shared",

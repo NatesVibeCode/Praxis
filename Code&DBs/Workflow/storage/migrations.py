@@ -60,8 +60,8 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = _WORKFLOW_SCHEMA_READINESS_SEQUENCE
 
 
 _COMPILE_AUTHORITY_REQUIREMENT_TABLES = (
-    ("compile_artifact_authority_ready", ("compile_artifacts", "capability_catalog", "verify_refs", "verification_registry")),
-    ("compile_index_authority_ready", ("compile_index_snapshots",)),
+    ("compile_artifact_authority_ready", ("materialize_artifacts", "capability_catalog", "verify_refs", "verification_registry")),
+    ("compile_index_authority_ready", ("materialize_index_snapshots",)),
     ("execution_packet_authority_ready", ("execution_packets",)),
     ("repo_snapshot_authority_ready", ("repo_snapshots",)),
     ("verification_registry_ready", ("verification_registry",)),
@@ -70,11 +70,11 @@ _COMPILE_AUTHORITY_REQUIREMENT_TABLES = (
 )
 
 _COMPILE_AUTHORITY_READINESS_ORDER = (
-    "compile_artifacts",
+    "materialize_artifacts",
     "capability_catalog",
     "verify_refs",
     "verification_registry",
-    "compile_index_snapshots",
+    "materialize_index_snapshots",
     "execution_packets",
     "repo_snapshots",
     "verifier_registry",

@@ -63,9 +63,9 @@ def test_command_normalizes_model_override() -> None:
     cmd = ExecuteChatTurnCommand(
         conversation_id="conv-1",
         user_content="hi",
-        model_override="  openrouter/moonshotai/kimi-k2.6  ",
+        model_override="  openrouter/canvasshotai/kimi-k2.6  ",
     )
-    assert cmd.model_override == "openrouter/moonshotai/kimi-k2.6"
+    assert cmd.model_override == "openrouter/canvasshotai/kimi-k2.6"
 
 
 def test_command_treats_blank_model_override_as_none() -> None:
@@ -89,7 +89,7 @@ def test_handler_returns_assistant_payload() -> None:
         "message_id": "msg-1",
         "content": "Hello!",
         "tool_results": [],
-        "model_used": "openrouter/moonshotai/kimi-k2.6",
+        "model_used": "openrouter/canvasshotai/kimi-k2.6",
         "latency_ms": 124,
     })
     cmd = ExecuteChatTurnCommand(conversation_id="conv-1", user_content="hi")
@@ -98,7 +98,7 @@ def test_handler_returns_assistant_payload() -> None:
     assert result["ok"] is True
     assert result["message_id"] == "msg-1"
     assert result["content"] == "Hello!"
-    assert result["model_used"] == "openrouter/moonshotai/kimi-k2.6"
+    assert result["model_used"] == "openrouter/canvasshotai/kimi-k2.6"
     assert result["latency_ms"] == 124
 
 
@@ -109,7 +109,7 @@ def test_handler_passes_overrides_through_to_orchestrator() -> None:
         user_content="hello",
         model_override="together/deepseek-ai/DeepSeek-V4-Pro",
         max_tokens=2048,
-        selection_context=[{"type": "moon_workflow_ref", "ref": "wf-1"}],
+        selection_context=[{"type": "canvas_workflow_ref", "ref": "wf-1"}],
     )
     with patch("runtime.chat_orchestrator.ChatOrchestrator", side_effect=_orchestrator_factory(stub)):
         handle_execute_chat_turn(cmd, _StubSubsystems())
@@ -117,7 +117,7 @@ def test_handler_passes_overrides_through_to_orchestrator() -> None:
     assert stub.last_call["conversation_id"] == "conv-2"
     assert stub.last_call["model_override"] == "together/deepseek-ai/DeepSeek-V4-Pro"
     assert stub.last_call["max_tokens"] == 2048
-    assert stub.last_call["selection_context"] == [{"type": "moon_workflow_ref", "ref": "wf-1"}]
+    assert stub.last_call["selection_context"] == [{"type": "canvas_workflow_ref", "ref": "wf-1"}]
 
 
 def test_handler_surfaces_orchestrator_errors() -> None:

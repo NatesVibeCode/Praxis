@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import hashlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ._shared import (
     _READ_ONLY_MODE,
@@ -252,6 +252,54 @@ def _route_plan_from_run_envelope(
     return {}
 
 
+def _normalize_transport_type(value: object) -> str:
+    normalized = str(value or "").strip().upper()
+    return normalized if normalized in {"CLI", "API"} else ""
+
+
+def _route_candidate_entries_from_plan(
+    route_plan: dict[str, object],
+) -> dict[str, dict[str, object]]:
+    raw_entries = route_plan.get("route_candidates")
+    if not isinstance(raw_entries, list):
+        return {}
+    entries: dict[str, dict[str, object]] = {}
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            continue
+        slug = str(raw.get("slug") or "").strip()
+        if not slug and raw.get("provider_slug") and raw.get("model_slug"):
+            slug = f"{raw.get('provider_slug')}/{raw.get('model_slug')}"
+        if "/" not in slug:
+            continue
+        entries[slug] = {
+            "slug": slug,
+            "candidate_ref": str(raw.get("candidate_ref") or "").strip(),
+            "provider_slug": str(raw.get("provider_slug") or slug.split("/", 1)[0]).strip(),
+            "host_provider_slug": str(raw.get("host_provider_slug") or "").strip(),
+            "model_slug": str(raw.get("model_slug") or slug.split("/", 1)[1]).strip(),
+            "transport_type": _normalize_transport_type(raw.get("transport_type")),
+            "adapter_type": str(raw.get("adapter_type") or "").strip(),
+            "variant": str(raw.get("variant") or "").strip(),
+            "effort_slug": str(raw.get("effort_slug") or "").strip(),
+            "task_type": str(raw.get("task_type") or "").strip(),
+            "rank": raw.get("rank"),
+        }
+    return entries
+
+
+def _route_candidate_entries_for_job(
+    conn: SyncPostgresConnection,
+    job: dict,
+) -> dict[str, dict[str, object]]:
+    route_plan = _route_plan_from_run_envelope(
+        conn,
+        run_id=str(job.get("run_id") or ""),
+        job_label=str(job.get("label") or ""),
+    )
+    return _route_candidate_entries_from_plan(route_plan)
+
+
 def _deterministic_route_jitter(
     *,
     run_id: str,
@@ -401,6 +449,7 @@ def _runtime_profile_admitted_route_candidates(
     *,
     runtime_profile_ref: str,
     candidates: list[str],
+    route_candidate_entries: dict[str, dict[str, object]] | None = None,
 ) -> list[str]:
     from registry.runtime_profile_admission import (
         RuntimeProfileAdmissionError,
@@ -411,11 +460,39 @@ def _runtime_profile_admitted_route_candidates(
         conn,
         runtime_profile_ref=runtime_profile_ref,
     )
-    admitted_slugs = {
-        f"{candidate.provider_slug}/{candidate.model_slug}"
+    admitted_refs = {
+        str(candidate.candidate_ref).strip()
         for candidate in admitted_candidates
+        if str(candidate.candidate_ref).strip()
     }
-    eligible_slugs = [candidate for candidate in candidates if candidate in admitted_slugs]
+    admitted_slugs = {f"{candidate.provider_slug}/{candidate.model_slug}" for candidate in admitted_candidates}
+    admitted_exact = {
+        (
+            f"{candidate.provider_slug}/{candidate.model_slug}",
+            _normalize_transport_type(getattr(candidate, "transport_type", "")),
+        )
+        for candidate in admitted_candidates
+        if _normalize_transport_type(getattr(candidate, "transport_type", ""))
+    }
+
+    def _candidate_admitted(candidate: str) -> bool:
+        route_candidate_ref = str(
+            (route_candidate_entries or {}).get(candidate, {}).get("candidate_ref") or ""
+        ).strip()
+        route_transport = _normalize_transport_type(
+            (route_candidate_entries or {}).get(candidate, {}).get("transport_type")
+        )
+        if route_candidate_ref and admitted_refs:
+            if route_candidate_ref not in admitted_refs:
+                return False
+            if route_transport and admitted_exact:
+                return (candidate, route_transport) in admitted_exact
+            return True
+        if route_transport and admitted_exact:
+            return (candidate, route_transport) in admitted_exact
+        return candidate in admitted_slugs
+
+    eligible_slugs = [candidate for candidate in candidates if _candidate_admitted(candidate)]
     if not eligible_slugs:
         raise RuntimeProfileAdmissionError(
             "routing.no_admitted_candidate_overlap",
@@ -438,6 +515,7 @@ def _db_admitted_route_candidates(
     run_id: str,
     candidates: list[str],
     enforce_runtime_profile: bool,
+    route_candidate_entries: dict[str, dict[str, object]] | None = None,
 ) -> tuple[list[str], dict[str, dict[str, object]]]:
     if not candidates:
         return [], {}
@@ -446,6 +524,7 @@ def _db_admitted_route_candidates(
         """SELECT candidate_ref,
                   provider_slug,
                   model_slug,
+                  transport_type,
                   COALESCE(priority, 0) AS priority
            FROM provider_model_candidates
            WHERE status = 'active'
@@ -455,7 +534,21 @@ def _db_admitted_route_candidates(
     by_slug: dict[str, dict[str, object]] = {}
     for row in candidate_rows or []:
         slug = f"{row['provider_slug']}/{row['model_slug']}"
-        by_slug[slug] = dict(row)
+        existing = by_slug.get(slug)
+        route_candidate_ref = str(
+            (route_candidate_entries or {}).get(slug, {}).get("candidate_ref") or ""
+        ).strip()
+        row_candidate_ref = str(row.get("candidate_ref") or "").strip()
+        if route_candidate_ref and row_candidate_ref != route_candidate_ref:
+            continue
+        route_transport = _normalize_transport_type(
+            (route_candidate_entries or {}).get(slug, {}).get("transport_type")
+        )
+        row_transport = _normalize_transport_type(row.get("transport_type"))
+        if route_transport and row_transport != route_transport:
+            continue
+        if existing is None:
+            by_slug[slug] = dict(row)
 
     active_slugs = [candidate for candidate in candidates if candidate in by_slug]
     if not active_slugs:
@@ -485,6 +578,7 @@ def _db_admitted_route_candidates(
         conn,
         runtime_profile_ref=runtime_profile_ref,
         candidates=active_slugs,
+        route_candidate_entries=route_candidate_entries,
     )
     return eligible_slugs, by_slug
 
@@ -538,6 +632,7 @@ def _effective_catalog_route_candidates(
     runtime_profile_ref: str | None,
     task_type: str,
     candidates: list[str],
+    route_candidate_entries: dict[str, dict[str, object]] | None = None,
 ) -> list[str]:
     """Filter workflow candidates through the private effective provider catalog."""
     if not runtime_profile_ref or not task_type or not candidates:
@@ -550,11 +645,39 @@ def _effective_catalog_route_candidates(
         runtime_profile_ref=runtime_profile_ref,
         job_type=task_type,
     )
-    catalog_slugs = {
-        f"{row.provider_slug}/{row.model_slug}"
+    catalog_refs = {
+        str(row.candidate_ref).strip()
         for row in catalog_rows
+        if row.candidate_ref
     }
-    return [candidate for candidate in candidates if candidate in catalog_slugs]
+    catalog_slugs = {f"{row.provider_slug}/{row.model_slug}" for row in catalog_rows}
+    catalog_exact = {
+        (
+            f"{row.provider_slug}/{row.model_slug}",
+            _normalize_transport_type(getattr(row, "transport_type", "")),
+        )
+        for row in catalog_rows
+        if _normalize_transport_type(getattr(row, "transport_type", ""))
+    }
+
+    def _candidate_allowed(candidate: str) -> bool:
+        route_candidate_ref = str(
+            (route_candidate_entries or {}).get(candidate, {}).get("candidate_ref") or ""
+        ).strip()
+        route_transport = _normalize_transport_type(
+            (route_candidate_entries or {}).get(candidate, {}).get("transport_type")
+        )
+        if route_candidate_ref and catalog_refs:
+            if route_candidate_ref not in catalog_refs:
+                return False
+            if route_transport and catalog_exact:
+                return (candidate, route_transport) in catalog_exact
+            return True
+        if route_transport and catalog_exact:
+            return (candidate, route_transport) in catalog_exact
+        return candidate in catalog_slugs
+
+    return [candidate for candidate in candidates if _candidate_allowed(candidate)]
 
 
 def _catalog_gate_denial_for_candidates(
@@ -674,6 +797,7 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
     if not candidates:
         return str(job.get("agent_slug", ""))
 
+    route_candidate_entries = _route_candidate_entries_for_job(conn, job)
     route_task_type = str(job.get("route_task_type") or "").strip()
     runtime_profile_ref = _runtime_profile_ref_for_run(conn, str(job.get("run_id", "")))
     if route_task_type:
@@ -682,6 +806,7 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
             runtime_profile_ref=runtime_profile_ref,
             task_type=route_task_type,
             candidates=candidates,
+            route_candidate_entries=route_candidate_entries,
         )
         if not catalog_candidates:
             denial = _catalog_gate_denial_for_candidates(
@@ -718,6 +843,7 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
         run_id=str(job.get("run_id", "")),
         candidates=candidates_for_admission,
         enforce_runtime_profile=enforce_runtime_profile,
+        route_candidate_entries=route_candidate_entries,
     )
     provider_load = _active_provider_load(conn)
     available = admitted_candidates or candidates_for_admission

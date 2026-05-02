@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from runtime.compile_index import current_repo_fingerprint
+from runtime.materialize_index import current_repo_fingerprint
 
 
 def _utc_now() -> datetime:

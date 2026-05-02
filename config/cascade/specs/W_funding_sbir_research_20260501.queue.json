@@ -1,0 +1,96 @@
+{
+  "name": "Funding — SBIR Phase I Topic Fit (NSF / DOE / DARPA)",
+  "phase": "W",
+  "queue_id": "funding_sbir_research_20260501",
+  "outcome_goal": "artifacts/funding/sbir_research_20260501/sbir_research.md exists with: (a) ≥3 currently-open Phase I solicitations from NSF / DOE / DARPA matching AI infrastructure / autonomous agents / decision-support, (b) per topic — due date, max award, eligibility, required attachments, point of contact, (c) 2–3 funded-proposal examples in adjacent areas, (d) 1–5 fit score per topic, (e) Phase I outline draft for the strongest fit.",
+  "anti_requirements": [
+    "Do NOT list closed solicitations as if they were open — every topic must be currently accepting applications.",
+    "Do NOT inflate fit scores — a 5 means 'strong topic match AND eligibility AND timeline alignment'.",
+    "Do NOT draft a full proposal — only an outline of Phase I with section headers and bullets.",
+    "Do NOT submit any application — research and outline only."
+  ],
+  "jobs": [
+    {
+      "label": "nsf_sbir_topics",
+      "task_type": "research",
+      "description": "Identify currently open NSF SBIR Phase I solicitations matching Praxis",
+      "outcome_goal": "artifacts/funding/sbir_research_20260501/01_nsf.md lists open NSF SBIR Phase I topics that match AI infrastructure / autonomous agents / decision-support, each with due date, max award, eligibility, required attachments.",
+      "prompt": "Search seedfund.nsf.gov / nsf.gov SBIR for currently open Phase I solicitations. Filter to topics that match: AI infrastructure, autonomous software agents, developer productivity tooling, decision-support systems, software automation.\n\nWrite `artifacts/funding/sbir_research_20260501/01_nsf.md` with one section per matching topic. Each section:\n- **Topic code** (e.g. SF, AI, DT)\n- **Topic title**\n- **Topic description** (2–3 sentence summary)\n- **Due date** (next deadline)\n- **Max award** (Phase I dollar amount)\n- **Eligibility** (small business, US-based, ownership structure, etc.)\n- **Required attachments** (technical proposal, commercialization plan, budget, etc.)\n- **Point of contact** (program officer, if listed)\n- **Source URL**\n\nIf none match, say so explicitly and list the closest near-misses with one-line notes on why they don't qualify.",
+      "read": [],
+      "write": ["artifacts/funding/sbir_research_20260501/01_nsf.md"],
+      "verify_command": "test -s artifacts/funding/sbir_research_20260501/01_nsf.md"
+    },
+    {
+      "label": "doe_sbir_topics",
+      "task_type": "research",
+      "description": "Identify currently open DOE SBIR topics matching Praxis (energy/efficiency/grid framing)",
+      "outcome_goal": "artifacts/funding/sbir_research_20260501/02_doe.md lists open DOE SBIR topics that match Praxis if framed around energy efficiency or grid operations.",
+      "prompt": "Search science.osti.gov / energy.gov SBIR for currently open Phase I solicitations. Filter to topics where Praxis's autonomous-engineering capability could plausibly be applied — energy systems automation, grid operations decision support, lab-software automation, etc.\n\nWrite `artifacts/funding/sbir_research_20260501/02_doe.md` with the same structure as the NSF file. Be honest about fit — if the framing requires significant pivot, note the pivot cost.",
+      "read": [],
+      "write": ["artifacts/funding/sbir_research_20260501/02_doe.md"],
+      "verify_command": "test -s artifacts/funding/sbir_research_20260501/02_doe.md"
+    },
+    {
+      "label": "darpa_sbir_topics",
+      "task_type": "research",
+      "description": "Identify currently open DARPA Small Business topics matching Praxis",
+      "outcome_goal": "artifacts/funding/sbir_research_20260501/03_darpa.md lists open DARPA Small Business solicitations that match autonomous systems / decision support / software-defined operations.",
+      "prompt": "Search darpa.mil/work-with-us/for-small-businesses or the DARPA SBIR/STTR portal for currently open Phase I solicitations. Filter to topics matching: autonomous systems, decision support, software-defined operations, AI infrastructure.\n\nWrite `artifacts/funding/sbir_research_20260501/03_darpa.md` with the same structure as the NSF file. DARPA is high bar — be honest about whether a solo unfunded founder is realistically eligible for any of these.",
+      "read": [],
+      "write": ["artifacts/funding/sbir_research_20260501/03_darpa.md"],
+      "verify_command": "test -s artifacts/funding/sbir_research_20260501/03_darpa.md"
+    },
+    {
+      "label": "funded_proposal_examples",
+      "task_type": "research",
+      "description": "Find 2-3 recently funded SBIR proposals in adjacent areas as reference",
+      "outcome_goal": "artifacts/funding/sbir_research_20260501/04_examples.md catalogs 2-3 funded SBIR Phase I proposals in AI infrastructure / developer tooling / autonomous systems with abstract excerpt and award amount.",
+      "prompt": "Find 2–3 recently (last 24 months) funded SBIR Phase I proposals from any of NSF / DOE / DARPA / DOD in adjacent areas: AI infrastructure, developer tooling, autonomous software agents, decision support.\n\nWrite `artifacts/funding/sbir_research_20260501/04_examples.md` with one section per example:\n- **Awardee** (small business name)\n- **Topic / agency**\n- **Award amount and date**\n- **Public abstract** (excerpt, ≤4 sentences, with citation)\n- **What's transferable to Praxis** (1–2 sentences on framing/positioning lessons)\n- **Source URL**\n\nUse SBIR.gov public award search if available; otherwise NSF/DOE/DARPA award databases.",
+      "read": [],
+      "write": ["artifacts/funding/sbir_research_20260501/04_examples.md"],
+      "verify_command": "test -s artifacts/funding/sbir_research_20260501/04_examples.md"
+    },
+    {
+      "label": "score_topic_fit",
+      "task_type": "analysis",
+      "depends_on": ["nsf_sbir_topics", "doe_sbir_topics", "darpa_sbir_topics", "funded_proposal_examples"],
+      "description": "Score every candidate topic against Praxis fit on a 1–5 scale",
+      "outcome_goal": "artifacts/funding/sbir_research_20260501/05_scores.md ranks every topic from the three agency files with a 1–5 score and explicit reasoning.",
+      "prompt": "Read all three agency files and the examples file. Score every candidate topic on a 1–5 scale across these dimensions:\n- **Topic match** (1=requires major pivot, 5=Praxis is the textbook answer)\n- **Eligibility match** (1=disqualified or near-disqualified, 5=clean fit for solo unfunded WA-based small business)\n- **Timeline match** (1=deadline already passed effectively, 5=≥6 weeks until deadline so a real proposal is possible)\n- **Effort/reward** (1=400 hours of writing for $50K, 5=lean proposal possible with high probability)\n\nWrite `artifacts/funding/sbir_research_20260501/05_scores.md` as a markdown table:\n| Topic | Agency | Topic match | Eligibility | Timeline | Effort/reward | Total | Reasoning |\n\nSort descending by Total. Surface the top 1–3 explicitly. Be honest — if nothing scores ≥12, say so and recommend deferring SBIR until a topic better matches.",
+      "read": [
+        "artifacts/funding/sbir_research_20260501/01_nsf.md",
+        "artifacts/funding/sbir_research_20260501/02_doe.md",
+        "artifacts/funding/sbir_research_20260501/03_darpa.md",
+        "artifacts/funding/sbir_research_20260501/04_examples.md"
+      ],
+      "write": ["artifacts/funding/sbir_research_20260501/05_scores.md"],
+      "verify_command": "test -s artifacts/funding/sbir_research_20260501/05_scores.md"
+    },
+    {
+      "label": "outline_strongest_fit",
+      "task_type": "creative",
+      "depends_on": ["score_topic_fit"],
+      "description": "Draft a Phase I outline for the strongest-fit topic",
+      "outcome_goal": "artifacts/funding/sbir_research_20260501/06_outline.md is a Phase I outline (section headers + bullets) for the top-scoring topic, ready for Nate to expand into a full proposal.",
+      "prompt": "Read `artifacts/funding/sbir_research_20260501/05_scores.md`. Pick the top-ranked topic (or top 1–2 if tied). For that topic, draft a Phase I outline at `artifacts/funding/sbir_research_20260501/06_outline.md`.\n\nStructure the outline against the agency's required sections (which should be in the agency file). Default if unclear:\n1. **Project summary** (1 page)\n2. **Technical objectives**\n3. **Approach** (Phase I methodology)\n4. **Anticipated public benefits**\n5. **Commercialization plan**\n6. **Team** (single founder, advisors)\n7. **Facilities and equipment**\n8. **Budget** (with rough Phase I splits)\n\nUnder each section, write 3–5 bullet points specific to Praxis as the technology and the chosen topic as the framing. Bullets should be specific enough that Nate can expand them into prose without inventing facts. Where Nate's input is required (e.g. team bios, facility details), insert `[OPERATOR INPUT: <what's needed>]` placeholders.",
+      "read": ["artifacts/funding/sbir_research_20260501/05_scores.md"],
+      "write": ["artifacts/funding/sbir_research_20260501/06_outline.md"],
+      "verify_command": "test -s artifacts/funding/sbir_research_20260501/06_outline.md"
+    },
+    {
+      "label": "compose_sbir_report",
+      "task_type": "creative",
+      "depends_on": ["outline_strongest_fit"],
+      "description": "Produce the final operator-facing SBIR research report",
+      "outcome_goal": "artifacts/funding/sbir_research_20260501/sbir_research.md is the operator-facing deliverable consolidating topic shortlist, scores, examples, and outline.",
+      "prompt": "Read everything under `artifacts/funding/sbir_research_20260501/`.\n\nProduce `artifacts/funding/sbir_research_20260501/sbir_research.md` with:\n1. **TL;DR** (3 sentences: should Nate pursue SBIR Phase I right now, and which topic, and why)\n2. **Top 3 topics ranked** (one short paragraph each: agency, topic, due date, fit reasoning)\n3. **Reference proposals** (one bullet each from `04_examples.md` with the transferable lesson)\n4. **Recommended outline location** (link to `06_outline.md`)\n5. **What Nate needs to gather** (consolidated list of `[OPERATOR INPUT]` items from `06_outline.md`)\n6. **Decision: pursue / defer / skip** (be opinionated; if Total scores in `05_scores.md` are weak, recommend defer)\n\nThis file is the only one Nate is required to read — everything else is supporting evidence.",
+      "read": [
+        "artifacts/funding/sbir_research_20260501/05_scores.md",
+        "artifacts/funding/sbir_research_20260501/06_outline.md",
+        "artifacts/funding/sbir_research_20260501/04_examples.md"
+      ],
+      "write": ["artifacts/funding/sbir_research_20260501/sbir_research.md"],
+      "verify_command": "test -s artifacts/funding/sbir_research_20260501/sbir_research.md && grep -q 'TL;DR' artifacts/funding/sbir_research_20260501/sbir_research.md"
+    }
+  ]
+}

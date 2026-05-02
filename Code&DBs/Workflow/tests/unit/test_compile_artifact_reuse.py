@@ -18,12 +18,14 @@ _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
 class _ArtifactConn:
     def __init__(self) -> None:
         self.compile_artifact_rows: list[dict[str, object]] = []
+        self.queries: list[str] = []
 
     def execute(self, query: str, *args):
-        if "INSERT INTO compile_artifacts" in query:
+        self.queries.append(" ".join(query.split()))
+        if "INSERT INTO materialize_artifacts" in query:
             self.compile_artifact_rows.append(
                 {
-                    "compile_artifact_id": args[0],
+                    "materialize_artifact_id": args[0],
                     "artifact_kind": args[1],
                     "artifact_ref": args[2],
                     "revision_ref": args[3],
@@ -36,7 +38,7 @@ class _ArtifactConn:
                 }
             )
             return []
-        if "FROM compile_artifacts" in query:
+        if "FROM materialize_artifacts" in query:
             artifact_kind = args[0]
             input_fingerprint = args[1]
             return [
@@ -70,7 +72,7 @@ class _StubMatcher:
         )
 
 
-def _compile_index_snapshot() -> compile_index.CompileIndexSnapshot:
+def _compile_index_snapshot() -> compile_index.MaterializeIndexSnapshot:
     repo_info = {
         "repo_root": _REPO_ROOT,
         "git_head": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
@@ -95,23 +97,23 @@ def _compile_index_snapshot() -> compile_index.CompileIndexSnapshot:
             "reference_catalog": "catalog-fingerprint",
             "integration_registry": "integration-fingerprint",
             "object_types": "object-type-fingerprint",
-            "compiler_route_hints": "route-hint-fingerprint",
+            "materializer_route_hints": "route-hint-fingerprint",
             "capability_catalog": "capability-fingerprint",
         },
         "source_counts": {
             "reference_catalog": 0,
             "integration_registry": 0,
             "object_types": 0,
-            "compiler_route_hints": 0,
+            "materializer_route_hints": 0,
             "capability_catalog": 0,
         },
         "reference_catalog": [],
         "integration_registry": [],
         "object_types": [],
-        "compiler_route_hints": [],
+        "materializer_route_hints": [],
         "capability_catalog": [],
     }
-    return compile_index.CompileIndexSnapshot(
+    return compile_index.MaterializeIndexSnapshot(
         schema_version=1,
         compile_index_ref="compile_index.compiler.test",
         compile_surface_revision="compile_surface.compiler.test",
@@ -131,7 +133,7 @@ def _compile_index_snapshot() -> compile_index.CompileIndexSnapshot:
         reference_catalog=(),
         integration_registry=(),
         object_types=(),
-        compiler_route_hints=(),
+        materializer_route_hints=(),
         capability_catalog=(),
         payload=payload,
     )
@@ -149,6 +151,7 @@ def test_compile_prose_reuses_definition_artifact_on_exact_input_match(monkeypat
     )
 
     assert first["reuse_provenance"]["decision"] == "compiled"
+    assert not any("compile_artifacts" in query for query in conn.queries)
 
     monkeypatch.setattr(
         "runtime.intent_matcher.IntentMatcher",
@@ -216,7 +219,7 @@ def test_plan_definition_reuses_exact_artifact_without_replanning(monkeypatch: p
     conn = _ArtifactConn()
     definition = {
         "source_prose": "Build a thing",
-        "compiled_prose": "Build a thing",
+        "materialized_prose": "Build a thing",
         "definition_revision": "def_1234abcd",
         "references": [],
         "narrative_blocks": [],
@@ -235,14 +238,14 @@ def test_plan_definition_reuses_exact_artifact_without_replanning(monkeypatch: p
     second = planner.plan_definition(definition, title="Alpha", conn=conn)
 
     assert second["reuse_provenance"]["decision"] == "reused"
-    assert second["compiled_spec"]["plan_revision"] == first["compiled_spec"]["plan_revision"]
+    assert second["materialized_spec"]["plan_revision"] == first["materialized_spec"]["plan_revision"]
 
 
 def test_plan_definition_skips_invalid_reusable_artifact() -> None:
     conn = _ArtifactConn()
     definition = {
         "source_prose": "Build a thing",
-        "compiled_prose": "Build a thing",
+        "materialized_prose": "Build a thing",
         "definition_revision": "def_1234abcd",
         "references": [],
         "narrative_blocks": [],

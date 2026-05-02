@@ -33,9 +33,9 @@ from runtime.capability_catalog import (
     select_capability_catalog_entries,
     sync_capability_catalog,
 )
-from runtime.compile_reuse import stable_hash
+from runtime.materialize_reuse import stable_hash
 from runtime.native_authority import default_native_authority_refs
-from runtime.definition_compile_kernel import build_definition as build_definition_kernel
+from runtime.definition_materialize_kernel import build_definition as build_definition_kernel
 from runtime.verification import sync_verify_refs
 
 
@@ -200,7 +200,7 @@ class Intent:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class CompiledSpec:
+class MaterializedSpec:
     """Output of spec compilation."""
 
     prompt: str
@@ -223,7 +223,7 @@ class CompiledSpec:
     max_retries: int = 0
     definition_graph: dict[str, Any] | None = None
     definition_revision: str | None = None
-    compiled_prose: str | None = None
+    materialized_prose: str | None = None
     narrative_blocks: list[dict[str, Any]] | None = None
     draft_flow: list[dict[str, Any]] | None = None
 
@@ -239,7 +239,7 @@ class CompiledSpec:
         for key in list(spec_dict.keys()):
             if key.startswith("_"):
                 spec_dict.pop(key, None)
-        for key in ("definition_graph", "compiled_prose", "narrative_blocks", "draft_flow"):
+        for key in ("definition_graph", "materialized_prose", "narrative_blocks", "draft_flow"):
             spec_dict.pop(key, None)
         return spec_dict
 
@@ -503,7 +503,7 @@ def compile_spec(
     *,
     auto_read_scope: bool = False,
     conn: Any | None = None,
-) -> tuple[CompiledSpec, list[str]]:
+) -> tuple[MaterializedSpec, list[str]]:
     """Compile a minimal intent dict into a full WorkflowSpec.
 
     Args:
@@ -512,7 +512,7 @@ def compile_spec(
                         (requires scope_resolver integration).
 
     Returns:
-        (CompiledSpec, list_of_warnings)
+        (MaterializedSpec, list_of_warnings)
     """
     warnings: list[str] = []
 
@@ -596,14 +596,14 @@ def compile_spec(
     # Build compiled spec
     kernel_definition = build_definition_kernel(
         source_prose=intent.description,
-        compiled_prose=prompt,
+        materialized_prose=prompt,
         references=[],
         capabilities=capability_rows,
         authority="",
         sla={},
     )
-    spec = CompiledSpec(
-        prompt=kernel_definition["compiled_prose"],
+    spec = MaterializedSpec(
+        prompt=kernel_definition["materialized_prose"],
         scope_write=intent.write,
         scope_read=read_scope,
         context_sections=context_sections,
@@ -619,7 +619,7 @@ def compile_spec(
         runtime_profile_ref=runtime_profile_ref,
         definition_graph=kernel_definition["definition_graph"],
         definition_revision=kernel_definition["definition_revision"],
-        compiled_prose=kernel_definition["compiled_prose"],
+        materialized_prose=kernel_definition["materialized_prose"],
         narrative_blocks=kernel_definition["narrative_blocks"],
         draft_flow=kernel_definition["draft_flow"],
     )
@@ -741,9 +741,9 @@ def compile_prompt_launch_spec(
                 }
             )
 
-    compiled_prompt = prompt
+    materialized_prompt = prompt
     if scope_write:
-        compiled_prompt += (
+        materialized_prompt += (
             "\n\nReturn your response as JSON with this schema:\n"
             '{"code_blocks": [{"file_path": "<path>", '
             '"content": "<FULL FILE>", "language": "python", '
@@ -765,7 +765,7 @@ def compile_prompt_launch_spec(
     launch_job = {
         "label": "run",
         "agent": f"{provider_slug}/{resolved_model_slug}" if resolved_model_slug else provider_slug,
-        "prompt": compiled_prompt,
+        "prompt": materialized_prompt,
         "adapter_type": adapter_type,
         "tier": tier,
         "timeout": timeout,
@@ -791,14 +791,14 @@ def compile_prompt_launch_spec(
     packet_provenance = {
         "source_kind": "prompt_launch",
         "definition_row": {"definition_revision": definition_revision},
-        "compiled_spec_row": {
+        "materialized_spec_row": {
             "definition_revision": definition_revision,
             "plan_revision": plan_revision,
         },
     }
 
     return PromptLaunchSpec(
-        name=compiled_prompt[:80] or "workflow cli prompt",
+        name=materialized_prompt[:80] or "workflow cli prompt",
         workflow_id=resolved_workflow_id,
         phase="execute",
         graph_runtime_submit=True,
@@ -815,8 +815,8 @@ def compile_prompt_launch_spec(
 # Plan → spec → launch continuous flow
 # ---------------------------------------------------------------------------
 #
-# The programmatic counterpart to the Moon UI's graph-to-run chain
-# (roadmap_item.make.moon.ui.emit.runnable.graph.authority.for.gated.9.step.workflows).
+# The programmatic counterpart to the Canvas UI's graph-to-run chain
+# (roadmap_item.make.canvas.ui.emit.runnable.graph.authority.for.gated.9.step.workflows).
 # Callers describe packets as minimal intents; this module compiles, translates
 # into the platform's workflow spec shape, and submits — never handing the
 # spec-JSON step back to a caller or LLM.
@@ -955,7 +955,7 @@ def _emit_plan_launched_event(
     :func:`runtime.system_events.emit_system_event` helper. Per architecture-
     policy::platform-architecture::expected-envelope-vs-actual-truth-
     separation, this event marks the pre-run envelope crossing into
-    runtime — downstream projections (future Phase 2/3) wire it into Moon
+    runtime — downstream projections (future Phase 2/3) wire it into Canvas
     observability and the agent operating manifest's "what changed recently"
     question.
 
@@ -1073,7 +1073,7 @@ def _build_packet_map_entry(
       field so post-run reconciliation can overwrite without clobbering the
       legacy ``agent``.
     - ``capabilities`` — capability_slug list the catalog bound to this
-      packet (from ``CompiledSpec.capabilities``).
+      packet (from ``MaterializedSpec.capabilities``).
     - ``write_envelope`` — pre-run allowed scope (declared ``packet.write``).
     - ``expected_gates`` — verify_ref IDs the compiler expects to run.
     - ``verification_gaps`` — files in ``write_envelope`` with no admitted
@@ -1105,7 +1105,7 @@ def _build_packet_map_entry(
     # runtime emits a matching produced artifact. No human review required —
     # gate satisfaction is computable from typed state per
     # architecture-policy::platform-architecture::legal-equals-computable-to-
-    # non-gap-output. Closes BUG-2729F8B7 (Moon generated workflow has no
+    # non-gap-output. Closes BUG-2729F8B7 (Canvas generated workflow has no
     # release gates or typed gate contracts).
     expected_typed_gates = [
         {
@@ -1764,14 +1764,14 @@ def _enrich_prompt_with_context(
 def _packet_to_job(
     packet: PlanPacket,
     *,
-    compiled: CompiledSpec,
+    compiled: MaterializedSpec,
     workdir: str,
     index: int,
 ) -> dict[str, Any]:
     """Translate a compiled packet into a workflow-spec job dict.
 
     This is the translation that used to require a human/LLM step:
-    CompiledSpec fields get mapped onto the job shape submit expects.
+    MaterializedSpec fields get mapped onto the job shape submit expects.
     """
     label = packet.label or compiled.label or f"packet_{index}"
     agent = packet.agent or f"auto/{_agent_route_stage(packet.stage)}"
@@ -2015,7 +2015,7 @@ def _plan_execution_manifest(
         **manifest_payload,
         "hardening_report": {
             "status": "inline_compiled",
-            "source": "runtime.spec_compiler.compile_plan",
+            "source": "runtime.spec_materializer.compile_plan",
             "job_count": len(jobs),
             "verify_ref_count": len(manifest_payload["verify_refs"]),
         },
@@ -2159,7 +2159,7 @@ def compile_plan(
     # all packets.
     #
     # Before raising, emit typed_gap.created events for structured gap
-    # errors so observers (Moon, operator console, projections) see the
+    # errors so observers (Canvas, operator console, projections) see the
     # failure at event-stream level — not just as an exception string.
     # Opt-in via conn: if no conn, skip emission (unit-test paths stay
     # cheap). Per architecture-policy::platform-architecture::conceptual-
@@ -2379,7 +2379,7 @@ def _require_provider_freshness(
 ) -> dict[str, Any]:
     normalized = _normalize_provider_freshness(
         evidence,
-        fallback_source=f"runtime.spec_compiler.{launch_kind}",
+        fallback_source=f"runtime.spec_materializer.{launch_kind}",
     )
     if normalized is None:
         raise ProviderFreshnessGateError(

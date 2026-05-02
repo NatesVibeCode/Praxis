@@ -127,12 +127,12 @@ def _json_load(value: object) -> dict[str, Any]:
 def _normalized_execution_manifest(value: object) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    if "tool_allowlist" in value and "verify_refs" in value and "compiled_spec" in value:
+    if "tool_allowlist" in value and "verify_refs" in value and "materialized_spec" in value:
         return _json_clone(value)
     tool_allowlist = value.get("tool_allowlist_json")
     if not isinstance(tool_allowlist, dict):
         return None
-    compiled_spec = value.get("compiled_spec_json")
+    materialized_spec = value.get("materialized_spec_json")
     policy_gates = value.get("policy_gates_json")
     hardening_report = value.get("hardening_report_json")
     return {
@@ -152,7 +152,7 @@ def _normalized_execution_manifest(value: object) -> dict[str, Any] | None:
             for item in (_json_clone(value.get("verify_refs_json")) if isinstance(value.get("verify_refs_json"), list) else [])
             if _as_text(item)
         ],
-        "compiled_spec": _json_clone(compiled_spec) if isinstance(compiled_spec, dict) else {},
+        "materialized_spec": _json_clone(materialized_spec) if isinstance(materialized_spec, dict) else {},
         "policy_gates": _json_clone(policy_gates) if isinstance(policy_gates, dict) else {},
         "hardening_report": _json_clone(hardening_report) if isinstance(hardening_report, dict) else {},
     }
@@ -577,7 +577,7 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
             "summary": _missing_execution_manifest_message(_as_text(workflow_row.get("name")) or workflow_id),
             "error": "workflow_execution_manifest_missing",
         }
-    spec = execution_manifest.get("compiled_spec")
+    spec = execution_manifest.get("materialized_spec")
     if not isinstance(spec, dict) or not _as_text(spec.get("definition_revision")):
         return {
             "status": "failed",

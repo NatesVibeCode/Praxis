@@ -261,7 +261,7 @@ export function AppShell() {
         diff: {
           activeTabId: surfaceName,
           dashboardDetail: null,
-          moonRunId: null,
+          canvasRunId: null,
         },
         callerRef: `shell.tab_strip.${surfaceName}`,
         bypassBuildDraftGuard: args.bypassBuildDraftGuard,
@@ -272,7 +272,7 @@ export function AppShell() {
 
   const openDashboardCosts = useCallback(async () => {
     await openSurface('route.app.dashboard', {
-      diff: { activeTabId: 'dashboard', dashboardDetail: 'costs', moonRunId: null },
+      diff: { activeTabId: 'dashboard', dashboardDetail: 'costs', canvasRunId: null },
       callerRef: 'shell.dashboard.cost_drill_in',
     });
   }, [openSurface]);
@@ -296,7 +296,7 @@ export function AppShell() {
           buildIntent: opts.intent ?? null,
           builderSeed: opts.seed ?? null,
           buildView: opts.view ?? stateRef.current.buildView,
-          moonRunId: null,
+          canvasRunId: null,
           dashboardDetail: null,
         },
         callerRef: 'shell.app_shell.open_build',
@@ -312,8 +312,8 @@ export function AppShell() {
         slotValues: { run_id: runId },
         diff: {
           activeTabId: 'build',
-          buildView: 'moon',
-          moonRunId: runId,
+          buildView: 'canvas',
+          canvasRunId: runId,
           dashboardDetail: null,
         },
         callerRef: 'shell.app_shell.open_run_detail',
@@ -530,10 +530,10 @@ export function AppShell() {
         id: 'create:builder',
         label: 'New Workflow',
         description: 'Describe what you want first, then refine the generated graph.',
-        keywords: ['builder', 'workflow', 'moon', 'new', 'blank', 'describe', 'compose'],
+        keywords: ['builder', 'workflow', 'canvas', 'new', 'blank', 'describe', 'compose'],
         shortcut: 'Ctrl+N',
         onSelect: () => {
-          void openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' });
+          void openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'canvas' });
         },
       },
       ...seedBundles.map((seed) => ({
@@ -772,12 +772,12 @@ function renderPropsForRoute(routeId: string, state: ShellState, helpers: Render
   switch (routeId) {
     case 'route.app.dashboard':
       return {
-        onEditWorkflow: (id: string) => helpers.openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' }),
-        onEditModel: (id: string) => helpers.openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' }),
+        onEditWorkflow: (id: string) => helpers.openBuild({ workflowId: id, intent: null, seed: null, view: 'canvas' }),
+        onEditModel: (id: string) => helpers.openBuild({ workflowId: id, intent: null, seed: null, view: 'canvas' }),
         onViewRun: (runId: string) => helpers.openRunDetail(runId),
-        onNewWorkflow: () => helpers.openBuild({ workflowId: null, intent: null, seed: null, view: 'moon' }),
+        onNewWorkflow: () => helpers.openBuild({ workflowId: null, intent: null, seed: null, view: 'canvas' }),
         onChat: () => helpers.setChatOpen(),
-        onDescribe: () => helpers.openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' }),
+        onDescribe: () => helpers.openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'canvas' }),
         onOpenCosts: () => helpers.openDashboardCosts(),
       };
     case 'route.app.dashboard_costs':
@@ -790,16 +790,16 @@ function renderPropsForRoute(routeId: string, state: ShellState, helpers: Render
     case 'route.app.run':
       return {
         workflowId: state.buildWorkflowId,
-        runId: state.moonRunId,
+        runId: state.canvasRunId,
         onBack,
         onWorkflowCreated: (wfId: string) =>
-          helpers.openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon', bypassBuildDraftGuard: true }),
-        onEditWorkflow: (wfId: string) => helpers.openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon' }),
+          helpers.openBuild({ workflowId: wfId, intent: null, seed: null, view: 'canvas', bypassBuildDraftGuard: true }),
+        onEditWorkflow: (wfId: string) => helpers.openBuild({ workflowId: wfId, intent: null, seed: null, view: 'canvas' }),
         onViewRun: (runId: string) => helpers.openRunDetail(runId),
         onDraftStateChange: helpers.handleBuildDraftStateChange,
         onMaterializeHandoff: helpers.openMaterializeChat,
         initialMode:
-          state.buildIntent === '__compose__' || (!state.buildWorkflowId && !state.moonRunId)
+          state.buildIntent === '__compose__' || (!state.buildWorkflowId && !state.canvasRunId)
             ? 'compose'
             : undefined,
       };

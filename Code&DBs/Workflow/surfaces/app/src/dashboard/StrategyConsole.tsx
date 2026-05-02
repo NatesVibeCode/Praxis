@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Conversation } from '../workspace/useChat';
 import {
-  clearMoonChatHandoff,
-  getMoonChatHandoff,
-  moonChatSelectionContext,
-  subscribeMoonChatHandoff,
-  type MoonChatHandoff,
-} from '../moon/moonChatContext';
+  clearCanvasChatHandoff,
+  getCanvasChatHandoff,
+  canvasChatSelectionContext,
+  subscribeCanvasChatHandoff,
+  type CanvasChatHandoff,
+} from '../canvas/canvasChatContext';
 import { MarkdownRenderer } from '../workspace/MarkdownRenderer';
 import { ToolResultRenderer } from '../workspace/ToolResultRenderer';
 import './strategy-console.css';
@@ -29,9 +29,15 @@ const MAX_CHAT_FILES = 6;
 const DEFAULT_CHAT_TASK_SLUG = 'auto/chat';
 
 interface ChatRouteCandidate {
+  candidate_ref?: string;
+  candidate_set_hash?: string;
   provider_slug: string;
   model_slug: string;
   transport_type: string | null;
+  execution_target_ref?: string | null;
+  execution_profile_ref?: string | null;
+  execution_target_kind?: string | null;
+  disabled_reason?: string | null;
   rank: number | null;
   permitted: boolean | null;
   route_health_score: number | null;
@@ -40,9 +46,14 @@ interface ChatRouteCandidate {
   latency_class: string | null;
 }
 
+interface ChatRoutingOptionsPayload {
+  candidates: ChatRouteCandidate[];
+  candidateSetHash: string | null;
+}
+
 function chatRouteKey(route: ChatRouteCandidate | null): string {
   if (!route) return '';
-  return `${route.provider_slug}|${route.model_slug}|${route.transport_type ?? ''}`;
+  return route.candidate_ref || `${route.provider_slug}|${route.model_slug}|${route.transport_type ?? ''}`;
 }
 
 function chatRouteOverride(route: ChatRouteCandidate | null): string | undefined {
@@ -50,13 +61,13 @@ function chatRouteOverride(route: ChatRouteCandidate | null): string | undefined
   return `${route.provider_slug}/${route.model_slug}`;
 }
 
-async function fetchChatRoutingOptions(taskSlug: string): Promise<ChatRouteCandidate[]> {
+async function fetchChatRoutingOptions(taskSlug: string): Promise<ChatRoutingOptionsPayload> {
   const res = await fetch('/api/operate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      operation: 'chat.routing_options.list',
-      input: { task_slug: taskSlug },
+      operation: 'execution.dispatch_options.list',
+      input: { task_slug: taskSlug, workload_kind: 'chat', include_disabled: true },
       mode: 'query',
     }),
   });
@@ -64,8 +75,50 @@ async function fetchChatRoutingOptions(taskSlug: string): Promise<ChatRouteCandi
     throw new Error(`routing options fetch failed (${res.status})`);
   }
   const payload = await res.json();
-  const candidates = payload?.result?.candidates ?? payload?.candidates ?? [];
-  return Array.isArray(candidates) ? (candidates as ChatRouteCandidate[]) : [];
+  const result = payload?.result ?? payload ?? {};
+  const candidates = result?.candidates ?? [];
+  return {
+    candidates: Array.isArray(candidates) ? (candidates as ChatRouteCandidate[]) : [],
+    candidateSetHash: typeof result?.candidate_set_hash === 'string' ? result.candidate_set_hash : null,
+  };
+}
+
+async function commitChatDispatchChoice(
+  route: ChatRouteCandidate,
+  candidateSetHash: string,
+  selectionKind: 'default' | 'explicit_click',
+  conversationId: string | null,
+): Promise<string | null> {
+  const res = await fetch('/api/operate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      operation: 'execution.dispatch_choice.commit',
+      input: {
+        task_slug: DEFAULT_CHAT_TASK_SLUG,
+        workload_kind: 'chat',
+        candidate_set_hash: candidateSetHash,
+        selected_candidate_ref: route.candidate_ref,
+        selected_provider_slug: route.provider_slug,
+        selected_model_slug: route.model_slug,
+        selected_transport_type: route.transport_type,
+        selection_kind: selectionKind,
+        selected_by: 'operator',
+        surface: 'strategy_console',
+        conversation_id: conversationId,
+      },
+      mode: 'command',
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`dispatch choice commit failed (${res.status})`);
+  }
+  const payload = await res.json();
+  const result = payload?.result ?? payload ?? {};
+  if (result.ok === false) {
+    throw new Error(result.error_code || result.error || 'dispatch choice rejected');
+  }
+  return typeof result.dispatch_choice_ref === 'string' ? result.dispatch_choice_ref : null;
 }
 const MAX_FILE_CONTEXT_BYTES = 80_000;
 const MAX_TOTAL_FILE_CONTEXT_BYTES = 240_000;
@@ -124,8 +177,9 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const [conversationQuery, setConversationQuery] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<PendingChatFile[]>([]);
   const [dropActive, setDropActive] = useState(false);
-  const [moonHandoff, setMoonHandoff] = useState<MoonChatHandoff | null>(null);
+  const [canvasHandoff, setCanvasHandoff] = useState<CanvasChatHandoff | null>(null);
   const [routeCandidates, setRouteCandidates] = useState<ChatRouteCandidate[]>([]);
+  const [candidateSetHash, setCandidateSetHash] = useState<string | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<ChatRouteCandidate | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [routesError, setRoutesError] = useState<string | null>(null);
@@ -134,13 +188,18 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const processedHandoffIdsRef = useRef<Set<string>>(new Set());
+  const defaultRoute = useMemo(
+    () => routeCandidates.find((route) => route.permitted !== false && !route.disabled_reason) ?? routeCandidates[0] ?? null,
+    [routeCandidates],
+  );
 
   useEffect(() => {
     let cancelled = false;
     fetchChatRoutingOptions(DEFAULT_CHAT_TASK_SLUG)
-      .then((candidates) => {
+      .then((payload) => {
         if (cancelled) return;
-        setRouteCandidates(candidates);
+        setRouteCandidates(payload.candidates);
+        setCandidateSetHash(payload.candidateSetHash);
         setRoutesError(null);
       })
       .catch((err: unknown) => {
@@ -179,13 +238,13 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
 
   useEffect(() => {
     if (stage === 'icon') return;
-    const applyHandoff = (event: MoonChatHandoff | null) => {
+    const applyHandoff = (event: CanvasChatHandoff | null) => {
       if (!event) return;
       setThreadsOpen(false);
-      setMoonHandoff(event);
+      setCanvasHandoff(event);
     };
-    applyHandoff(getMoonChatHandoff());
-    return subscribeMoonChatHandoff(applyHandoff);
+    applyHandoff(getCanvasChatHandoff());
+    return subscribeCanvasChatHandoff(applyHandoff);
   }, [stage]);
 
   useEffect(() => {
@@ -211,7 +270,9 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
 
   const charsRemaining = INPUT_MAX_LENGTH - input.length;
   const showCounter = charsRemaining <= INPUT_COUNTER_THRESHOLD;
-  const statusLabel = loading || streamingText ? 'Thinking' : conversationId ? 'Ready' : 'No thread';
+  const isThinking = loading && !streamingText;
+  const isStreaming = Boolean(streamingText);
+  const statusLabel = isThinking ? 'Thinking' : isStreaming ? 'Responding' : conversationId ? 'Ready' : 'No thread';
 
   const attachFiles = useCallback(async (fileList: FileList | File[]) => {
     const files = Array.from(fileList).slice(0, MAX_CHAT_FILES);
@@ -265,61 +326,82 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     setInput('');
     setAttachedFiles([]);
     setThreadsOpen(false);
-    // Splice the active Moon workflow + selection state into selection_context
+    // Splice the active Canvas workflow + selection state into selection_context
     // when the user has the canvas open. Tools default-target it, so the user
     // can ask "what's in this workflow" or "add a Slack node here" without
     // naming the workflow id explicitly.
-    const moonCtx = moonChatSelectionContext();
-    const mergedSelection = moonCtx.length || attachmentContext.length
-      ? [...moonCtx, ...attachmentContext]
+    const canvasCtx = canvasChatSelectionContext();
+    const mergedSelection = canvasCtx.length || attachmentContext.length
+      ? [...canvasCtx, ...attachmentContext]
       : undefined;
-    const modelOverride = chatRouteOverride(selectedRoute);
+    const dispatchRoute = selectedRoute ?? defaultRoute;
+    const explicitRouteSelected = Boolean(selectedRoute);
+    let dispatchChoiceRef: string | null = null;
+    if (dispatchRoute && candidateSetHash) {
+      try {
+        dispatchChoiceRef = await commitChatDispatchChoice(
+          dispatchRoute,
+          candidateSetHash,
+          explicitRouteSelected ? 'explicit_click' : 'default',
+          targetConversationId,
+        );
+      } catch (err: unknown) {
+        setRoutesError(err instanceof Error ? err.message : String(err));
+        if (explicitRouteSelected) return;
+      }
+    }
+    const modelOverride = explicitRouteSelected ? chatRouteOverride(selectedRoute) : undefined;
     void sendMessage(
       content,
       mergedSelection,
       targetConversationId,
-      modelOverride ? { model: modelOverride } : undefined,
+      {
+        ...(modelOverride ? { model: modelOverride } : {}),
+        ...(dispatchChoiceRef ? { dispatchChoiceRef } : {}),
+        ...(dispatchRoute?.candidate_ref ? { selectedCandidateRef: dispatchRoute.candidate_ref } : {}),
+        ...(candidateSetHash ? { candidateSetHash } : {}),
+      },
     );
     void refreshConversations();
-  }, [attachedFiles, conversationId, createConversation, input, loading, refreshConversations, selectedRoute, sendMessage]);
+  }, [attachedFiles, candidateSetHash, conversationId, createConversation, defaultRoute, input, loading, refreshConversations, selectedRoute, sendMessage]);
 
   useEffect(() => {
     if (stage === 'icon' || loading) return;
-    if (!moonHandoff || moonHandoff.phase !== 'chat_fallback' || !moonHandoff.prompt) return;
-    if (processedHandoffIdsRef.current.has(moonHandoff.handoff_id)) return;
-    processedHandoffIdsRef.current.add(moonHandoff.handoff_id);
+    if (!canvasHandoff || canvasHandoff.phase !== 'chat_fallback' || !canvasHandoff.prompt) return;
+    if (processedHandoffIdsRef.current.has(canvasHandoff.handoff_id)) return;
+    processedHandoffIdsRef.current.add(canvasHandoff.handoff_id);
 
     let cancelled = false;
     const runHandoff = async () => {
       let targetConversationId = conversationId;
       if (!targetConversationId) {
         targetConversationId = await createConversation(
-          moonHandoff.workflow_id ? `Materialize recovery ${moonHandoff.workflow_id}` : 'Materialize recovery',
+          canvasHandoff.workflow_id ? `Materialize recovery ${canvasHandoff.workflow_id}` : 'Materialize recovery',
         );
         if (!targetConversationId || cancelled) return;
       }
-      const moonCtx = moonChatSelectionContext();
+      const canvasCtx = canvasChatSelectionContext();
       const selectionContext = [
-        ...moonCtx,
+        ...canvasCtx,
         {
-          kind: 'moon_materialize_handoff',
-          workflow_id: moonHandoff.workflow_id,
-          workflow_name: moonHandoff.workflow_name ?? null,
-          phase: moonHandoff.phase,
-          status_message: moonHandoff.status_message,
-          operation_receipt_id: moonHandoff.operation_receipt_id ?? null,
-          correlation_id: moonHandoff.correlation_id ?? null,
-          graph_summary: moonHandoff.graph_summary ?? null,
+          kind: 'canvas_materialize_handoff',
+          workflow_id: canvasHandoff.workflow_id,
+          workflow_name: canvasHandoff.workflow_name ?? null,
+          phase: canvasHandoff.phase,
+          status_message: canvasHandoff.status_message,
+          operation_receipt_id: canvasHandoff.operation_receipt_id ?? null,
+          correlation_id: canvasHandoff.correlation_id ?? null,
+          graph_summary: canvasHandoff.graph_summary ?? null,
         },
       ];
       void sendMessage(
-        moonHandoff.prompt || '',
+        canvasHandoff.prompt || '',
         selectionContext,
         targetConversationId,
         { timeoutMs: 240000 },
       );
-      clearMoonChatHandoff();
-      setMoonHandoff(moonHandoff);
+      clearCanvasChatHandoff();
+      setCanvasHandoff(canvasHandoff);
       void refreshConversations();
     };
 
@@ -327,7 +409,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     return () => {
       cancelled = true;
     };
-  }, [conversationId, createConversation, loading, moonHandoff, refreshConversations, sendMessage, stage]);
+  }, [conversationId, createConversation, loading, canvasHandoff, refreshConversations, sendMessage, stage]);
 
   const handleStartNew = useCallback(async () => {
     const id = await createConversation();
@@ -364,7 +446,10 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
           <span className="strategy-console__face" aria-hidden="true">[._.]</span>
           <div className="strategy-console__title-block">
             <strong>STRATEGY_CONSOLE</strong>
-            <span>{statusLabel}</span>
+            <span>
+              <span className={`strategy-console__status-dot strategy-console__status-dot--${isThinking ? 'thinking' : isStreaming ? 'streaming' : conversationId ? 'ready' : 'idle'}`} />
+              {statusLabel}
+            </span>
           </div>
         </div>
         <div className="strategy-console__actions">
@@ -442,11 +527,11 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
       )}
 
       <div className="strategy-console__stream" role="log" aria-live="polite" aria-relevant="additions">
-        {moonHandoff && (
-          <div className={`strategy-console__handoff strategy-console__handoff--${moonHandoff.phase}`}>
+        {canvasHandoff && (
+          <div className={`strategy-console__handoff strategy-console__handoff--${canvasHandoff.phase}`}>
             <span className="strategy-console__handoff-kicker">Materialize handoff</span>
-            <strong>{moonHandoff.phase === 'chat_fallback' ? 'Recovery is running' : moonHandoff.phase === 'ready' ? 'Materialize ready' : moonHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
-            <p>{moonHandoff.status_message}</p>
+            <strong>{canvasHandoff.phase === 'chat_fallback' ? 'Recovery is running' : canvasHandoff.phase === 'ready' ? 'Materialize ready' : canvasHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
+            <p>{canvasHandoff.status_message}</p>
           </div>
         )}
 
@@ -475,7 +560,10 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
           if (message.role === 'tool_result' && message.tool_results) {
             return (
               <div key={message.id} className="strategy-message strategy-message--tool">
-                <div className="strategy-message__meta">Tool</div>
+                <div className="strategy-message__embed-bar">
+                  <span className="strategy-message__embed-icon" aria-hidden="true" />
+                  <span className="strategy-message__embed-label">Tool result</span>
+                </div>
                 <ToolResultRenderer result={message.tool_results} />
               </div>
             );
@@ -488,7 +576,17 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
               key={message.id}
               className={`strategy-message ${isUser ? 'strategy-message--user' : isError ? 'strategy-message--error' : 'strategy-message--assistant'}`}
             >
-              <div className="strategy-message__meta">{isUser ? 'You' : isError ? 'Error' : 'Praxis'}</div>
+              <div className="strategy-message__header">
+                {!isUser && (
+                  <span className="strategy-message__avatar" aria-hidden="true">[._.]</span>
+                )}
+                <span className="strategy-message__meta">{isUser ? 'You' : isError ? 'Error' : 'Praxis'}</span>
+                {message.created_at && (
+                  <time className="strategy-message__time" dateTime={message.created_at}>
+                    {new Date(message.created_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  </time>
+                )}
+              </div>
               <div className="strategy-message__content">
                 {isUser ? message.content : <MarkdownRenderer content={message.content} />}
               </div>
@@ -499,12 +597,29 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
           );
         })}
 
+        {isThinking && !streamingText && (
+          <div className="strategy-message strategy-message--assistant strategy-message--thinking">
+            <div className="strategy-message__header">
+              <span className="strategy-message__avatar" aria-hidden="true">[._.]</span>
+              <span className="strategy-message__meta">Praxis</span>
+            </div>
+            <div className="strategy-typing-indicator" aria-label="Thinking">
+              <span className="strategy-typing-indicator__dot" />
+              <span className="strategy-typing-indicator__dot" />
+              <span className="strategy-typing-indicator__dot" />
+            </div>
+          </div>
+        )}
+
         {streamingText && (
-          <div className="strategy-message strategy-message--assistant">
-            <div className="strategy-message__meta">Praxis</div>
+          <div className="strategy-message strategy-message--assistant strategy-message--streaming">
+            <div className="strategy-message__header">
+              <span className="strategy-message__avatar" aria-hidden="true">[._.]</span>
+              <span className="strategy-message__meta">Praxis</span>
+            </div>
             <div className="strategy-message__content">
-              {streamingText}
-              <span className="ws-cursor" />
+              <MarkdownRenderer content={streamingText} />
+              <span className="strategy-cursor" aria-hidden="true" />
             </div>
           </div>
         )}
@@ -559,12 +674,12 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
                     <span className="strategy-console__transport-chip" data-transport={selectedRoute.transport_type ?? undefined}>{selectedRoute.transport_type}</span>
                   )}
                 </>
-              ) : routeCandidates.length > 0 ? (
+              ) : defaultRoute ? (
                 <>
-                  <strong>{routeCandidates[0].model_slug}</strong>
-                  <em>{routeCandidates[0].provider_slug}</em>
-                  {routeCandidates[0].transport_type && (
-                    <span className="strategy-console__transport-chip" data-transport={routeCandidates[0].transport_type ?? undefined}>{routeCandidates[0].transport_type}</span>
+                  <strong>{defaultRoute.model_slug}</strong>
+                  <em>{defaultRoute.provider_slug}</em>
+                  {defaultRoute.transport_type && (
+                    <span className="strategy-console__transport-chip" data-transport={defaultRoute.transport_type ?? undefined}>{defaultRoute.transport_type}</span>
                   )}
                 </>
               ) : routesError ? (
@@ -577,20 +692,23 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
               <ul className="strategy-console__model-list" role="listbox">
                 {routeCandidates.map((route) => {
                   const key = chatRouteKey(route);
+                  const disabled = route.permitted === false || Boolean(route.disabled_reason);
                   const isSelected = selectedRoute
                     ? chatRouteKey(selectedRoute) === key
-                    : route === routeCandidates[0];
+                    : route === defaultRoute;
                   return (
                     <li
                       key={key}
                       role="option"
                       aria-selected={isSelected}
+                      aria-disabled={disabled}
                       className={
                         isSelected
                           ? 'strategy-console__model-option strategy-console__model-option--selected'
                           : 'strategy-console__model-option'
                       }
                       onClick={() => {
+                        if (disabled) return;
                         setSelectedRoute(route);
                         setPickerOpen(false);
                       }}
@@ -600,8 +718,14 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
                       {route.transport_type && (
                         <span className="strategy-console__transport-chip" data-transport={route.transport_type ?? undefined}>{route.transport_type}</span>
                       )}
+                      {route.execution_target_kind && (
+                        <span className="strategy-console__transport-chip" data-transport={route.execution_target_kind ?? undefined}>{route.execution_target_kind}</span>
+                      )}
                       {typeof route.rank === 'number' && (
                         <span className="strategy-console__model-rank">#{route.rank}</span>
+                      )}
+                      {disabled && (
+                        <span className="strategy-console__model-rank">unavailable</span>
                       )}
                     </li>
                   );

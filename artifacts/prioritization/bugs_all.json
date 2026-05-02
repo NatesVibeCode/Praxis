@@ -239,18 +239,18 @@
     },
     {
       "bug_id": "BUG-9B904118",
-      "title": "Moon picker APIs hardcode provider choices outside effective catalog",
+      "title": "Canvas picker APIs hardcode provider choices outside effective catalog",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
       "filed_at": "2026-04-26T14:13:44.937916+00:00",
       "updated_at": "2026-04-26T14:43:05.141940+00:00",
       "resolved_at": "2026-04-26T14:43:05.141940+00:00",
-      "description": "Moon picker API handlers expose hardcoded provider choices instead of reading effective provider availability. Picker surfaces should reflect the same catalog and breaker state as dispatch, otherwise ...",
+      "description": "Canvas picker API handlers expose hardcoded provider choices instead of reading effective provider availability. Picker surfaces should reflect the same catalog and breaker state as dispatch, otherwise ...",
       "resume_context": {
         "audit_group": "F_picker_helper_leaks",
         "grouping_source": "codex_catalog_circuit_audit_2026-04-26",
-        "assignment_reason": "Moon picker API cleanup is narrow UI/API wiring.",
+        "assignment_reason": "Canvas picker API cleanup is narrow UI/API wiring.",
         "suggested_sequence": 2,
         "recommended_model_tier": "mid_coder"
       },
@@ -1115,7 +1115,7 @@
       "category": "OTHER",
       "filed_at": "2026-04-25T02:02:45.920710+00:00",
       "updated_at": "2026-04-25T02:02:45.920710+00:00",
-      "description": "runtime/compiler_output_builders.py:810-872 defines infer_blocking_inputs and infer_briefing_fields as keyword-gated constant functions: if compiled_prose contains any of (connector, api docs, common ...",
+      "description": "runtime/compiler_output_builders.py:810-872 defines infer_blocking_inputs and infer_briefing_fields as keyword-gated constant functions: if materialized_prose contains any of (connector, api docs, common ...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -1123,7 +1123,7 @@
     },
     {
       "bug_id": "BUG-B7A075E2",
-      "title": "persona_profiles is empty \u2014 Moon compose path has no response_contract / system_prompt to teach the LLM the build shape",
+      "title": "persona_profiles is empty \u2014 Canvas compose path has no response_contract / system_prompt to teach the LLM the build shape",
       "status": "OPEN",
       "severity": "P2",
       "category": "OTHER",
@@ -2390,16 +2390,16 @@
     },
     {
       "bug_id": "BUG-FC232024",
-      "title": "Moon suggest-next request times out without graceful partial-state fallback",
+      "title": "Canvas suggest-next request times out without graceful partial-state fallback",
       "status": "FIXED",
       "severity": "P2",
       "category": "RUNTIME",
       "filed_at": "2026-04-24T17:54:39.594814+00:00",
       "updated_at": "2026-04-25T01:28:51.859892+00:00",
       "resolved_at": "2026-04-25T01:28:51.859892+00:00",
-      "description": "Moon displayed 'Request timed out after 15s' while reviewing the generated workflow. When suggestion or catalog calls time out, the builder should retain visible partial graph state, show the failed a...",
+      "description": "Canvas displayed 'Request timed out after 15s' while reviewing the generated workflow. When suggestion or catalog calls time out, the builder should retain visible partial graph state, show the failed a...",
       "resume_context": {
-        "trace": "MoonActionDock.tsx already has full partial-state fallback: suggestedError + suggestedStale states (lines 66-67), .catch preserves previous suggestedCatalogIds, UI renders 'Couldn't refresh suggestions (showing last known)' with explicit retry button (lines 500-541), aria-live='polite' for screen readers, .moon-action__suggestions--stale class on the cached set, role='status' on error block. Implementation matches every requirement in the bug description: 'retain visible partial graph state', 'show the failed authority call', 'offer retry', 'offline legal-next fallback'.",
+        "trace": "CanvasActionDock.tsx already has full partial-state fallback: suggestedError + suggestedStale states (lines 66-67), .catch preserves previous suggestedCatalogIds, UI renders 'Couldn't refresh suggestions (showing last known)' with explicit retry button (lines 500-541), aria-live='polite' for screen readers, .canvas-action__suggestions--stale class on the cached set, role='status' on error block. Implementation matches every requirement in the bug description: 'retain visible partial graph state', 'show the failed authority call', 'offer retry', 'offline legal-next fallback'.",
         "status": "verified_already_fixed",
         "finding": "already_fixed_in_react",
         "investigation_at": "2026-04-24"
@@ -2411,14 +2411,14 @@
     },
     {
       "bug_id": "BUG-99B9DC7E",
-      "title": "Moon composer turns uncertainty into human Provide nodes instead of typed gaps with fallback branches",
+      "title": "Canvas composer turns uncertainty into human Provide nodes instead of typed gaps with fallback branches",
       "status": "FIXED",
       "severity": "P2",
       "category": "ARCHITECTURE",
       "filed_at": "2026-04-24T17:54:39.593125+00:00",
       "updated_at": "2026-04-25T00:48:15.036853+00:00",
       "resolved_at": "2026-04-25T00:48:15.036853+00:00",
-      "description": "The integration workflow prompt explicitly requested fallback logic and progress under incomplete or uncertain information, but Moon generated human homework nodes such as 'Provide Target application'...",
+      "description": "The integration workflow prompt explicitly requested fallback logic and progress under incomplete or uncertain information, but Canvas generated human homework nodes such as 'Provide Target application'...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -2426,22 +2426,22 @@
     },
     {
       "bug_id": "BUG-C6EE740C",
-      "title": "Regression: Moon composer emits prose-shaped auto/build nodes instead of executable typed workflow units",
+      "title": "Regression: Canvas composer emits prose-shaped auto/build nodes instead of executable typed workflow units",
       "status": "FIXED",
       "severity": "P1",
       "category": "ARCHITECTURE",
       "filed_at": "2026-04-24T17:54:39.444065+00:00",
       "updated_at": "2026-04-25T01:28:50.876841+00:00",
       "resolved_at": "2026-04-25T01:28:50.876841+00:00",
-      "description": "Moon composer accepted an integration-workflow prompt but generated prose-shaped nodes routed through generic auto/build instead of executable typed units. System instructions and diagnostics such as ...",
+      "description": "Canvas composer accepted an integration-workflow prompt but generated prose-shaped nodes routed through generic auto/build instead of executable typed units. System instructions and diagnostics such as ...",
       "resume_context": {
         "status": "code_landed_pending_browser_verification",
-        "fix_path": "runtime/compiler.py:compile_prose (846 lines) is the Moon backend that turns prose into the workflow definition. Called from runtime/canonical_workflows.py:mutate_workflow_build subpath=bootstrap (line 1031-1051), which is dispatched by the /api/workflows/<id>/build/bootstrap POST endpoint. The LLM-driven path (enable_llm=True) is producing prose-shaped nodes including system prompt fragments because: (1) system instructions appear to be concatenated with user prose before LLM call, and (2) LLM output is not validated against the catalog before being persisted. Fix: separate system prompt from user prose at the message boundary; add post-LLM validator that rejects nodes whose route is not a registered catalog_ref or whose content matches known system-prompt fragments. Save-boundary half (Phase 1.2.a type-flow validation in _handle_workflows_post) catches some of this on commit, but the composer should not produce the bad shape in the first place.",
-        "blocked_on": "dedicated Moon composer session",
-        "smoke_proof": "vitest passes 6/6 moonComposeAuthority tests + 7/7 MoonBuildPage tests. Authority/freshness/build-control diagnostics now live exclusively in the backend system prompt (compile_prose at runtime/compiler_llm.py:178), where they belong. The LLM input is clean operator prose so it can not compile system instructions INTO the workflow graph as nodes.",
+        "fix_path": "runtime/compiler.py:compile_prose (846 lines) is the Canvas backend that turns prose into the workflow definition. Called from runtime/canonical_workflows.py:mutate_workflow_build subpath=bootstrap (line 1031-1051), which is dispatched by the /api/workflows/<id>/build/bootstrap POST endpoint. The LLM-driven path (enable_llm=True) is producing prose-shaped nodes including system prompt fragments because: (1) system instructions appear to be concatenated with user prose before LLM call, and (2) LLM output is not validated against the catalog before being persisted. Fix: separate system prompt from user prose at the message boundary; add post-LLM validator that rejects nodes whose route is not a registered catalog_ref or whose content matches known system-prompt fragments. Save-boundary half (Phase 1.2.a type-flow validation in _handle_workflows_post) catches some of this on commit, but the composer should not produce the bad shape in the first place.",
+        "blocked_on": "dedicated Canvas composer session",
+        "smoke_proof": "vitest passes 6/6 canvasComposeAuthority tests + 7/7 CanvasBuildPage tests. Authority/freshness/build-control diagnostics now live exclusively in the backend system prompt (compile_prose at runtime/compiler_llm.py:178), where they belong. The LLM input is clean operator prose so it can not compile system instructions INTO the workflow graph as nodes.",
         "code_changes": [
-          "surfaces/app/src/moon/moonComposeAuthority.ts: buildAuthorityCompileProse no longer prepends 8 lines of system context (Build this as a Praxis workflow graph / Workflow authority / Atlas freshness / Available builder controls / Use explicit nodes / Prefer small progressive units / Operator request) onto the operator prose. Returns only the user prose, optionally annotated with the selected trigger label.",
-          "surfaces/app/src/moon/moonComposeAuthority.test.ts: tests updated to assert the new minimal-output contract (no meta-prose appears in compile input)."
+          "surfaces/app/src/canvas/canvasComposeAuthority.ts: buildAuthorityCompileProse no longer prepends 8 lines of system context (Build this as a Praxis workflow graph / Workflow authority / Atlas freshness / Available builder controls / Use explicit nodes / Prefer small progressive units / Operator request) onto the operator prose. Returns only the user prose, optionally annotated with the selected trigger label.",
+          "surfaces/app/src/canvas/canvasComposeAuthority.test.ts: tests updated to assert the new minimal-output contract (no meta-prose appears in compile input)."
         ],
         "delivered_at": "2026-04-24",
         "scope_estimate": "1-2 day session (compiler refactor + LLM message-boundary discipline + post-LLM validator)",
@@ -2454,18 +2454,18 @@
     },
     {
       "bug_id": "BUG-5DD67C2A",
-      "title": "Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty",
+      "title": "Canvas generated nodes leave data dictionary, bindings, imports, and DB object contracts empty",
       "status": "OPEN",
       "severity": "P1",
       "category": "WIRING",
       "filed_at": "2026-04-24T17:54:39.443176+00:00",
       "updated_at": "2026-04-25T01:23:34.331159+00:00",
-      "description": "Generated Moon workflow nodes expose inspector sections for data dictionary kinds, field bindings, staged imports, attachments, and DB objects, but the integration-design workflow populated none of th...",
+      "description": "Generated Canvas workflow nodes expose inspector sections for data dictionary kinds, field bindings, staged imports, attachments, and DB objects, but the integration-design workflow populated none of th...",
       "resume_context": {
         "trace": "Same downstream relationship as BUG-2729F8B7. compile_prose -> build_authority_bundle/apply_authority_bundle (runtime/compiler.py:448-460) populates bindings, imports, db-object contracts when the LLM-produced definition has structured nodes. Empty bindings is downstream of contaminated LLM input (BUG-C6EE740C). Fix at the input boundary should cascade.",
         "status": "likely_fixed_by_upstream_pending_verification",
         "fix_path": "Same code path as BUG-C6EE740C: runtime/compiler.py:compile_prose. The bindings/imports/db-objects sections are populated downstream via runtime.build_authority.attach_authority / stage_import_snapshot / restore_binding (called from runtime/canonical_workflows.py:1015-1030 for the attachments subpath). The composer should call these helpers after LLM produces the structural definition so each node arrives with full attachments. Currently the LLM emits node skeletons but no bindings are attached.",
-        "blocked_on": "dedicated Moon composer session (sibling of BUG-C6EE740C)",
+        "blocked_on": "dedicated Canvas composer session (sibling of BUG-C6EE740C)",
         "downstream_of": "BUG-C6EE740C",
         "scope_estimate": "Bundled with BUG-C6EE740C \u2014 one composer session covers both",
         "investigation_at": "2026-04-24"
@@ -2477,19 +2477,19 @@
     },
     {
       "bug_id": "BUG-EBFFD508",
-      "title": "Moon inspector and action panels hide bottom controls below viewport",
+      "title": "Canvas inspector and action panels hide bottom controls below viewport",
       "status": "FIXED",
       "severity": "P2",
       "category": "OTHER",
       "filed_at": "2026-04-24T17:52:12.115922+00:00",
       "updated_at": "2026-04-25T01:28:51.186118+00:00",
       "resolved_at": "2026-04-25T01:28:51.186118+00:00",
-      "description": "Moon right-side inspector and left-side action panels can extend beyond the visible viewport, hiding lower menus such as attach reference, stage import, materialize controls, and save/release controls...",
+      "description": "Canvas right-side inspector and left-side action panels can extend beyond the visible viewport, hiding lower menus such as attach reference, stage import, materialize controls, and save/release controls...",
       "resume_context": {
         "status": "code_landed_pending_browser_verification",
         "smoke_proof": "CSS-only fix. Browser verification still required.",
         "code_changes": [
-          "Code&DBs/Workflow/surfaces/app/src/moon/style/layout.css: .moon-dock-overlay now has explicit max-height: 100%, doubled padding-bottom (calc(var(--moon-dock-pad-v) * 2)) so bottom controls always have breathing room above the dock floor, and forced-visible scrollbar styling (scrollbar-width: thin; scrollbar-gutter: stable; ::-webkit-scrollbar at 8px with var(--moon-white-a10) thumb)."
+          "Code&DBs/Workflow/surfaces/app/src/canvas/style/layout.css: .canvas-dock-overlay now has explicit max-height: 100%, doubled padding-bottom (calc(var(--canvas-dock-pad-v) * 2)) so bottom controls always have breathing room above the dock floor, and forced-visible scrollbar styling (scrollbar-width: thin; scrollbar-gutter: stable; ::-webkit-scrollbar at 8px with var(--canvas-white-a10) thumb)."
         ],
         "delivered_at": "2026-04-24"
       },
@@ -2500,18 +2500,18 @@
     },
     {
       "bug_id": "BUG-2729F8B7",
-      "title": "Moon generated workflow has no release gates or typed gate contracts",
+      "title": "Canvas generated workflow has no release gates or typed gate contracts",
       "status": "OPEN",
       "severity": "P1",
       "category": "WIRING",
       "filed_at": "2026-04-24T17:52:12.115111+00:00",
       "updated_at": "2026-04-25T01:23:34.028375+00:00",
-      "description": "Moon generated a workflow from an integration-design prompt, but the resulting graph has no visible release gates or typed gate contracts on the generated units. The release surface blocks with checks...",
+      "description": "Canvas generated a workflow from an integration-design prompt, but the resulting graph has no visible release gates or typed gate contracts on the generated units. The release surface blocks with checks...",
       "resume_context": {
-        "trace": "compile_prose backend at runtime/compiler.py:448 calls build_authority_bundle(definition) and apply_authority_bundle which DO populate release gates and binding metadata when the LLM produces a clean structured definition. The empty-gate symptom in this bug is downstream of BUG-C6EE740C (LLM input contaminated with meta-prose -> LLM produced prose-shaped output -> build_authority could not extract gates from prose nodes). With BUG-C6EE740C fixed (meta-prose stripped at moonComposeAuthority), the LLM should produce structured nodes that build_authority can decorate with gates correctly. Browser verification needed to confirm.",
+        "trace": "compile_prose backend at runtime/compiler.py:448 calls build_authority_bundle(definition) and apply_authority_bundle which DO populate release gates and binding metadata when the LLM produces a clean structured definition. The empty-gate symptom in this bug is downstream of BUG-C6EE740C (LLM input contaminated with meta-prose -> LLM produced prose-shaped output -> build_authority could not extract gates from prose nodes). With BUG-C6EE740C fixed (meta-prose stripped at canvasComposeAuthority), the LLM should produce structured nodes that build_authority can decorate with gates correctly. Browser verification needed to confirm.",
         "status": "likely_fixed_by_upstream_pending_verification",
-        "fix_path": "Composer needs to emit release_gates and typed gate contracts on every node it generates. Look at runtime/build_authority.py for gate primitives. The Moon save-boundary type-flow validator (_validate_type_flow_on_commit in surfaces/api/handlers/workflow_query.py:1361, 1411) currently rejects untyped types but does not require gates. Fix path: (1) compile_prose includes default release_gates per node-kind from catalog metadata; (2) save-boundary validator gains a release_gate_present check.",
-        "blocked_on": "dedicated Moon composer session (sibling of BUG-C6EE740C, BUG-5DD67C2A)",
+        "fix_path": "Composer needs to emit release_gates and typed gate contracts on every node it generates. Look at runtime/build_authority.py for gate primitives. The Canvas save-boundary type-flow validator (_validate_type_flow_on_commit in surfaces/api/handlers/workflow_query.py:1361, 1411) currently rejects untyped types but does not require gates. Fix path: (1) compile_prose includes default release_gates per node-kind from catalog metadata; (2) save-boundary validator gains a release_gate_present check.",
+        "blocked_on": "dedicated Canvas composer session (sibling of BUG-C6EE740C, BUG-5DD67C2A)",
         "downstream_of": "BUG-C6EE740C",
         "scope_estimate": "Bundled with BUG-C6EE740C and BUG-5DD67C2A \u2014 one composer session covers all three",
         "investigation_at": "2026-04-24"
@@ -2523,19 +2523,19 @@
     },
     {
       "bug_id": "BUG-FA546993",
-      "title": "Moon graph and inspector text overlaps or wraps into unreadable labels",
+      "title": "Canvas graph and inspector text overlaps or wraps into unreadable labels",
       "status": "FIXED",
       "severity": "P2",
       "category": "OTHER",
       "filed_at": "2026-04-24T17:52:12.114174+00:00",
       "updated_at": "2026-04-25T01:28:51.526206+00:00",
       "resolved_at": "2026-04-25T01:28:51.526206+00:00",
-      "description": "Moon renders generated workflow node labels and inspector contract rows with overlapping or vertically stacked text. Long prose node titles collide with nodes, edges, chips, and panel rows, making the...",
+      "description": "Canvas renders generated workflow node labels and inspector contract rows with overlapping or vertically stacked text. Long prose node titles collide with nodes, edges, chips, and panel rows, making the...",
       "resume_context": {
         "status": "code_landed_pending_browser_verification",
         "smoke_proof": "CSS-only fix. Browser verification still required.",
         "code_changes": [
-          "Code&DBs/Workflow/surfaces/app/src/moon/style/graph.css: .moon-graph-node__label clamps to 2 lines max with -webkit-line-clamp + display: -webkit-box + overflow: hidden + text-overflow: ellipsis. Hover unsets the line-clamp so the operator can read the full label on demand. .moon-detail__ribbon-label already had truncation; no change needed there."
+          "Code&DBs/Workflow/surfaces/app/src/canvas/style/graph.css: .canvas-graph-node__label clamps to 2 lines max with -webkit-line-clamp + display: -webkit-box + overflow: hidden + text-overflow: ellipsis. Hover unsets the line-clamp so the operator can read the full label on demand. .canvas-detail__ribbon-label already had truncation; no change needed there."
         ],
         "delivered_at": "2026-04-24"
       },
@@ -3017,14 +3017,14 @@
     },
     {
       "bug_id": "BUG-84EDBF9A",
-      "title": "Moon build harden can wedge API during release preview",
+      "title": "Canvas build harden can wedge API during release preview",
       "status": "FIXED",
       "severity": "P1",
       "category": "RUNTIME",
       "filed_at": "2026-04-24T13:46:18.399445+00:00",
       "updated_at": "2026-04-24T15:03:54.918337+00:00",
       "resolved_at": "2026-04-24T15:03:54.918337+00:00",
-      "description": "Release Preview for a graph-first Moon workflow can return 200 in the server log for /api/workflows/:id/build/harden while the browser remains on 'Request timed out after 15s'; after the harden attemp...",
+      "description": "Release Preview for a graph-first Canvas workflow can return 200 in the server log for /api/workflows/:id/build/harden while the browser remains on 'Request timed out after 15s'; after the harden attemp...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -3032,7 +3032,7 @@
     },
     {
       "bug_id": "BUG-BA265A8A",
-      "title": "Moon UI path shown with shell-escaped ampersand in bootstrap DONE and README",
+      "title": "Canvas UI path shown with shell-escaped ampersand in bootstrap DONE and README",
       "status": "FIXED",
       "severity": "P3",
       "category": "OTHER",
@@ -3098,7 +3098,7 @@
       "category": "RUNTIME",
       "filed_at": "2026-04-24T06:33:43.892897+00:00",
       "updated_at": "2026-04-24T06:33:43.892897+00:00",
-      "description": "Live Moon Support Intake Orchestrator proof validated and dispatched run:wf_d22b7388f065:32e3d355bd34a952, but execution failed at normalize-intake with credential.env_var_missing: OPENAI_API_KEY not ...",
+      "description": "Live Canvas Support Intake Orchestrator proof validated and dispatched run:wf_d22b7388f065:32e3d355bd34a952, but execution failed at normalize-intake with credential.env_var_missing: OPENAI_API_KEY not ...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -3113,7 +3113,7 @@
       "filed_at": "2026-04-24T06:27:13.229309+00:00",
       "updated_at": "2026-04-24T06:32:45.890045+00:00",
       "resolved_at": "2026-04-24T06:32:45.890045+00:00",
-      "description": "The Moon UI builds run-status URLs with encodeURIComponent(runId). For run ids containing colons, GET /api/workflow-runs/run%3Awf_ca479e5c82bc%3Ac0f1f4c00a04f30f/status returned 404, while the raw col...",
+      "description": "The Canvas UI builds run-status URLs with encodeURIComponent(runId). For run ids containing colons, GET /api/workflow-runs/run%3Awf_ca479e5c82bc%3Ac0f1f4c00a04f30f/status returned 404, while the raw col...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -3121,7 +3121,7 @@
     },
     {
       "bug_id": "BUG-F2B3E693",
-      "title": "Graph-first Moon compiled specs use unresolved auto agent routes",
+      "title": "Graph-first Canvas compiled specs use unresolved auto agent routes",
       "status": "FIXED",
       "severity": "P1",
       "category": "RUNTIME",
@@ -3136,14 +3136,14 @@
     },
     {
       "bug_id": "BUG-67CEB47D",
-      "title": "Moon edge release normalization collapses validation approval and retry gates",
+      "title": "Canvas edge release normalization collapses validation approval and retry gates",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
       "filed_at": "2026-04-24T06:23:45.933270+00:00",
       "updated_at": "2026-04-24T06:25:29.870760+00:00",
       "resolved_at": "2026-04-24T06:25:29.870760+00:00",
-      "description": "Moon graph edge release normalization accepted validation, approval, and retry families but normalized their edge_type to after_success. Impact: UI-authored gated workflows lost release semantics befo...",
+      "description": "Canvas graph edge release normalization accepted validation, approval, and retry families but normalized their edge_type to after_success. Impact: UI-authored gated workflows lost release semantics befo...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -3460,14 +3460,14 @@
     },
     {
       "bug_id": "BUG-1A0B4E94",
-      "title": "Moon harden produces no compiled spec for manual two-node workflow and requires unrelated ap_invoice bundle",
+      "title": "Canvas harden produces no compiled spec for manual two-node workflow and requires unrelated ap_invoice bundle",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
       "filed_at": "2026-04-24T05:39:54.663798+00:00",
       "updated_at": "2026-04-24T06:25:35.855040+00:00",
       "resolved_at": "2026-04-24T06:25:35.855040+00:00",
-      "description": "The UI-created workflow wf_749cd91cd36e had a manual trigger and one auto/draft step. POST /api/workflows/wf_749cd91cd36e/build/harden returned build_state ready but compiled_spec null, compiled_spec_...",
+      "description": "The UI-created workflow wf_749cd91cd36e had a manual trigger and one auto/draft step. POST /api/workflows/wf_749cd91cd36e/build/harden returned build_state ready but materialized_spec null, materialized_spec_...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_receipt_context",
       "replay_run_id": "workflow_562b40c61833",
@@ -3475,7 +3475,7 @@
     },
     {
       "bug_id": "BUG-5861F7F9",
-      "title": "Moon trigger picker hangs while loading available triggers because catalog API does not return",
+      "title": "Canvas trigger picker hangs while loading available triggers because catalog API does not return",
       "status": "OPEN",
       "severity": "P2",
       "category": "RUNTIME",
@@ -3489,7 +3489,7 @@
     },
     {
       "bug_id": "BUG-8DADDD64",
-      "title": "Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled",
+      "title": "Canvas compose creates local drafts with no trigger or jobs, leaving release dispatch disabled",
       "status": "OPEN",
       "severity": "P2",
       "category": "WIRING",
@@ -3570,13 +3570,13 @@
     },
     {
       "bug_id": "BUG-3CC5D3AD",
-      "title": "Moon dev API crash loop blocks compose engine handoff",
+      "title": "Canvas dev API crash loop blocks compose engine handoff",
       "status": "OPEN",
       "severity": "P1",
       "category": "RUNTIME",
       "filed_at": "2026-04-24T04:40:24.282475+00:00",
       "updated_at": "2026-04-24T04:40:24.282475+00:00",
-      "description": "Moon compose can render an editable fallback graph, but the live workflow engine handoff is blocked because the dev API crash-loops on startup/restart. Observed failures include 'WorkflowMigrationErro...",
+      "description": "Canvas compose can render an editable fallback graph, but the live workflow engine handoff is blocked because the dev API crash-loops on startup/restart. Observed failures include 'WorkflowMigrationErro...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -6010,7 +6010,7 @@
     },
     {
       "bug_id": "BUG-B357177E",
-      "title": "Moon dashboard metrics disagree with recent run ledger",
+      "title": "Canvas dashboard metrics disagree with recent run ledger",
       "status": "FIXED",
       "severity": "P1",
       "category": "WIRING",
@@ -6025,14 +6025,14 @@
     },
     {
       "bug_id": "BUG-984AFD8B",
-      "title": "Moon Run now hides approved-manifest rejection",
+      "title": "Canvas Run now hides approved-manifest rejection",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
       "filed_at": "2026-04-23T22:37:04.669607+00:00",
       "updated_at": "2026-04-24T00:37:48.350725+00:00",
       "resolved_at": "2026-04-24T00:37:48.350725+00:00",
-      "description": "During live UI review, clicking Run now on draft workflow wf_1ae60b0c6744 posted to /api/trigger/wf_1ae60b0c6744 and the backend returned HTTP 400 with: Workflow 'Moon draft' has no approved execution...",
+      "description": "During live UI review, clicking Run now on draft workflow wf_1ae60b0c6744 posted to /api/trigger/wf_1ae60b0c6744 and the backend returned HTTP 400 with: Workflow 'Canvas draft' has no approved execution...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -6040,7 +6040,7 @@
     },
     {
       "bug_id": "BUG-8F7EEB0E",
-      "title": "Moon builder compiles whole prompt into malformed graph instead of progressive validated units",
+      "title": "Canvas builder compiles whole prompt into malformed graph instead of progressive validated units",
       "status": "FIXED",
       "severity": "P2",
       "category": "ARCHITECTURE",
@@ -6055,7 +6055,7 @@
     },
     {
       "bug_id": "BUG-15F67F63",
-      "title": "Moon/Vite dev server hangs root and crash-loops API on port conflict",
+      "title": "Canvas/Vite dev server hangs root and crash-loops API on port conflict",
       "status": "FIXED",
       "severity": "P1",
       "category": "RUNTIME",
@@ -7161,13 +7161,13 @@
     },
     {
       "bug_id": "BUG-6F69A6DF",
-      "title": "Moon node state styling uses filled alarm circles as primary graph language",
+      "title": "Canvas node state styling uses filled alarm circles as primary graph language",
       "status": "OPEN",
       "severity": "P2",
       "category": "OTHER",
       "filed_at": "2026-04-23T22:17:34.163507+00:00",
       "updated_at": "2026-04-23T22:17:34.163507+00:00",
-      "description": "Moon node rendering currently lets blocked/error route-bearing nodes paint the full circular node body, so status becomes the dominant graph shape. This makes normal workflows read as filled red/alarm...",
+      "description": "Canvas node rendering currently lets blocked/error route-bearing nodes paint the full circular node body, so status becomes the dominant graph shape. This makes normal workflows read as filled red/alarm...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -7359,7 +7359,7 @@
       "filed_at": "2026-04-23T21:46:21.971714+00:00",
       "updated_at": "2026-04-23T22:05:21.550108+00:00",
       "resolved_at": "2026-04-23T22:05:21.550108+00:00",
-      "description": "Test drift around compile authority: the compiler smoke test patches the real DB/compile-index path out and injects a private fallback CompileIndexSnapshot with empty catalog, integration, object-type...",
+      "description": "Test drift around compile authority: the compiler smoke test patches the real DB/compile-index path out and injects a private fallback MaterializeIndexSnapshot with empty catalog, integration, object-type...",
       "resume_context": {
         "area": "compiler / compile index authority / tests",
         "bug_class": "observability or test drift bug",
@@ -7548,7 +7548,7 @@
       "filed_at": "2026-04-23T21:45:37.820440+00:00",
       "updated_at": "2026-04-23T22:09:57.998600+00:00",
       "resolved_at": "2026-04-23T22:09:57.998600+00:00",
-      "description": "Attempting to resolve UI bugs with verifier refs npm-test-moon-build-page and npm-test-moon-build-page-dock-authority failed because those refs are missing from the verifier registry. The tests passed...",
+      "description": "Attempting to resolve UI bugs with verifier refs npm-test-canvas-build-page and npm-test-canvas-build-page-dock-authority failed because those refs are missing from the verifier registry. The tests passed...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -8095,14 +8095,14 @@
     },
     {
       "bug_id": "BUG-A6E390EA",
-      "title": "Moon canvas pan can render invalid NaN transform",
+      "title": "Canvas canvas pan can render invalid NaN transform",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
       "filed_at": "2026-04-23T21:44:24.258727+00:00",
       "updated_at": "2026-04-23T22:08:15.645934+00:00",
       "resolved_at": "2026-04-23T22:08:15.645934+00:00",
-      "description": "MoonBuildPage canvas pan assumed pointer events always carried finite client coordinates. In test/edge pointer paths this produced translate(NaNpx, NaNpx), which can corrupt the graph transform and ma...",
+      "description": "CanvasBuildPage canvas pan assumed pointer events always carried finite client coordinates. In test/edge pointer paths this produced translate(NaNpx, NaNpx), which can corrupt the graph transform and ma...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -8110,14 +8110,14 @@
     },
     {
       "bug_id": "BUG-B82F8737",
-      "title": "Moon dock authority test used stale Detail dock contract",
+      "title": "Canvas dock authority test used stale Detail dock contract",
       "status": "FIXED",
       "severity": "P3",
       "category": "TEST",
       "filed_at": "2026-04-23T21:44:24.255449+00:00",
       "updated_at": "2026-04-23T22:09:58.091803+00:00",
       "resolved_at": "2026-04-23T22:09:58.091803+00:00",
-      "description": "MoonBuildPage.dockAuthority.test still expected an Open Detail dock control and expected clicking the already-active detail/inspector dock to keep content open. The UI contract now names the dock Insp...",
+      "description": "CanvasBuildPage.dockAuthority.test still expected an Open Detail dock control and expected clicking the already-active detail/inspector dock to keep content open. The UI contract now names the dock Insp...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -8578,7 +8578,7 @@
     },
     {
       "bug_id": "BUG-6D4D0B3D",
-      "title": "MoonBuildPage interaction coverage missing for delete and canvas controls",
+      "title": "CanvasBuildPage interaction coverage missing for delete and canvas controls",
       "status": "FIXED",
       "severity": "P2",
       "category": "TEST",
@@ -8624,14 +8624,14 @@
     },
     {
       "bug_id": "BUG-9B4C9384",
-      "title": "Moon interaction lacks standard canvas navigation and deletion controls",
+      "title": "Canvas interaction lacks standard canvas navigation and deletion controls",
       "status": "FIXED",
       "severity": "P2",
       "category": "VERIFY",
       "filed_at": "2026-04-23T21:26:33.344900+00:00",
       "updated_at": "2026-04-23T22:08:15.748447+00:00",
       "resolved_at": "2026-04-23T22:08:15.748447+00:00",
-      "description": "MoonBuildPage lacks standard pointer-based pan/zoom controls in build mode and lacks a deterministic keyboard deletion flow for selected nodes/edges. This blocks basic graph navigation and destructive...",
+      "description": "CanvasBuildPage lacks standard pointer-based pan/zoom controls in build mode and lacks a deterministic keyboard deletion flow for selected nodes/edges. This blocks basic graph navigation and destructive...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -8727,14 +8727,14 @@
     },
     {
       "bug_id": "BUG-11898FCA",
-      "title": "Moon interactions lack standard zoom, pan, and delete controls",
+      "title": "Canvas interactions lack standard zoom, pan, and delete controls",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
       "filed_at": "2026-04-23T21:23:29.231038+00:00",
       "updated_at": "2026-04-23T22:11:47.926418+00:00",
       "resolved_at": "2026-04-23T22:11:47.926418+00:00",
-      "description": "Moon canvas currently supports click/dragger interactions only; there is no wheel/trackpad zoom around pointer, no drag-to-pan on empty canvas, and no delete mutation authority flow for selected node/...",
+      "description": "Canvas canvas currently supports click/dragger interactions only; there is no wheel/trackpad zoom around pointer, no drag-to-pan on empty canvas, and no delete mutation authority flow for selected node/...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -8811,7 +8811,7 @@
       "filed_at": "2026-04-23T21:18:00.728520+00:00",
       "updated_at": "2026-04-23T22:14:25.243284+00:00",
       "resolved_at": "2026-04-23T22:14:25.243284+00:00",
-      "description": "The frontend test run surfaced two real MoonBuildPage.dockAuthority failures, then continued with prolonged Vitest worker churn until manually stopped. Impact: future agents get a red test signal, but...",
+      "description": "The frontend test run surfaced two real CanvasBuildPage.dockAuthority failures, then continued with prolonged Vitest worker churn until manually stopped. Impact: future agents get a red test signal, but...",
       "resume_context": {
         "next_steps": [
           "Add a bounded/fail-fast frontend test command for agent quality gates",
@@ -8820,10 +8820,10 @@
         ],
         "related_files": [
           "Code&DBs/Workflow/surfaces/app/package.json",
-          "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.dockAuthority.test.tsx"
+          "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.dockAuthority.test.tsx"
         ],
         "observed_commands": [
-          "npm test -> MoonBuildPage.dockAuthority.test.tsx failed 2 tests",
+          "npm test -> CanvasBuildPage.dockAuthority.test.tsx failed 2 tests",
           "ps showed multiple node vitest workers still running several minutes into the run",
           "pkill -f node .*vitest was used to stop the run after useful failure signal was captured"
         ]
@@ -9179,7 +9179,7 @@
       "category": "VERIFY",
       "filed_at": "2026-04-23T21:16:27.077908+00:00",
       "updated_at": "2026-04-23T21:16:27.077908+00:00",
-      "description": "No receipts/runs were found for wave IDs ui_atlas_refinement_wave, ui_atlas_refinement_moon_run_graph_gates, ui_atlas_refinement_moon_interaction_navigation_cleanup, or ui_atlas_refinement_atlas_graph...",
+      "description": "No receipts/runs were found for wave IDs ui_atlas_refinement_wave, ui_atlas_refinement_canvas_run_graph_gates, ui_atlas_refinement_canvas_interaction_navigation_cleanup, or ui_atlas_refinement_atlas_graph...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -9268,7 +9268,7 @@
       "filed_at": "2026-04-23T21:16:17.541416+00:00",
       "updated_at": "2026-04-24T16:30:54.827754+00:00",
       "resolved_at": "2026-04-24T16:30:54.827754+00:00",
-      "description": "While preparing the Moon/Atlas UI wave, shell/surfaceRegistry.tsx still defines a top-level Cost Summary primary tab in surfaces for navigation despite spec explicitly requiring removal from primary n...",
+      "description": "While preparing the Canvas/Atlas UI wave, shell/surfaceRegistry.tsx still defines a top-level Cost Summary primary tab in surfaces for navigation despite spec explicitly requiring removal from primary n...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -9305,7 +9305,7 @@
       "category": "WIRING",
       "filed_at": "2026-04-23T21:16:12.860644+00:00",
       "updated_at": "2026-04-23T21:16:12.860644+00:00",
-      "description": "The requested Wave artifacts location artifacts/workflow/ui_atlas_refinement_wave does not exist in repo, so prescribed queue specs (01_moon_run_graph_gates, 02_moon_interaction_navigation_cleanup, 03...",
+      "description": "The requested Wave artifacts location artifacts/workflow/ui_atlas_refinement_wave does not exist in repo, so prescribed queue specs (01_canvas_run_graph_gates, 02_canvas_interaction_navigation_cleanup, 03...",
       "replay_ready": false,
       "replay_reason_code": "bug.replay_missing_run_context",
       "replay_run_id": null,
@@ -9313,28 +9313,28 @@
     },
     {
       "bug_id": "BUG-8742C732",
-      "title": "MoonBuildPage dock authority tests fail because node-popout is absent",
+      "title": "CanvasBuildPage dock authority tests fail because node-popout is absent",
       "status": "OPEN",
       "severity": "P2",
       "category": "TEST",
       "filed_at": "2026-04-23T21:09:21.027740+00:00",
       "updated_at": "2026-04-23T21:09:21.027740+00:00",
-      "description": "Frontend npm test fails in MoonBuildPage.dockAuthority.test.tsx: both dock-authority tests expect data-testid=node-popout, but the rendered MoonBuildPage tree has no node-popout element before opening...",
+      "description": "Frontend npm test fails in CanvasBuildPage.dockAuthority.test.tsx: both dock-authority tests expect data-testid=node-popout, but the rendered CanvasBuildPage tree has no node-popout element before opening...",
       "resume_context": {
         "hypothesis": "The selected-node popout contract changed or no longer renders in the test fixture, while dock authority tests still assume it exists.",
         "next_steps": [
-          "Run npm test -- MoonBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
+          "Run npm test -- CanvasBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
           "Decide whether node popout should render on selected node in this state or update the test to assert the new interaction contract",
           "Keep npm test green and bounded before treating frontend quality as release-ready"
         ],
         "related_files": [
-          "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.dockAuthority.test.tsx",
-          "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+          "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.dockAuthority.test.tsx",
+          "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx"
         ],
         "observed_commands": [
           "npm run build: passed",
-          "./scripts/test.sh moon-style-lint: ok true",
-          "npm test: MoonBuildPage.dockAuthority.test.tsx failed 2 tests; stopped after prolonged worker churn"
+          "./scripts/test.sh canvas-style-lint: ok true",
+          "npm test: CanvasBuildPage.dockAuthority.test.tsx failed 2 tests; stopped after prolonged worker churn"
         ]
       },
       "replay_ready": false,
@@ -13546,15 +13546,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.picker.apis",
-      "label": "title: moon.picker.apis",
+      "cluster_key": "bug.title_anchor:canvas.picker.apis",
+      "label": "title: canvas.picker.apis",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-9B904118"
       ],
       "titles": [
-        "Moon picker APIs hardcode provider choices outside effective catalog"
+        "Canvas picker APIs hardcode provider choices outside effective catalog"
       ],
       "status_counts": {
         "FIXED": 1
@@ -14255,15 +14255,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:persona_profiles.empty.moon",
-      "label": "title: persona_profiles.empty.moon",
+      "cluster_key": "bug.title_anchor:persona_profiles.empty.canvas",
+      "label": "title: persona_profiles.empty.canvas",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-B7A075E2"
       ],
       "titles": [
-        "persona_profiles is empty \u2014 Moon compose path has no response_contract / system_prompt to teach the LLM the build shape"
+        "persona_profiles is empty \u2014 Canvas compose path has no response_contract / system_prompt to teach the LLM the build shape"
       ],
       "status_counts": {
         "OPEN": 1
@@ -15416,15 +15416,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.suggest-next.request",
-      "label": "title: moon.suggest-next.request",
+      "cluster_key": "bug.title_anchor:canvas.suggest-next.request",
+      "label": "title: canvas.suggest-next.request",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-FC232024"
       ],
       "titles": [
-        "Moon suggest-next request times out without graceful partial-state fallback"
+        "Canvas suggest-next request times out without graceful partial-state fallback"
       ],
       "status_counts": {
         "FIXED": 1
@@ -15440,15 +15440,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.composer.turns",
-      "label": "title: moon.composer.turns",
+      "cluster_key": "bug.title_anchor:canvas.composer.turns",
+      "label": "title: canvas.composer.turns",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-99B9DC7E"
       ],
       "titles": [
-        "Moon composer turns uncertainty into human Provide nodes instead of typed gaps with fallback branches"
+        "Canvas composer turns uncertainty into human Provide nodes instead of typed gaps with fallback branches"
       ],
       "status_counts": {
         "FIXED": 1
@@ -15464,15 +15464,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.composer.emits",
-      "label": "title: moon.composer.emits",
+      "cluster_key": "bug.title_anchor:canvas.composer.emits",
+      "label": "title: canvas.composer.emits",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-C6EE740C"
       ],
       "titles": [
-        "Regression: Moon composer emits prose-shaped auto/build nodes instead of executable typed workflow units"
+        "Regression: Canvas composer emits prose-shaped auto/build nodes instead of executable typed workflow units"
       ],
       "status_counts": {
         "FIXED": 1
@@ -15488,15 +15488,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.generated.nodes",
-      "label": "title: moon.generated.nodes",
+      "cluster_key": "bug.title_anchor:canvas.generated.nodes",
+      "label": "title: canvas.generated.nodes",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-5DD67C2A"
       ],
       "titles": [
-        "Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty"
+        "Canvas generated nodes leave data dictionary, bindings, imports, and DB object contracts empty"
       ],
       "status_counts": {
         "OPEN": 1
@@ -15512,15 +15512,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.inspector.action",
-      "label": "title: moon.inspector.action",
+      "cluster_key": "bug.title_anchor:canvas.inspector.action",
+      "label": "title: canvas.inspector.action",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-EBFFD508"
       ],
       "titles": [
-        "Moon inspector and action panels hide bottom controls below viewport"
+        "Canvas inspector and action panels hide bottom controls below viewport"
       ],
       "status_counts": {
         "FIXED": 1
@@ -15536,15 +15536,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.generated.workflow",
-      "label": "title: moon.generated.workflow",
+      "cluster_key": "bug.title_anchor:canvas.generated.workflow",
+      "label": "title: canvas.generated.workflow",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-2729F8B7"
       ],
       "titles": [
-        "Moon generated workflow has no release gates or typed gate contracts"
+        "Canvas generated workflow has no release gates or typed gate contracts"
       ],
       "status_counts": {
         "OPEN": 1
@@ -15560,15 +15560,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.graph.inspector",
-      "label": "title: moon.graph.inspector",
+      "cluster_key": "bug.title_anchor:canvas.graph.inspector",
+      "label": "title: canvas.graph.inspector",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-FA546993"
       ],
       "titles": [
-        "Moon graph and inspector text overlaps or wraps into unreadable labels"
+        "Canvas graph and inspector text overlaps or wraps into unreadable labels"
       ],
       "status_counts": {
         "FIXED": 1
@@ -15920,15 +15920,15 @@
       ]
     },
     {
-      "cluster_key": "bug.title_anchor:moon.build.harden",
-      "label": "title: moon.build.harden",
+      "cluster_key": "bug.title_anchor:canvas.build.harden",
+      "label": "title: canvas.build.harden",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-84EDBF9A"
       ],
       "titles": [
-        "Moon build harden can wedge API during release preview"
+        "Canvas build harden can wedge API during release preview"
       ],
       "status_counts": {
         "FIXED": 1
@@ -15944,15 +15944,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.path.shown",
-      "label": "title: moon.path.shown",
+      "cluster_key": "bug.title_anchor:canvas.path.shown",
+      "label": "title: canvas.path.shown",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-BA265A8A"
       ],
       "titles": [
-        "Moon UI path shown with shell-escaped ampersand in bootstrap DONE and README"
+        "Canvas UI path shown with shell-escaped ampersand in bootstrap DONE and README"
       ],
       "status_counts": {
         "FIXED": 1
@@ -16088,15 +16088,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:graph-first.moon.compiled",
-      "label": "title: graph-first.moon.compiled",
+      "cluster_key": "bug.title_anchor:graph-first.canvas.compiled",
+      "label": "title: graph-first.canvas.compiled",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-F2B3E693"
       ],
       "titles": [
-        "Graph-first Moon compiled specs use unresolved auto agent routes"
+        "Graph-first Canvas compiled specs use unresolved auto agent routes"
       ],
       "status_counts": {
         "FIXED": 1
@@ -16112,15 +16112,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.edge.release",
-      "label": "title: moon.edge.release",
+      "cluster_key": "bug.title_anchor:canvas.edge.release",
+      "label": "title: canvas.edge.release",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-67CEB47D"
       ],
       "titles": [
-        "Moon edge release normalization collapses validation approval and retry gates"
+        "Canvas edge release normalization collapses validation approval and retry gates"
       ],
       "status_counts": {
         "FIXED": 1
@@ -16373,15 +16373,15 @@
       ]
     },
     {
-      "cluster_key": "bug.title_anchor:moon.harden.produces",
-      "label": "title: moon.harden.produces",
+      "cluster_key": "bug.title_anchor:canvas.harden.produces",
+      "label": "title: canvas.harden.produces",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-1A0B4E94"
       ],
       "titles": [
-        "Moon harden produces no compiled spec for manual two-node workflow and requires unrelated ap_invoice bundle"
+        "Canvas harden produces no compiled spec for manual two-node workflow and requires unrelated ap_invoice bundle"
       ],
       "status_counts": {
         "FIXED": 1
@@ -16397,15 +16397,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.trigger.picker",
-      "label": "title: moon.trigger.picker",
+      "cluster_key": "bug.title_anchor:canvas.trigger.picker",
+      "label": "title: canvas.trigger.picker",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-5861F7F9"
       ],
       "titles": [
-        "Moon trigger picker hangs while loading available triggers because catalog API does not return"
+        "Canvas trigger picker hangs while loading available triggers because catalog API does not return"
       ],
       "status_counts": {
         "OPEN": 1
@@ -16421,15 +16421,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.compose.creates",
-      "label": "title: moon.compose.creates",
+      "cluster_key": "bug.title_anchor:canvas.compose.creates",
+      "label": "title: canvas.compose.creates",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-8DADDD64"
       ],
       "titles": [
-        "Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled"
+        "Canvas compose creates local drafts with no trigger or jobs, leaving release dispatch disabled"
       ],
       "status_counts": {
         "OPEN": 1
@@ -16521,15 +16521,15 @@
       ]
     },
     {
-      "cluster_key": "bug.title_anchor:moon.dev.api",
-      "label": "title: moon.dev.api",
+      "cluster_key": "bug.title_anchor:canvas.dev.api",
+      "label": "title: canvas.dev.api",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-3CC5D3AD"
       ],
       "titles": [
-        "Moon dev API crash loop blocks compose engine handoff"
+        "Canvas dev API crash loop blocks compose engine handoff"
       ],
       "status_counts": {
         "OPEN": 1
@@ -18045,15 +18045,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.dashboard.metrics",
-      "label": "title: moon.dashboard.metrics",
+      "cluster_key": "bug.title_anchor:canvas.dashboard.metrics",
+      "label": "title: canvas.dashboard.metrics",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-B357177E"
       ],
       "titles": [
-        "Moon dashboard metrics disagree with recent run ledger"
+        "Canvas dashboard metrics disagree with recent run ledger"
       ],
       "status_counts": {
         "FIXED": 1
@@ -18069,15 +18069,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.run.now",
-      "label": "title: moon.run.now",
+      "cluster_key": "bug.title_anchor:canvas.run.now",
+      "label": "title: canvas.run.now",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-984AFD8B"
       ],
       "titles": [
-        "Moon Run now hides approved-manifest rejection"
+        "Canvas Run now hides approved-manifest rejection"
       ],
       "status_counts": {
         "FIXED": 1
@@ -18093,15 +18093,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.builder.compiles",
-      "label": "title: moon.builder.compiles",
+      "cluster_key": "bug.title_anchor:canvas.builder.compiles",
+      "label": "title: canvas.builder.compiles",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-8F7EEB0E"
       ],
       "titles": [
-        "Moon builder compiles whole prompt into malformed graph instead of progressive validated units"
+        "Canvas builder compiles whole prompt into malformed graph instead of progressive validated units"
       ],
       "status_counts": {
         "FIXED": 1
@@ -18117,15 +18117,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon/vite.dev.server",
-      "label": "title: moon/vite.dev.server",
+      "cluster_key": "bug.title_anchor:canvas/vite.dev.server",
+      "label": "title: canvas/vite.dev.server",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-15F67F63"
       ],
       "titles": [
-        "Moon/Vite dev server hangs root and crash-loops API on port conflict"
+        "Canvas/Vite dev server hangs root and crash-loops API on port conflict"
       ],
       "status_counts": {
         "FIXED": 1
@@ -18533,15 +18533,15 @@
       ]
     },
     {
-      "cluster_key": "bug.title_anchor:moon.node.state",
-      "label": "title: moon.node.state",
+      "cluster_key": "bug.title_anchor:canvas.node.state",
+      "label": "title: canvas.node.state",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-6F69A6DF"
       ],
       "titles": [
-        "Moon node state styling uses filled alarm circles as primary graph language"
+        "Canvas node state styling uses filled alarm circles as primary graph language"
       ],
       "status_counts": {
         "OPEN": 1
@@ -18733,15 +18733,15 @@
       ]
     },
     {
-      "cluster_key": "bug.title_anchor:moon.canvas.pan",
-      "label": "title: moon.canvas.pan",
+      "cluster_key": "bug.title_anchor:canvas.canvas.pan",
+      "label": "title: canvas.canvas.pan",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-A6E390EA"
       ],
       "titles": [
-        "Moon canvas pan can render invalid NaN transform"
+        "Canvas canvas pan can render invalid NaN transform"
       ],
       "status_counts": {
         "FIXED": 1
@@ -18757,15 +18757,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.dock.authority",
-      "label": "title: moon.dock.authority",
+      "cluster_key": "bug.title_anchor:canvas.dock.authority",
+      "label": "title: canvas.dock.authority",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-B82F8737"
       ],
       "titles": [
-        "Moon dock authority test used stale Detail dock contract"
+        "Canvas dock authority test used stale Detail dock contract"
       ],
       "status_counts": {
         "FIXED": 1
@@ -18960,15 +18960,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moonbuildpage.interaction.coverage",
-      "label": "title: moonbuildpage.interaction.coverage",
+      "cluster_key": "bug.title_anchor:canvasbuildpage.interaction.coverage",
+      "label": "title: canvasbuildpage.interaction.coverage",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-6D4D0B3D"
       ],
       "titles": [
-        "MoonBuildPage interaction coverage missing for delete and canvas controls"
+        "CanvasBuildPage interaction coverage missing for delete and canvas controls"
       ],
       "status_counts": {
         "FIXED": 1
@@ -18984,15 +18984,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moon.interaction.lacks",
-      "label": "title: moon.interaction.lacks",
+      "cluster_key": "bug.title_anchor:canvas.interaction.lacks",
+      "label": "title: canvas.interaction.lacks",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-9B4C9384"
       ],
       "titles": [
-        "Moon interaction lacks standard canvas navigation and deletion controls"
+        "Canvas interaction lacks standard canvas navigation and deletion controls"
       ],
       "status_counts": {
         "FIXED": 1
@@ -19090,15 +19090,15 @@
       ]
     },
     {
-      "cluster_key": "bug.title_anchor:moon.interactions.lack",
-      "label": "title: moon.interactions.lack",
+      "cluster_key": "bug.title_anchor:canvas.interactions.lack",
+      "label": "title: canvas.interactions.lack",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-11898FCA"
       ],
       "titles": [
-        "Moon interactions lack standard zoom, pan, and delete controls"
+        "Canvas interactions lack standard zoom, pan, and delete controls"
       ],
       "status_counts": {
         "FIXED": 1
@@ -19649,15 +19649,15 @@
       "next_steps": []
     },
     {
-      "cluster_key": "bug.title_anchor:moonbuildpage.dock.authority",
-      "label": "title: moonbuildpage.dock.authority",
+      "cluster_key": "bug.title_anchor:canvasbuildpage.dock.authority",
+      "label": "title: canvasbuildpage.dock.authority",
       "reason_code": "bug_cluster.title_anchor",
       "count": 1,
       "bug_ids": [
         "BUG-8742C732"
       ],
       "titles": [
-        "MoonBuildPage dock authority tests fail because node-popout is absent"
+        "CanvasBuildPage dock authority tests fail because node-popout is absent"
       ],
       "status_counts": {
         "OPEN": 1
@@ -19671,7 +19671,7 @@
       "source_issue_ids": [],
       "common_tags": [],
       "next_steps": [
-        "Run npm test -- MoonBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
+        "Run npm test -- CanvasBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
         "Decide whether node popout should render on selected node in this state or update the test to assert the new interaction contract",
         "Keep npm test green and bounded before treating frontend quality as release-ready"
       ]

@@ -31,6 +31,45 @@ def _write_spec(tmp_path: Path) -> str:
     return str(path)
 
 
+def test_cmd_active_uses_status_snapshot_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object]):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {
+            "in_flight_status_authority": "runtime.workflow.unified.get_run_status",
+            "in_flight_workflows": [
+                {
+                    "run_id": "workflow_live",
+                    "completed_jobs": 1,
+                    "status_authority": "runtime.workflow.unified.get_run_status",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(workflow_cli, "run_cli_tool", _fake_run_cli_tool)
+
+    result = workflow_cli.cmd_active(argparse.Namespace())
+
+    assert result == 0
+    assert captured == {
+        "tool_name": "praxis_status_snapshot",
+        "params": {"since_hours": 24},
+    }
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {
+            "run_id": "workflow_live",
+            "completed_jobs": 1,
+            "status_authority": "runtime.workflow.unified.get_run_status",
+        }
+    ]
+
+
 def test_cmd_run_writes_async_result_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -348,6 +387,42 @@ def test_detached_launch_failure_does_not_claim_result_file(
     assert "Result file:" not in stdout.getvalue()
     assert captured["command"][:4] == [workflow_commands.sys.executable, "-m", "surfaces.cli.main", "workflow"]
     assert captured["command"][4] == "run"
+
+
+def test_detached_launch_env_hydrates_workflow_mcp_runtime_keys_from_repo_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".env").write_text(
+        "\n".join(
+            [
+                "WORKFLOW_DATABASE_URL=postgresql://repo-env.example/praxis",
+                "PRAXIS_WORKFLOW_MCP_URL=http://mcp.local/mcp",
+                "PRAXIS_WORKFLOW_MCP_SIGNING_SECRET=test-signing-secret",
+                "OPENAI_API_KEY=must-not-be-forwarded-from-repo-env",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("PRAXIS_WORKFLOW_MCP_URL", raising=False)
+    monkeypatch.delenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        workflow_commands,
+        "workflow_database_authority_for_repo",
+        lambda _repo_root, env=None: workflow_commands.SimpleNamespace(
+            database_url="postgresql://repo-env.example/praxis",
+            source="repo_env",
+        ),
+    )
+
+    env, _source = workflow_commands._detached_launch_env(repo_root)
+
+    assert env["PRAXIS_WORKFLOW_MCP_URL"] == "http://mcp.local/mcp"
+    assert env["PRAXIS_WORKFLOW_MCP_SIGNING_SECRET"] == "test-signing-secret"
+    assert "OPENAI_API_KEY" not in env
 
 
 def test_detached_spawn_launch_reads_result_file_and_reports_authority(

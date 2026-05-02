@@ -1096,11 +1096,11 @@
       "source_bug_id": null,
       "source_idea_id": null,
       "registry_paths": [],
-      "summary": "Reframe Moon as the human control room for stateful A2A work: inspect work programs, tasks, routes, artifacts, blockers, approvals, retries, handoffs, and next actions without making the UI the source of truth.",
+      "summary": "Reframe Canvas as the human control room for stateful A2A work: inspect work programs, tasks, routes, artifacts, blockers, approvals, retries, handoffs, and next actions without making the UI the source of truth.",
       "acceptance_criteria": {
         "tier": "tier_1",
         "must_have": [
-          "Reframe Moon as the human control room for stateful A2A work: inspect work programs, tasks, routes, artifacts, blockers, approvals, retries, handoffs, and next actions without making the UI the source of truth."
+          "Reframe Canvas as the human control room for stateful A2A work: inspect work programs, tasks, routes, artifacts, blockers, approvals, retries, handoffs, and next actions without making the UI the source of truth."
         ],
         "phase_order": "1.6",
         "phase_ready": false,

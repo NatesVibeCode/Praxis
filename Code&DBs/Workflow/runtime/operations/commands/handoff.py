@@ -5,8 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
-from storage.postgres.compile_artifact_repository import PostgresCompileArtifactRepository
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
+from storage.postgres.materialize_artifact_repository import PostgresCompileArtifactRepository
 from storage.postgres.subscription_repository import PostgresSubscriptionRepository
 
 
@@ -25,10 +25,10 @@ def _pg_conn(subsystems: Any) -> Any:
 
 
 def _payload_input_fingerprint(payload: dict[str, Any]) -> str | None:
-    compile_provenance = payload.get("compile_provenance")
-    if not isinstance(compile_provenance, dict):
+    materialize_provenance = payload.get("materialize_provenance")
+    if not isinstance(materialize_provenance, dict):
         return None
-    candidate = compile_provenance.get("input_fingerprint")
+    candidate = materialize_provenance.get("input_fingerprint")
     if isinstance(candidate, str) and candidate.strip():
         return candidate.strip()
     return None
@@ -40,7 +40,7 @@ def _record_payload(record: Any) -> dict[str, Any]:
 
 def _selected_artifact_record(
     *,
-    store: CompileArtifactStore,
+    store: MaterializeArtifactStore,
     repository: Any | None = None,
     artifact_kind: str,
     revision_ref: str | None,
@@ -52,7 +52,7 @@ def _selected_artifact_record(
                 artifact_kind=artifact_kind,
                 input_fingerprint=input_fingerprint,
             )
-        except CompileArtifactError as exc:
+        except MaterializeArtifactError as exc:
             raise HandoffCommandError(str(exc)) from exc
         if reusable is None:
             raise HandoffCommandError(
@@ -113,7 +113,7 @@ def handle_publish_handoff_artifact(
     subsystems: Any,
 ) -> dict[str, Any]:
     conn = _pg_conn(subsystems)
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     normalized_input_fingerprint = command.input_fingerprint or _payload_input_fingerprint(
         command.payload,
     )
@@ -124,7 +124,7 @@ def handle_publish_handoff_artifact(
                 artifact_kind=command.artifact_kind,
                 input_fingerprint=normalized_input_fingerprint,
             )
-        except CompileArtifactError as exc:
+        except MaterializeArtifactError as exc:
             raise HandoffCommandError(str(exc)) from exc
         if reusable is not None:
             return {"artifact": _record_payload(reusable), "reused": True}
@@ -157,7 +157,7 @@ def handle_publish_handoff_artifact(
             raise HandoffCommandError(
                 "artifact_kind must be one of: definition, plan, packet_lineage",
             )
-    except CompileArtifactError as exc:
+    except MaterializeArtifactError as exc:
         raise HandoffCommandError(str(exc)) from exc
 
     return {"artifact": _record_payload(record), "reused": False}
@@ -168,7 +168,7 @@ def handle_bind_handoff_artifact(
     subsystems: Any,
 ) -> dict[str, Any]:
     conn = _pg_conn(subsystems)
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     normalized_input_fingerprint = command.input_fingerprint or _payload_input_fingerprint(
         command.packet,
     )
@@ -178,7 +178,7 @@ def handle_bind_handoff_artifact(
                 artifact_kind="packet_lineage",
                 input_fingerprint=normalized_input_fingerprint,
             )
-        except CompileArtifactError as exc:
+        except MaterializeArtifactError as exc:
             raise HandoffCommandError(str(exc)) from exc
         if reusable is not None:
             return {"artifact": _record_payload(reusable), "reused": True}
@@ -191,7 +191,7 @@ def handle_bind_handoff_artifact(
             parent_artifact_ref=command.parent_artifact_ref,
             input_fingerprint=normalized_input_fingerprint,
         )
-    except CompileArtifactError as exc:
+    except MaterializeArtifactError as exc:
         raise HandoffCommandError(str(exc)) from exc
 
     return {"artifact": _record_payload(record), "reused": False}
@@ -202,7 +202,7 @@ def handle_consume_handoff_artifact(
     subsystems: Any,
 ) -> dict[str, Any]:
     conn = _pg_conn(subsystems)
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     subscription_repository = PostgresSubscriptionRepository(conn)
     artifact_repository = PostgresCompileArtifactRepository(conn)
 

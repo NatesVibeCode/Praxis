@@ -37,7 +37,7 @@ from registry.repository import (
     bootstrap_registry_authority_schema,
     load_registry_resolver,
 )
-from runtime.context_compiler import (
+from runtime.context_materializer import (
     ContextAuthorityRecord,
     ContextCompilationError,
     ContextCompiler,

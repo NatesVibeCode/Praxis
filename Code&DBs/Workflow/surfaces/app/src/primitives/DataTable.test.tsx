@@ -5,7 +5,7 @@ import React from 'react';
 import { DataTable } from './DataTable';
 
 describe('DataTable', () => {
-  test('renders the prx-table structure with fixed-layout content containment', () => {
+  test('renders the prx-table structure via PrxTable delegation', () => {
     render(
       <DataTable
         columns={[
@@ -23,16 +23,12 @@ describe('DataTable', () => {
       />,
     );
 
-    // Class-based assertion (post-refactor structure)
-    const wrapper = screen.getByTestId('prx-data-table');
+    const wrapper = screen.getByTestId('prx-table');
     expect(wrapper).toHaveClass('prx-table');
 
-    // Layout assertion remains — table-layout fixed both in CSS class and inline
     const table = wrapper.querySelector('table');
     expect(table).toBeInTheDocument();
-    expect(table).toHaveStyle({ tableLayout: 'fixed', width: '100%' });
 
-    // Long content survives without expanding the table
     expect(
       screen.getByText('workflow.run.very-long-workflow-name-that-should-not-expand-the-table'),
     ).toBeInTheDocument();

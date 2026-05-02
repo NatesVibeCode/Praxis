@@ -356,7 +356,7 @@ def test_emit_typed_gaps_for_verification_gaps_skips_non_dict_entries():
 
 def test_emit_typed_gaps_for_compile_errors_unresolved_source_ref():
     import json
-    from runtime.spec_compiler import UnresolvedSourceRefError
+    from runtime.spec_materializer import UnresolvedSourceRefError
     from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
 
     conn = _RecordingConn()
@@ -372,7 +372,7 @@ def test_emit_typed_gaps_for_compile_errors_unresolved_source_ref():
 
 def test_emit_typed_gaps_for_compile_errors_unresolved_stage():
     import json
-    from runtime.spec_compiler import UnresolvedStageError
+    from runtime.spec_materializer import UnresolvedStageError
     from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
 
     conn = _RecordingConn()
@@ -394,7 +394,7 @@ def test_emit_typed_gaps_for_compile_errors_unresolved_stage():
 
 def test_emit_typed_gaps_for_compile_errors_unresolved_write_scope():
     import json
-    from runtime.spec_compiler import UnresolvedWriteScopeError
+    from runtime.spec_materializer import UnresolvedWriteScopeError
     from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
 
     conn = _RecordingConn()
@@ -422,7 +422,7 @@ def test_emit_typed_gaps_for_compile_errors_unknown_error_type_returns_zero():
 
 
 def test_emit_typed_gaps_for_compile_errors_empty_entries_returns_zero():
-    from runtime.spec_compiler import UnresolvedStageError
+    from runtime.spec_materializer import UnresolvedStageError
     from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
 
     conn = _RecordingConn()

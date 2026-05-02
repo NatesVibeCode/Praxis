@@ -50,8 +50,8 @@ function planForDetail(detail: PraxisOpenTabDetail): OpenTabPlan | null {
           buildWorkflowId: workflowId,
           buildIntent: intent,
           builderSeed: null,
-          buildView: 'moon',
-          moonRunId: null,
+          buildView: 'canvas',
+          canvasRunId: null,
           dashboardDetail: null,
         },
       };
@@ -64,8 +64,8 @@ function planForDetail(detail: PraxisOpenTabDetail): OpenTabPlan | null {
         slotValues: { run_id: runId },
         shellStateDiff: {
           activeTabId: 'build',
-          buildView: 'moon',
-          moonRunId: runId,
+          buildView: 'canvas',
+          canvasRunId: runId,
           dashboardDetail: null,
         },
       };

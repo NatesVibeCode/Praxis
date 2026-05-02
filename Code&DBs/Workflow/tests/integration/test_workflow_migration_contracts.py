@@ -145,10 +145,37 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "375_cleanup_invalid_task_type_routing_transports.sql" in filenames
     assert "376_portable_cartridge_authority.sql" in filenames
     assert "377_register_chat_routing_options_query.sql" in filenames
+    assert "379_register_chat_turn_execute_command.sql" in filenames
+    assert "380_register_chat_template_ask_all_command.sql" in filenames
+    assert "381_register_chat_template_review_command.sql" in filenames
     assert "382_managed_runtime_authority.sql" in filenames
     assert "383_action_fingerprint_authority.sql" in filenames
     assert "384_chat_picker_full_model_coverage.sql" in filenames
-    assert filenames[-1] == "384_chat_picker_full_model_coverage.sql"
+    assert "385_action_fingerprint_view_refinement.sql" in filenames
+    assert "386_workflow_context_authority.sql" in filenames
+    assert "387_synthetic_data_authority.sql" in filenames
+    assert "388_synthetic_environment_authority.sql" in filenames
+    assert "389_tool_opportunities_view_pin.sql" in filenames
+    assert "390_register_action_fingerprint_record_operation.sql" in filenames
+    assert "391_register_model_eval_operations.sql" in filenames
+    assert "392_model_eval_case_runs_and_scorecards.sql" in filenames
+    assert "393_register_model_eval_benchmark_ingest.sql" in filenames
+    assert "394_execution_target_authority.sql" in filenames
+    assert "395_compile_decision_authority.sql" in filenames
+    assert "396_materialize_decision_authority.sql" in filenames
+    assert "398_agent_principal_authority.sql" in filenames
+    assert "399_paid_model_access_leases.sql" in filenames
+    assert "400_register_integration_register_operation.sql" in filenames
+    assert "401_materialize_operation_renames.sql" in filenames
+    assert "402_register_paid_model_access_operation.sql" in filenames
+    assert "403_materialize_table_renames.sql" in filenames
+    assert "404_materialize_event_type_renames.sql" in filenames
+    assert "405_materialize_remaining_compile_remnants.sql" in filenames
+    assert "406_data_dictionary_lineage_capability_edge_kinds.sql" in filenames
+    assert "407_rename_agent_principals_to_agent_registry.sql" in filenames
+    assert "408_register_workflow_solution_operations.sql" in filenames
+    assert "409_agent_wake_dedup_event_id.sql" in filenames
+    assert filenames[-1] == "421_agent_builder_authority.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -180,8 +207,8 @@ def test_together_compile_primary_declares_full_control_plane_authority() -> Non
     assert "provider_model_candidates.candidate.together.deepseek-v3.2" in names
     assert "runtime_profile_admitted_routes.candidate.together.deepseek-v4-pro" in names
     assert "runtime_profile_admitted_routes.candidate.together.deepseek-v3.2" in names
-    assert "task_type_routing.compile|together|deepseek-ai/DeepSeek-V4-Pro" in names
-    assert "task_type_routing.compile|together|deepseek-ai/DeepSeek-V3.2" in names
+    assert "task_type_routing.materialize|together|deepseek-ai/DeepSeek-V4-Pro" in names
+    assert "task_type_routing.materialize|together|deepseek-ai/DeepSeek-V3.2" in names
     assert "authority_projection_state.projection.private_provider_job_catalog" in names
     assert "authority_projection_state.projection.private_provider_control_plane_snapshot" in names
 
@@ -392,15 +419,51 @@ def test_action_fingerprint_authority_is_registered() -> None:
     assert "CREATE VIEW tool_opportunities_pending" in sql_text
 
 
-def test_chat_picker_full_model_coverage_is_classified_as_data_only() -> None:
-    assert workflow_migration_expected_objects(
+def test_chat_picker_full_model_coverage_records_schema_migration_receipt() -> None:
+    objects = workflow_migration_expected_objects(
         "384_chat_picker_full_model_coverage.sql"
-    ) == ()
+    )
+    assert len(objects) == 1
+    assert objects[0].object_type == "row"
+    names = {item.object_name for item in objects}
+    assert "schema_migrations.384_chat_picker_full_model_coverage.sql" in names
     sql_text = workflow_migration_sql_text(
         "384_chat_picker_full_model_coverage.sql"
     )
     assert "INSERT INTO task_type_routing" in sql_text
     assert "task_type <> 'chat'" in sql_text
+
+
+def test_compile_decision_authority_is_historical_absent_row_record() -> None:
+    objects = workflow_migration_expected_objects(
+        "395_compile_decision_authority.sql"
+    )
+    assert {item.object_type for item in objects} == {"absent_row"}
+    names = {item.object_name for item in objects}
+    assert "data_dictionary_objects.compile.decision.stage_resolution" in names
+    assert "data_dictionary_objects.compile.decision.write_scope_resolution" in names
+    assert "data_dictionary_objects.compile.decision.source_ref_resolution" in names
+    assert "data_dictionary_objects.compile.decision.agent_selection" in names
+    assert "data_dictionary_objects.compile.decision.data_pill_binding" in names
+    assert "data_dictionary_objects.compile.decision.capability_binding" in names
+    assert "data_dictionary_objects.compile.decision.verification_admission" in names
+    assert "data_dictionary_objects.compile.review.packet_decision_record" in names
+
+
+def test_materialize_decision_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "396_materialize_decision_authority.sql"
+    )
+    assert {item.object_type for item in objects} == {"row"}
+    names = {item.object_name for item in objects}
+    assert "data_dictionary_objects.materialize.decision.stage_resolution" in names
+    assert "data_dictionary_objects.materialize.decision.write_scope_resolution" in names
+    assert "data_dictionary_objects.materialize.decision.source_ref_resolution" in names
+    assert "data_dictionary_objects.materialize.decision.agent_selection" in names
+    assert "data_dictionary_objects.materialize.decision.data_pill_binding" in names
+    assert "data_dictionary_objects.materialize.decision.capability_binding" in names
+    assert "data_dictionary_objects.materialize.decision.verification_admission" in names
+    assert "data_dictionary_objects.materialize.review.packet_decision_record" in names
 
 
 def test_task_type_routing_transport_cleanup_is_classified() -> None:
@@ -823,7 +886,7 @@ def test_verification_registry_expected_objects_are_registered() -> None:
 def test_compile_spine_authority_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("057_compile_spine_authority.sql")
     names = {item.object_name for item in objects}
-    assert "compile_artifacts" in names
+    assert "materialize_artifacts" in names
     assert "capability_catalog" in names
     assert "verify_refs" in names
     assert "compile_artifacts_kind_revision_idx" in names
@@ -910,7 +973,7 @@ def test_verifier_healer_authority_expected_objects_are_registered() -> None:
 def test_compile_index_snapshots_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("069_compile_index_snapshots.sql")
     names = {item.object_name for item in objects}
-    assert "compile_index_snapshots" in names
+    assert "materialize_index_snapshots" in names
     assert "compile_index_snapshots_surface_name_refreshed_idx" in names
     assert "compile_index_snapshots_surface_name_revision_idx" in names
     assert "compile_index_snapshots_repo_fingerprint_idx" in names

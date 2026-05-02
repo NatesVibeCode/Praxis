@@ -34,9 +34,7 @@ from registry.domain import RuntimeProfile
 from registry.endpoint_failover import (
     ProviderEndpointAuthoritySelector,
     ProviderEndpointBindingAuthorityRecord,
-    ProviderFailoverAndEndpointAuthority,
     ProviderFailoverAndEndpointAuthorityRepositoryError,
-    ProviderFailoverAuthoritySelector,
     ProviderFailoverBindingAuthorityRecord,
     load_provider_failover_and_endpoint_authority,
 )
@@ -60,11 +58,6 @@ from runtime.scheduler_window_repository import (
 )
 
 
-TSourceWindowRecord = TypeVar(
-    "TSourceWindowRecord",
-    ProviderRouteHealthWindowAuthorityRecord,
-    ProviderBudgetWindowAuthorityRecord,
-)
 TAuthoritySliceRecord = TypeVar(
     "TAuthoritySliceRecord",
     ProviderFailoverBindingAuthorityRecord,
@@ -583,33 +576,6 @@ class DefaultPathPilotResolution:
         }
 
 
-def _matching_source_windows(
-    records: tuple[TSourceWindowRecord, ...],
-    *,
-    source_window_refs: tuple[str, ...],
-    record_id_field: str,
-) -> tuple[TSourceWindowRecord, ...]:
-    source_window_ref_set = set(source_window_refs)
-    return tuple(
-        record
-        for record in records
-        if getattr(record, record_id_field) in source_window_ref_set
-    )
-
-
-def _default_failover_selector(
-    *,
-    request: DefaultPathPilotRequest,
-    as_of: datetime,
-) -> ProviderFailoverAuthoritySelector:
-    return ProviderFailoverAuthoritySelector(
-        model_profile_id=request.model_profile_id,
-        provider_policy_id=request.provider_policy_id,
-        binding_scope=_DEFAULT_PATH_PILOT_BINDING_SCOPE,
-        as_of=as_of,
-    )
-
-
 def _default_endpoint_selector(
     *,
     request: DefaultPathPilotRequest,
@@ -776,7 +742,6 @@ def _translate_failover_and_endpoint_authority_failure(
 
 def _resolve_route_decision(
     *,
-    control_tower: ProviderRouteAuthority,
     runtime_resolution: ProviderRouteRuntimeResolution,
     request: DefaultPathPilotRequest,
     authoritative_candidate_ref: str,
@@ -809,15 +774,7 @@ def _resolve_route_decision(
             },
         )
 
-    candidate_health_windows = control_tower.provider_route_health_windows.get(
-        runtime_resolution.selected_candidate_ref,
-        (),
-    )
-    matching_health_windows = _matching_source_windows(
-        candidate_health_windows,
-        source_window_refs=route_eligibility_state.source_window_refs,
-        record_id_field="provider_route_health_window_id",
-    )
+    matching_health_windows = runtime_resolution.source_provider_route_health_windows
     if not matching_health_windows:
         raise _fail(
             "default_path_pilot.health_window_missing",
@@ -841,15 +798,7 @@ def _resolve_route_decision(
             },
         )
 
-    provider_budget_windows = control_tower.provider_budget_windows.get(
-        request.provider_policy_id,
-        (),
-    )
-    matching_budget_windows = _matching_source_windows(
-        provider_budget_windows,
-        source_window_refs=route_eligibility_state.source_window_refs,
-        record_id_field="provider_budget_window_id",
-    )
+    matching_budget_windows = runtime_resolution.source_provider_budget_windows
     if not matching_budget_windows:
         raise _fail(
             "default_path_pilot.budget_window_missing",
@@ -906,43 +855,30 @@ def _resolve_route_decision(
     )
 
 
-def _resolve_failover_decision(
+def _failover_decision_from_route_runtime(
     *,
-    authority: ProviderFailoverAndEndpointAuthority,
+    runtime_resolution: ProviderRouteRuntimeResolution,
     request: DefaultPathPilotRequest,
     as_of: datetime,
 ) -> DefaultPathPilotFailoverDecision:
-    failover_selector = _default_failover_selector(request=request, as_of=as_of)
-    failover_bindings = authority.resolve_provider_failover_bindings(
-        selector=failover_selector
-    )
-    selected_position_index = failover_bindings[0].position_index
-    selected_failover_bindings = tuple(
-        binding
-        for binding in failover_bindings
-        if binding.position_index == selected_position_index
-    )
-    if len(selected_failover_bindings) != 1:
+    failover_bindings = runtime_resolution.provider_failover_bindings
+    selected_failover_binding = runtime_resolution.selected_provider_failover_binding
+    if not failover_bindings or selected_failover_binding is None:
         raise _fail(
-            "default_path_pilot.failover_selected_candidate_ambiguous",
-            "active failover slice did not resolve one authoritative adopted candidate",
+            "default_path_pilot.failover_slice_missing",
+            "provider-route runtime did not return an active failover slice for the bounded default path",
             details={
                 "model_profile_id": request.model_profile_id,
                 "provider_policy_id": request.provider_policy_id,
                 "binding_scope": _DEFAULT_PATH_PILOT_BINDING_SCOPE,
                 "as_of": as_of.isoformat(),
-                "selected_position_index": selected_position_index,
-                "provider_failover_binding_ids": ",".join(
-                    binding.provider_failover_binding_id
-                    for binding in selected_failover_bindings
-                ),
+                "route_decision_id": runtime_resolution.route_decision_id,
             },
         )
-    selected_failover_binding = selected_failover_bindings[0]
     if request.candidate_ref != selected_failover_binding.candidate_ref:
         raise _fail(
             "default_path_pilot.request_candidate_mismatch",
-            "bounded default-path request named a different candidate than the active failover authority slice",
+            "bounded default-path request named a different candidate than the route-runtime failover authority slice",
             details={
                 "model_profile_id": request.model_profile_id,
                 "provider_policy_id": request.provider_policy_id,
@@ -1083,26 +1019,32 @@ async def resolve_default_path_pilot(
     normalized_request = request.normalized()
     normalized_as_of = _normalize_as_of(as_of)
     runtime_profile = _pilot_runtime_profile(normalized_request)
-    failover_selector = _default_failover_selector(
-        request=normalized_request,
-        as_of=normalized_as_of,
-    )
 
     async with conn.transaction():
         try:
-            failover_authority = await load_provider_failover_and_endpoint_authority(
+            route_runtime_resolution = await resolve_provider_route_runtime(
                 conn,
-                failover_selectors=(failover_selector,),
+                runtime_profile=runtime_profile,
+                as_of=normalized_as_of,
+                preferred_candidate_ref=normalized_request.candidate_ref,
+                failover_binding_scope=_DEFAULT_PATH_PILOT_BINDING_SCOPE,
             )
-        except ProviderFailoverAndEndpointAuthorityRepositoryError as exc:
-            raise _translate_failover_and_endpoint_authority_failure(
+        except ProviderRouteRuntimeError as exc:
+            control_tower = await load_provider_route_authority(
+                conn,
+                model_profile_ids=(normalized_request.model_profile_id,),
+                provider_policy_ids=(normalized_request.provider_policy_id,),
+                candidate_refs=(normalized_request.candidate_ref,),
+            )
+            raise _translate_route_runtime_failure(
+                control_tower=control_tower,
                 request=normalized_request,
                 candidate_ref=normalized_request.candidate_ref,
                 as_of=normalized_as_of,
                 error=exc,
             ) from exc
-        failover = _resolve_failover_decision(
-            authority=failover_authority,
+        failover = _failover_decision_from_route_runtime(
+            runtime_resolution=route_runtime_resolution,
             request=normalized_request,
             as_of=normalized_as_of,
         )
@@ -1130,29 +1072,7 @@ async def resolve_default_path_pilot(
             failover=failover,
             as_of=normalized_as_of,
         )
-        control_tower = await load_provider_route_authority(
-            conn,
-            model_profile_ids=(normalized_request.model_profile_id,),
-            provider_policy_ids=(normalized_request.provider_policy_id,),
-            candidate_refs=(failover.selected_candidate_ref,),
-        )
-        try:
-            route_runtime_resolution = await resolve_provider_route_runtime(
-                conn,
-                runtime_profile=runtime_profile,
-                as_of=normalized_as_of,
-                preferred_candidate_ref=failover.selected_candidate_ref,
-            )
-        except ProviderRouteRuntimeError as exc:
-            raise _translate_route_runtime_failure(
-                control_tower=control_tower,
-                request=normalized_request,
-                candidate_ref=failover.selected_candidate_ref,
-                as_of=normalized_as_of,
-                error=exc,
-            ) from exc
         route = _resolve_route_decision(
-            control_tower=control_tower,
             runtime_resolution=route_runtime_resolution,
             request=normalized_request,
             authoritative_candidate_ref=failover.selected_candidate_ref,

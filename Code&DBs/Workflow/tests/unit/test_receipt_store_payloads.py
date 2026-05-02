@@ -482,13 +482,13 @@ class _ProofMetricsConn:
                 "produced_edges": 6,
                 "related_edges": 2,
             }
-        if normalized.startswith("SELECT to_regclass('public.compile_artifacts') IS NOT NULL AS compile_artifacts_ready"):
+        if normalized.startswith("SELECT to_regclass('public.materialize_artifacts') IS NOT NULL AS materialize_artifacts_ready"):
             return {
-                "compile_artifacts_ready": True,
+                "materialize_artifacts_ready": True,
                 "capability_catalog_ready": True,
                 "verify_refs_ready": True,
                 "verification_registry_ready": True,
-                "compile_index_snapshots_ready": True,
+                "materialize_index_snapshots_ready": True,
                 "execution_packets_ready": True,
                 "repo_snapshots_ready": True,
                 "verifier_registry_ready": True,
@@ -533,6 +533,8 @@ def test_proof_metrics_reports_verification_tiers() -> None:
     assert receipts["path_backed_verification_coverage"] == 0.3
     assert receipts["fully_proved_verification_coverage"] == 0.2
     assert receipts["repo_snapshot_ref_coverage"] == 0.8
+    assert metrics["compile_authority"]["materialize_artifacts_ready"] is True
+    assert metrics["compile_authority"]["materialize_index_snapshots_ready"] is True
     assert metrics["compile_authority"]["verification_registry_ready"] is True
     assert metrics["recovery_authority"]["authority_ready"] is True
     assert metrics["recovery_authority"]["verifiers"] == 5

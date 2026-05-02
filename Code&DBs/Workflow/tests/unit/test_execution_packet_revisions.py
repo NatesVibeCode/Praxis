@@ -2,7 +2,7 @@
 
 BUG-D384AB69: queue-spec and chain-submitted runs don't carry
 ``definition_revision`` / ``plan_revision`` in the raw snapshot (those are
-graph-runtime fields populated by spec_compiler). Before the fix,
+graph-runtime fields populated by spec_materializer). Before the fix,
 _build_execution_packet warned and returned None for every non-graph run,
 silently dropping execution-packet rows. The fix synthesizes deterministic
 fallbacks from the spec itself, preserving diagnostic context while still

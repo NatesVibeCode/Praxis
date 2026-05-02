@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `437`.
+Public route count: `8`. All route count: `464`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -40,6 +40,16 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/access_control` | `internal` | `operations` | access_control |
 | `POST` | `/api/action_fingerprint_record` | `internal` | `operations` | action_fingerprint_record |
 | `GET` | `/api/agent-sessions` | `internal` | - | agent_sessions_index_get |
+| `GET` | `/api/agent/forge` | `internal` | `operations` | agent.query.forge |
+| `POST` | `/api/agent_delegations` | `internal` | `operations` | agent.delegate |
+| `GET` | `/api/agent_principals` | `internal` | `operations` | agent_principal.list |
+| `GET` | `/api/agent_principals/describe` | `internal` | `operations` | agent_principal.describe |
+| `POST` | `/api/agent_principals/register` | `internal` | `operations` | agent_principal.register |
+| `POST` | `/api/agent_principals/status` | `internal` | `operations` | agent_principal.update_status |
+| `GET` | `/api/agent_tool_gaps` | `internal` | `operations` | agent_tool_gap.list |
+| `POST` | `/api/agent_tool_gaps/file` | `internal` | `operations` | agent_tool_gap.file |
+| `GET` | `/api/agent_wakes` | `internal` | `operations` | agent_wake.list |
+| `POST` | `/api/agent_wakes/request` | `internal` | `operations` | agent_wake.request |
 | `GET` | `/api/atlas.html` | `internal` | - | Send legacy Atlas artifact traffic to the live Atlas surface. |
 | `GET` | `/api/atlas/graph` | `internal` | - | Return the canonical Atlas graph payload for native app rendering. |
 | `GET` | `/api/atlas/graph/stream` | `internal` | - | Stream Atlas-relevant committed workflow evidence from the DB outbox. |
@@ -69,7 +79,6 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/bug_resolve` | `internal` | `operations` | bug_resolve |
 | `GET` | `/api/bugs` | `internal` | - | bugs_get |
 | `GET` | `/api/bugs/replay-ready` | `internal` | - | bugs_replay_ready_get |
-| `POST` | `/api/candidate_identity_phase_b` | `internal` | `operations` | candidate_identity_phase_b |
 | `GET` | `/api/catalog` | `internal` | - | Return live catalog items from platform registries + static primitives. |
 | `GET` | `/api/catalog/operations` | `internal` | - | Return DB-backed CQRS operation definitions and source policies. |
 | `GET` | `/api/catalog/review-decisions` | `internal` | - | catalog_review_decisions_get |
@@ -93,8 +102,6 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/code_change_candidate_materialize` | `internal` | `operations` | code_change_candidate.materialize |
 | `POST` | `/api/code_change_candidate_review` | `internal` | `operations` | code_change_candidate.review |
 | `POST` | `/api/code_change_candidate_submit` | `internal` | `operations` | code_change_candidate.submit |
-| `POST` | `/api/compile/materialize` | `internal` | `operations` | compile_materialize |
-| `POST` | `/api/compile/preview` | `internal` | `operations` | compile_preview |
 | `POST` | `/api/compile_materialize` | `internal` | - | Structured deprecation for the retired underscore compile route. |
 | `POST` | `/api/compliance.list_receipts` | `internal` | `operations` | compliance.list_receipts |
 | `POST` | `/api/compose_experiment` | `internal` | `operations` | compose_experiment |
@@ -155,6 +162,10 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/documents` | `internal` | - | documents_post |
 | `POST` | `/api/documents/{doc_id}/attach` | `internal` | - | documents_attach_post |
 | `GET` | `/api/events` | `internal` | - | Return recent platform events from the durable event log. |
+| `POST` | `/api/execution/dispatch-choice` | `internal` | `operations` | execution.dispatch_choice.commit |
+| `GET` | `/api/execution/dispatch-options` | `internal` | `operations` | execution.dispatch_options.list |
+| `GET` | `/api/execution/targets` | `internal` | `operations` | execution.targets.list |
+| `GET` | `/api/execution/targets/resolve` | `internal` | `operations` | execution.targets.resolve |
 | `POST` | `/api/experiment_promote_winner` | `internal` | `operations` | experiment_promote_winner |
 | `GET` | `/api/feedback/events` | `internal` | `operations` | feedback.list |
 | `POST` | `/api/feedback/events` | `internal` | `operations` | feedback.record |
@@ -168,6 +179,10 @@ Public route count: `8`. All route count: `437`.
 | `GET` | `/api/handoff/latest` | `internal` | - | handoff_latest_get |
 | `GET` | `/api/handoff/lineage` | `internal` | - | handoff_lineage_get |
 | `GET` | `/api/handoff/status` | `internal` | - | handoff_status_get |
+| `GET` | `/api/healer_catalog_list` | `internal` | `operations` | healer.catalog.list |
+| `POST` | `/api/healer_register` | `internal` | `operations` | healer.register |
+| `POST` | `/api/healer_run` | `internal` | `operations` | healer.run |
+| `GET` | `/api/healer_runs_list` | `internal` | `operations` | healer.runs.list |
 | `GET` | `/api/health` | `internal` | - | Platform health from bounded Postgres probes. |
 | `GET` | `/api/integration-action/contracts` | `internal` | `operations` | integration_action_contract_read |
 | `POST` | `/api/integration-action/contracts` | `internal` | `operations` | integration_action_contract_record |
@@ -193,21 +208,25 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/manifests/save-as` | `internal` | - | manifests_save_as_post |
 | `GET` | `/api/manifests/{manifest_id}` | `internal` | - | manifests_get |
 | `POST` | `/api/match_rules.backfill` | `internal` | `operations` | match_rules.backfill |
+| `POST` | `/api/materialize/commit` | `internal` | `operations` | materialize_commit |
+| `POST` | `/api/materialize/preview` | `internal` | `operations` | materialize_preview |
 | `GET` | `/api/metrics` | `internal` | - | Return the core metrics summary for the last N days. |
 | `GET` | `/api/metrics/heatmap` | `internal` | - | Return the failure code x provider heatmap for the last N days. |
 | `GET` | `/api/metrics/surface-usage` | `internal` | - | Return durable frontdoor surface-usage counters for the last N days. |
+| `POST` | `/api/model_eval_benchmark_ingest` | `internal` | `operations` | model_eval_benchmark_ingest |
 | `GET` | `/api/model_eval_compare` | `internal` | `operations` | model_eval_compare |
 | `GET` | `/api/model_eval_export` | `internal` | `operations` | model_eval_export |
 | `GET` | `/api/model_eval_inspect` | `internal` | `operations` | model_eval_inspect |
 | `GET` | `/api/model_eval_plan` | `internal` | `operations` | model_eval_plan |
 | `POST` | `/api/model_eval_promote_proposal` | `internal` | `operations` | model_eval_promote_proposal |
+| `POST` | `/api/model_eval_run_case` | `internal` | `operations` | model_eval_run_case |
 | `POST` | `/api/model_eval_run_matrix` | `internal` | `operations` | model_eval_run_matrix |
 | `GET` | `/api/models` | `internal` | - | models_get |
 | `GET` | `/api/models/market` | `internal` | - | models_market_get |
 | `POST` | `/api/models/run` | `internal` | - | models_run_post |
 | `GET` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_get |
 | `POST` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_post |
-| `GET` | `/api/moon/pickers/{rest_of_path:path}` | `internal` | - | moon_pickers_get |
+| `GET` | `/api/canvas/pickers/{rest_of_path:path}` | `internal` | - | canvas_pickers_get |
 | `GET` | `/api/object-truth/compare-versions` | `internal` | `operations` | object_truth_compare_versions |
 | `GET` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_read |
 | `POST` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_record |
@@ -292,6 +311,7 @@ Public route count: `8`. All route count: `437`.
 | `GET` | `/api/operator/ui/experience-graph` | `internal` | `operations` | operator.ui_experience_graph |
 | `GET` | `/api/operator/work-assignment-matrix` | `internal` | `operations` | operator.work_assignment_matrix |
 | `POST` | `/api/operator/work-item-closeout` | `internal` | `operations` | operator.work_item_closeout |
+| `POST` | `/api/operator_paid_model_access` | `internal` | `operations` | operator.paid_model_access |
 | `POST` | `/api/operator_patterns` | `internal` | `operations` | operator_patterns |
 | `GET` | `/api/operator_repo_policy_contract_current` | `internal` | `operations` | operator.repo_policy_contract_current |
 | `GET` | `/api/operator_repo_policy_submission_acceptance` | `internal` | `operations` | operator.repo_policy_submission_acceptance |
@@ -382,6 +402,9 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/typed_gap/emit` | `internal` | `operations` | typed_gap.emit |
 | `POST` | `/api/ui/telemetry` | `internal` | - | Append a frontend prx-* primitive event to the UI telemetry log. |
 | `GET` | `/api/ui/telemetry/recent` | `internal` | - | Return the last N rows from the UI telemetry log for inspection. |
+| `POST` | `/api/verifier_register` | `internal` | `operations` | verifier.register |
+| `POST` | `/api/verifier_run` | `internal` | `operations` | verifier.run |
+| `GET` | `/api/verifier_runs_list` | `internal` | `operations` | verifier.runs.list |
 | `GET` | `/api/verifiers` | `internal` | `operations` | verifier.catalog.list |
 | `GET` | `/api/virtual-lab/sandbox-promotions` | `internal` | `operations` | virtual_lab_sandbox_promotion_read |
 | `POST` | `/api/virtual-lab/sandbox-promotions` | `internal` | `operations` | virtual_lab_sandbox_promotion_record |
@@ -393,8 +416,8 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/webhooks/{slug}` | `internal` | `webhooks` | Receive an incoming webhook, validate signature, store event. |
 | `GET` | `/api/workflow-context` | `internal` | `operations` | workflow_context_read |
 | `POST` | `/api/workflow-context/bind` | `internal` | `operations` | workflow_context_bind |
-| `POST` | `/api/workflow-context/compile` | `internal` | `operations` | workflow_context_compile |
 | `GET` | `/api/workflow-context/guardrails` | `internal` | `operations` | workflow_context_guardrail_check |
+| `POST` | `/api/workflow-context/materialize` | `internal` | `operations` | workflow_context_materialize |
 | `POST` | `/api/workflow-context/transition` | `internal` | `operations` | workflow_context_transition |
 | `POST` | `/api/workflow-job` | `internal` | - | workflow_job_post |
 | `POST` | `/api/workflow-runs` | `internal` | - | workflow_runs_handler_post |
@@ -410,6 +433,10 @@ Public route count: `8`. All route count: `437`.
 | `POST` | `/api/workflow_build_get` | `internal` | `operations` | workflow_build_get |
 | `POST` | `/api/workflow_chain_submit` | `internal` | `operations` | workflow_chain_submit |
 | `POST` | `/api/workflow_create_draft` | `internal` | `operations` | workflow_create_draft |
+| `POST` | `/api/workflow_repair_queue_command` | `internal` | `operations` | workflow_repair_queue.command |
+| `GET` | `/api/workflow_repair_queue_status` | `internal` | `operations` | workflow_repair_queue.status |
+| `GET` | `/api/workflow_solution_status` | `internal` | `operations` | workflow_solution.status |
+| `POST` | `/api/workflow_solution_submit` | `internal` | `operations` | workflow_solution.submit |
 | `GET` | `/api/workflows` | `internal` | - | workflows_get |
 | `POST` | `/api/workflows` | `internal` | - | workflows_post |
 | `POST` | `/api/workflows/run` | `internal` | - | workflows_run_post |

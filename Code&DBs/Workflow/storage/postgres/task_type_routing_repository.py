@@ -7,6 +7,11 @@ from typing import Any, Mapping, cast
 from .validators import _require_text
 
 
+def _optional_clean_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 class PostgresTaskTypeRoutingRepository:
     """Owns durable task routing rows and route-health mutations."""
 
@@ -110,6 +115,10 @@ class PostgresTaskTypeRoutingRepository:
         model_slug: str,
         provider_slug: str,
         transport_type: str,
+        candidate_ref: str | None = None,
+        host_provider_slug: str | None = None,
+        variant: str | None = None,
+        effort_slug: str | None = None,
         permitted: bool,
         rank: int,
         benchmark_score: float,
@@ -148,7 +157,7 @@ class PostgresTaskTypeRoutingRepository:
             """
             INSERT INTO task_type_routing (
                 task_type, sub_task_type, model_slug, provider_slug, transport_type,
-                permitted, rank,
+                candidate_ref, host_provider_slug, variant, effort_slug, permitted, rank,
                 benchmark_score, benchmark_name, cost_per_m_tokens, rationale,
                 route_tier, route_tier_rank, latency_class, latency_rank, route_source,
                 route_health_score, observed_completed_count, observed_execution_failure_count,
@@ -157,10 +166,15 @@ class PostgresTaskTypeRoutingRepository:
                 consecutive_internal_failures, last_failure_category, last_failure_zone, updated_at
             ) VALUES (
                 $1, '*', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                'derived', $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, now()
+                $15, $16, $17, $18, 'derived', $19, $20, $21, $22, $23, $24, $25,
+                $26, $27, $28, now()
             )
             ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug) DO UPDATE SET
                 transport_type = EXCLUDED.transport_type,
+                candidate_ref = EXCLUDED.candidate_ref,
+                host_provider_slug = EXCLUDED.host_provider_slug,
+                variant = EXCLUDED.variant,
+                effort_slug = EXCLUDED.effort_slug,
                 permitted = EXCLUDED.permitted, rank = EXCLUDED.rank,
                 benchmark_score = EXCLUDED.benchmark_score, benchmark_name = EXCLUDED.benchmark_name,
                 cost_per_m_tokens = EXCLUDED.cost_per_m_tokens, rationale = EXCLUDED.rationale,
@@ -173,6 +187,10 @@ class PostgresTaskTypeRoutingRepository:
             str(model_slug),
             _require_text(provider_slug, field_name="provider_slug"),
             normalized_transport,
+            _optional_clean_text(candidate_ref),
+            str(host_provider_slug or ""),
+            str(variant or ""),
+            str(effort_slug or ""),
             bool(permitted),
             int(rank),
             float(benchmark_score),
@@ -201,9 +219,11 @@ class PostgresTaskTypeRoutingRepository:
         task_type: str,
         provider_slug: str,
         model_slug: str,
+        candidate_ref: str | None = None,
         benchmark_score: float,
         benchmark_name: str,
     ) -> None:
+        normalized_candidate_ref = _optional_clean_text(candidate_ref)
         self._conn.execute(
             """
             UPDATE task_type_routing
@@ -213,6 +233,7 @@ class PostgresTaskTypeRoutingRepository:
             WHERE task_type    = $3
               AND provider_slug = $4
               AND model_slug    = $5
+              AND ($6::text IS NULL OR candidate_ref = $6)
               AND route_source  = 'explicit'
             """,
             float(benchmark_score),
@@ -220,6 +241,7 @@ class PostgresTaskTypeRoutingRepository:
             _require_text(task_type, field_name="task_type"),
             _require_text(provider_slug, field_name="provider_slug"),
             _require_text(model_slug, field_name="model_slug"),
+            normalized_candidate_ref,
         )
 
     def load_outcome_state(self, *, task_type: str, provider_slug: str, model_slug: str) -> Mapping[str, Any] | None:

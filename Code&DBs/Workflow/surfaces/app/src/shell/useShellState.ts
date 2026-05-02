@@ -91,13 +91,13 @@ export function routeSlotState(
     patch.activeTabId = 'build';
     patch.buildWorkflowId = workflow || null;
     patch.buildIntent = intent || null;
-    patch.buildView = 'moon';
-    patch.moonRunId = null;
+    patch.buildView = 'canvas';
+    patch.canvasRunId = null;
     patch.dashboardDetail = null;
   } else if (routeId === 'route.app.run') {
     const runId = typeof slotValues.run_id === 'string' ? slotValues.run_id : null;
     patch.activeTabId = 'build';
-    patch.moonRunId = runId;
+    patch.canvasRunId = runId;
     patch.dashboardDetail = null;
   } else if (routeId === 'route.app.manifest') {
     const manifestId = typeof slotValues.manifest_id === 'string' ? slotValues.manifest_id : null;

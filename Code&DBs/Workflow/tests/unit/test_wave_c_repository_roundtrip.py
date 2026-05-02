@@ -8,19 +8,19 @@ from runtime.workflow.job_runtime_context import (
     load_workflow_job_runtime_context,
     persist_workflow_job_runtime_contexts,
 )
-from storage.postgres.compile_artifact_repository import PostgresCompileArtifactRepository
+from storage.postgres.materialize_artifact_repository import PostgresCompileArtifactRepository
 
 
 class _CompileArtifactConn:
     def __init__(self) -> None:
-        self.compile_artifacts: list[dict[str, object]] = []
+        self.materialize_artifacts: list[dict[str, object]] = []
         self.execution_packets: list[dict[str, object]] = []
 
     def execute(self, query: str, *args):
         normalized = " ".join(query.split())
-        if "INSERT INTO compile_artifacts" in normalized:
+        if "INSERT INTO materialize_artifacts" in normalized:
             row = {
-                "compile_artifact_id": args[0],
+                "materialize_artifact_id": args[0],
                 "artifact_kind": args[1],
                 "artifact_ref": args[2],
                 "revision_ref": args[3],
@@ -34,23 +34,23 @@ class _CompileArtifactConn:
             existing = next(
                 (
                     index
-                    for index, candidate in enumerate(self.compile_artifacts)
+                    for index, candidate in enumerate(self.materialize_artifacts)
                     if candidate["artifact_kind"] == row["artifact_kind"]
                     and candidate["revision_ref"] == row["revision_ref"]
                 ),
                 None,
             )
             if existing is None:
-                self.compile_artifacts.append(row)
+                self.materialize_artifacts.append(row)
             else:
-                self.compile_artifacts[existing] = row
+                self.materialize_artifacts[existing] = row
             return []
-        if "FROM compile_artifacts" in normalized:
+        if "FROM materialize_artifacts" in normalized:
             artifact_kind = str(args[0])
             input_fingerprint = str(args[1])
             return [
                 dict(row)
-                for row in self.compile_artifacts
+                for row in self.materialize_artifacts
                 if row["artifact_kind"] == artifact_kind
                 and row["input_fingerprint"] == input_fingerprint
             ]
@@ -210,8 +210,8 @@ def test_compile_artifact_repository_round_trip_persists_compile_and_packet_rows
     conn = _CompileArtifactConn()
     repository = PostgresCompileArtifactRepository(conn)
 
-    compile_artifact_id = repository.upsert_compile_artifact(
-        compile_artifact_id="compile_artifact.wave_c",
+    materialize_artifact_id = repository.upsert_compile_artifact(
+        materialize_artifact_id="materialize_artifact.wave_c",
         artifact_kind="definition",
         artifact_ref="definition.wave_c",
         revision_ref="definition.wave_c",
@@ -254,11 +254,11 @@ def test_compile_artifact_repository_round_trip_persists_compile_and_packet_rows
         packet_revision="packet.wave_c"
     )
 
-    assert compile_artifact_id == "compile_artifact.wave_c"
+    assert materialize_artifact_id == "materialize_artifact.wave_c"
     assert execution_packet_id == "execution_packet.wave_c"
     assert compile_rows == [
         {
-            "compile_artifact_id": "compile_artifact.wave_c",
+            "materialize_artifact_id": "materialize_artifact.wave_c",
             "artifact_kind": "definition",
             "artifact_ref": "definition.wave_c",
             "revision_ref": "definition.wave_c",

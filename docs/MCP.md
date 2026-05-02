@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 177 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 200 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -25,8 +25,16 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `launch`, `read`, `write` | - | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | - | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
 | `praxis_friction` | `evidence` | `advanced` | - | `read` | - | Read or write the friction ledger — every guardrail bounce, warning, or hard failure (scope violations, secret leaks, policy bounces, JIT trigger matches). |
+| `praxis_healer_catalog` | `evidence` | `stable` | `workflow healer-catalog` | `read` | - | List registered healer authority refs from healer_registry. Returns each healer's healer_ref, executor_kind, action_ref, auto_mode (manual / assisted / automatic), safety_mode (guarded / unsafe), enabled state, and the bound verifier_refs (which verifiers this healer can repair after a failure). Use this before picking a healer for praxis_healer_run, or to inspect the repair surface. |
+| `praxis_healer_register` | `evidence` | `stable` | `workflow healer-register` | `write` | - | Register (or update) a healer authority ref without authoring a SQL migration. Upserts a healer_registry row idempotently. action_ref names a built-in handler from runtime.verifier_builtins.run_builtin_healer; executor_kind is fixed at 'builtin' today (registry CHECK constraint). auto_mode controls when the runtime auto-fires (manual / assisted / automatic) and safety_mode is the replay-safety classifier (guarded / unsafe). Both default to safest values. |
+| `praxis_healer_run` | `evidence` | `stable` | `workflow healer-run` | `write` | - | Run a registered healer to attempt repair after a verifier failure. verifier_ref is required (every heal is invoked in the context of a verifier whose result it tries to fix). healer_ref is OPTIONAL — when omitted, the runtime auto-resolves from the verifier's bound healers and errors if zero or multiple are bound. The runtime reruns the bound verifier as post-verification, so 'status: succeeded' means BOTH the healer action returned succeeded AND the post-verification passed. |
+| `praxis_healer_runs_list` | `evidence` | `stable` | `workflow healer-runs` | `read` | - | List past healing_runs newest-first, optionally filtered by healer_ref, verifier_ref (which verifier triggered the heal), target_kind / target_ref, status (succeeded / failed / skipped / error), and trailing-window. Returns full run rows including action+post-verification outputs. |
 | `praxis_patterns` | `evidence` | `stable` | - | `read`, `write` | - | Inspect and materialize durable platform patterns: recurring failure shapes clustered from friction events, bugs, and receipts. Patterns sit between raw evidence and bug tickets so repeated platform pain becomes one queryable authority object with evidence links and promotion rules. |
 | `praxis_receipts` | `evidence` | `advanced` | - | `read` | - | Search through past workflow results and analyze costs. Every workflow run produces receipts — this tool lets you search them by keyword and analyze token/cost spending. |
+| `praxis_verifier_catalog` | `evidence` | `stable` | `workflow verifier-catalog` | `read` | - | List registered verifier authority refs from verifier_registry. Returns each verifier's verifier_ref, kind (platform / receipt / run / path), enabled state, and any bound suggested-healer refs. Use this before picking a verifier for a bug-resolve, code-change preflight, or workflow-packet review gate so the chosen ref actually exists and is enabled. Backed by the verifier.catalog.list CQRS query (registered via migration 369). |
+| `praxis_verifier_register` | `evidence` | `stable` | `workflow verifier-register` | `write` | - | Register (or update) a verifier authority ref without authoring a SQL migration. Upserts a verifier_registry row idempotently and optionally creates verifier_healer_bindings for any healer_refs you pass via bind_healer_refs. Per the registry CHECK constraint, exactly one of builtin_ref OR verification_ref must be set, matching verifier_kind. Use this instead of writing a migration when adding a new verifier. |
+| `praxis_verifier_run` | `evidence` | `stable` | `workflow verifier-run` | `write` | - | Run a registered verifier against a target. Records a verification_runs row, returns the outcome (status: passed / failed / error, plus outputs, duration_ms, suggested_healer_ref). The verifier_ref must be one the registry knows (use praxis_verifier_catalog to list). target_kind / target_ref must match what the verifier accepts: 'platform' for system-wide checks (target_ref typically empty), 'path' for file-targeted verifiers like pytest_file (target_ref = absolute path), 'receipt' / 'run' for receipt or run targets. promote_bug defaults to FALSE — leave that on only for canonical scheduler runs that should auto-file control-plane bugs on failure. |
+| `praxis_verifier_runs_list` | `evidence` | `stable` | `workflow verifier-runs` | `read` | - | List past verification_runs newest-first, optionally filtered by verifier_ref, target_kind (platform / receipt / run / path), target_ref, status (passed / failed / error), and an ISO trailing-window. Use this to confirm a verifier actually ran on a target — for example, to verify a fix's evidence chain before calling a bug FIXED, or to inspect failure rates of a specific verifier ref. Returns full run rows including inputs, outputs, suggested_healer_ref, decision_ref, and duration_ms. Backed by the verifier.runs.list CQRS query. |
 | `praxis_audit_primitive` | `general` | `advanced` | - | `read` | - | Generic scan/plan/resolve surface for platform audits (wiring, governance, drift). Call action='playbook' first to read the structured usage guide; then 'registered' to discover audits/patterns, 'plan' to see findings + proposed actions, 'apply' to execute auto-safe patterns. Code-editing patterns are gated behind autorun_ok=False and never fire from 'apply'. |
 | `praxis_data_dictionary` | `general` | `advanced` | - | `read` | - | Unified data dictionary authority. Auto-projects field descriptors for every injected object (tables, object_types, integrations, datasets, ingest payloads, operator decisions, receipts, MCP tools). Operator overrides win over projected rows. |
 | `praxis_data_dictionary_classifications` | `general` | `advanced` | - | `read` | - | Classification / tag authority for data dictionary objects. Auto-projected from name heuristics (PII detectors, credential tokens, owner columns) and structural type hints. Operator tags take precedence. |
@@ -69,7 +77,10 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_daily_heartbeat` | `operations` | `advanced` | `workflow heartbeat` | `write` | - | Run one daily-heartbeat probe cycle on demand and persist the results to heartbeat_runs + heartbeat_probe_snapshots through CQRS authority. Probes cover provider CLI usage (claude/codex/gemini latency + token counts), connector liveness (catalog health), credential expiry (keychain/env API keys + OAuth tokens), and MCP server liveness (stdio initialize handshake). |
 | `praxis_dataset` | `operations` | `stable` | `workflow dataset` | `read`, `write` | - | Praxis dataset refinery: turn evidence-linked execution receipts into curated, lineage-preserving training and eval data for specialist SLMs (slm/review first). |
 | `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | - | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
+| `praxis_dispatch_choice_commit` | `operations` | `stable` | - | `write` | - | Commit one selected dispatch option after validating the candidate_set_hash and candidate admission state. |
+| `praxis_dispatch_options_list` | `operations` | `stable` | - | `read` | - | List clickable/selectable dispatch candidates with provider/model, transport, execution target/profile, disabled reason, and candidate_set_hash. |
 | `praxis_evolve_operation_field` | `operations` | `advanced` | `workflow evolve-operation-field` | `read` | - | Plan-only wizard for adding a new field to an existing CQRS operation's input model. |
+| `praxis_execution_targets_list` | `operations` | `stable` | - | `read` | - | List first-class execution targets and profiles from Execution Target Authority. |
 | `praxis_execution_truth` | `operations` | `stable` | - | `read` | - | Read a composed execution-truth packet. Combines status snapshot, optional run views, and optional causal trace through gateway-dispatched child queries so green-looking state is checked against independent proof. |
 | `praxis_firecheck` | `operations` | `stable` | `workflow firecheck` | `read` | - | Preflight whether workflow work can actually fire now. Returns can_fire, typed blockers, and remediation plans so submitted state is not mistaken for runtime proof. |
 | `praxis_health` | `operations` | `stable` | `workflow health` | `read` | - | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, memory graph health, and projection freshness (event-log cursors + process-cache refresh lag) with SLA alerts and a read-side circuit-breaker verdict. |
@@ -91,6 +102,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_object_truth_store_schema_snapshot` | `operations` | `advanced` | `workflow object-truth-store-schema` | `write` | - | Normalize and persist deterministic schema-snapshot evidence for one external object. This is a thin write MCP wrapper over the gateway command `object_truth_store_schema_snapshot`. |
 | `praxis_operation_forge` | `operations` | `advanced` | `workflow operation-forge` | `read` | - | Preview the canonical CQRS path for adding or evolving an operation. Produces the registration payload, real tool binding + API route when the operation already exists, and reject paths before anyone hand-builds catalog drift. |
 | `praxis_orient` | `operations` | `curated` | `workflow orient` | `read` | - | Fresh-agent orientation: returns the canonical orient payload (standing orders, authority envelope, tool guidance, recent activity, endpoints, health). The single best first call for any LLM agent or operator waking up cold against Praxis. Delegates to the same authority that serves POST /orient so HTTP and MCP consumers see identical shape. |
+| `praxis_paid_model_access` | `operations` | `advanced` | - | `read`, `write` | - | Operate paid-model access control without broad enables. Soft-off is presentation-only; grant_once creates an exact one-workflow-run lease for a paid provider/model/task/transport tuple; revoke and consume close leases. Backend hard-off remains owned by praxis_access_control. |
 | `praxis_provider_availability_refresh` | `operations` | `advanced` | - | `write` | - | Refresh provider availability through CQRS authority. |
 | `praxis_provider_control_plane` | `operations` | `stable` | `workflow provider-control-plane` | `read` | - | Read the provider/job/model control-plane matrix through CQRS authority. |
 | `praxis_provider_route_truth` | `operations` | `stable` | - | `read` | - | Read composed provider-route truth. Combines provider control plane and model access control matrix to answer whether a provider/model/job route is runnable, blocked, mixed, or unknown, with removal reasons. |
@@ -165,6 +177,14 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_submit_artifact_bundle` | `submissions` | `session` | - | `session` | - | Submit a sealed artifact bundle result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_submit_code_change_candidate` | `submissions` | `session` | - | `session` | - | Submit a structured code-change candidate for the current workflow MCP session. The agent does not edit live source; it provides a small proposal payload plus source snapshots. Runtime validates the proposal and derives the patch artifact. |
 | `praxis_submit_research_result` | `submissions` | `session` | - | `session` | - | Submit a sealed research result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
+| `praxis_agent_delegate` | `workflow` | `advanced` | - | `write` | - | Parent agent delegates a bounded child task. Materialises an agent_delegations row, launches a child workflow with a scoped tool list and praxis_only network. Use this — never spawn child workflows directly. |
+| `praxis_agent_describe` | `workflow` | `advanced` | - | `read` | - | Full envelope for one agent: scope, integrations, standing orders, recent wakes, recent delegations, recent tool gaps. Use when you need to understand an agent's state or audit its history. |
+| `praxis_agent_forge` | `workflow` | `advanced` | - | `read` | - | Preview the canonical CQRS path for adding or evolving an agent. Validates standing_order_keys against operator_decisions, capability_refs against capability_catalog, integration_refs against integration_registry. Produces the predicted agent_principal.register payload + canonical write order + reject paths. |
+| `praxis_agent_list` | `workflow` | `advanced` | - | `read` | - | List agent principals filtered by status. |
+| `praxis_agent_register` | `workflow` | `advanced` | - | `write` | - | Upsert one agent_principal row. ALWAYS call praxis_agent_forge first to validate inputs. Idempotent on agent_principal_ref. Emits agent_principal.registered event on completion. |
+| `praxis_agent_status` | `workflow` | `advanced` | - | `write` | - | Flip an agent_principal between active|paused|killed. The trigger evaluator skips paused/killed principals with skip_reason — this is the kill switch. |
+| `praxis_agent_wake` | `workflow` | `advanced` | - | `write` | - | Request a wake for an agent. Inserts an agent_wakes row in status=pending, emits agent.wake.requested. Idempotent on (agent_principal_ref, trigger_kind, payload_hash). |
+| `praxis_agent_wake_list` | `workflow` | `advanced` | - | `read` | - | List agent wake-ledger rows. |
 | `praxis_approve_proposed_plan` | `workflow` | `stable` | `workflow approve-plan` | `read` | - | Approve a ProposedPlan so launch_approved can submit it. Takes the ProposedPlan payload from praxis_launch_plan(preview_only=true), wraps it with approved_by + timestamp + hash, and returns an ApprovedPlan. The hash binds the approval to the exact spec_dict — tampering between approve and launch fails closed at launch time. The ProposedPlan must already carry machine-checkable provider freshness evidence. |
 | `praxis_bind_data_pills` | `workflow` | `stable` | `workflow bind-pills` | `read` | - | Layer 1 (Bind) of the planning stack: extract and validate ``object.field`` data-pill references from prose intent against the data dictionary authority. Deterministic — matches explicit ``snake_case.field_path`` spans in the prose; does not infer loose references like "the user's name." Returns bound / ambiguous / unbound splits the caller confirms before decomposing intent into packets. |
 | `praxis_compose_and_launch` | `workflow` | `stable` | `workflow ship-intent` | `launch` | - | End-to-end: prose intent → compose → approve → launch in one call. Compose the ProposedPlan through Layers 2 → 1 → 5, wrap with an explicit approval record (approved_by + hash), and submit through the CQRS control-command bus. |
@@ -175,10 +195,11 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_decompose_intent` | `workflow` | `stable` | `workflow decompose` | `read` | - | Layer 2 (Decompose) of the planning stack: split prose intent into ordered steps by parsing explicit step markers (numbered lists, bulleted lists, or first/then/finally ordering). Deterministic — does NOT do free-prose semantic decomposition. |
 | `praxis_generate_plan` | `workflow` | `stable` | `workflow generate-plan` | `read`, `write` | - | Shared CQRS plan-generation front door. action='generate_plan' recognizes messy prose, matches spans to authority, returns suggestions and gaps, and does not mutate state. action='materialize_plan' creates or updates a draft workflow through the canonical workflow build mutation. |
 | `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | - | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
-| `praxis_model_eval` | `workflow` | `advanced` | `workflow model-eval` | `read`, `write` | - | Plan, run, inspect, compare, promote, or export model/job/prompt evaluation matrices. Imports canonical Workflow specs as fixed fixtures and varies model/provider/prompt/effort/tool/swarm configuration under strict privacy gates. |
-| `praxis_moon` | `workflow` | `advanced` | `workflow moon` | `launch`, `read`, `write` | - | Workflow graph-authoring co-pilot exposed through the legacy praxis_moon tool name. Five actions over the same workflow build authority, all CQRS-gateway dispatched (each call leaves a receipt + the command actions emit authority events). |
+| `praxis_model_eval` | `workflow` | `advanced` | `workflow model-eval` | `read`, `write` | - | Plan, run, inspect, compare, promote, export, or ingest public benchmark priors for model/job/prompt evaluation matrices. Imports canonical Workflow specs as fixed fixtures and varies model/provider/prompt/effort/tool/swarm configuration under strict privacy gates. |
+| `praxis_canvas` | `workflow` | `advanced` | `workflow canvas` | `launch`, `read`, `write` | - | Workflow graph-authoring co-pilot exposed through the legacy praxis_canvas tool name. Five actions over the same workflow build authority, all CQRS-gateway dispatched (each call leaves a receipt + the command actions emit authority events). |
 | `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | - | Q-side of the planning stack: read every plan.* authority_event for one workflow_id in order. Pair with gateway-backed praxis_compose_plan / praxis_launch_plan on the C side. |
 | `praxis_promote_experiment_winner` | `workflow` | `advanced` | - | `write` | - | Promote one compose-experiment leg into the canonical task_type_routing row for that task type. The winning leg's temperature and max_tokens are applied; provider/model changes remain visible only in the returned diff. |
+| `praxis_solution` | `workflow` | `advanced` | `workflow solution` | `launch`, `read` | - | Coordinate durable Solutions: one Solution is a coordinated answer under proof, backed by one or more workflow executions. This is the replacement for legacy multi-workflow batch coordination. |
 | `praxis_suggest_plan_atoms` | `workflow` | `stable` | `workflow suggest-atoms` | `read` | - | Layer 0 (Suggest): free prose → pills + step types + parameters. Deterministic; no LLM call; no order or count produced. |
 | `praxis_synthesize_skeleton` | `workflow` | `advanced` | - | `read` | - | Layer 0.5 (Synthesize): atoms + skeleton with deterministic depends_on, consumes/produces/capabilities floors, scaffolded gates from data dictionary. |
 | `praxis_synthetic_data_generate` | `workflow` | `advanced` | `workflow synthetic-data-generate` | `write` | - | Generate and persist a deterministic Synthetic Data dataset with stable record refs, stable name refs, an explicit naming plan, reserved-term checks, collision gates, schema contract, privacy posture, and quality report. Synthetic Data can seed Workflow Context and Virtual Lab but cannot become Object Truth evidence. |
@@ -189,8 +210,10 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_synthetic_environment_event_inject` | `workflow` | `advanced` | `workflow synthetic-environment-event-inject` | `write` | - | Inject a deterministic outside event into a Synthetic Environment and persist the exact effect on current state. |
 | `praxis_synthetic_environment_read` | `workflow` | `advanced` | `workflow synthetic-environment-read` | `read` | - | Read Synthetic Environments, current state, seed state, effect ledger, and current-vs-seed diffs through the CQRS gateway. |
 | `praxis_synthetic_environment_reset` | `workflow` | `advanced` | `workflow synthetic-environment-reset` | `write` | - | Reset a Synthetic Environment back to its seed state with a recorded effect. |
-| `praxis_wave` | `workflow` | `advanced` | - | `launch`, `read`, `write` | - | Manage execution waves — groups of jobs with dependency ordering. Waves track which jobs are runnable (all dependencies met) and which are blocked. |
+| `praxis_tool_gap_file` | `workflow` | `advanced` | - | `write` | - | File a tool gap when Praxis lacks a needed capability. This becomes roadmap fuel. Do this BEFORE improvising around a missing tool — the gap row is the right answer. |
+| `praxis_tool_gap_list` | `workflow` | `advanced` | - | `read` | - | List open / triaged / shipped tool gaps. Use this for roadmap triage — gaps filed by working agents tell you what tooling to build next. |
 | `praxis_workflow` | `workflow` | `advanced` | - | `launch`, `read`, `write` | - | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
+| `praxis_workflow_repair_queue` | `workflow` | `advanced` | `workflow repair` | `write` | - | Inspect and operate the durable repair queue for failed Solutions, Workflows, and Jobs. Failed terminal workflow state auto-enqueues repair intents; this tool reads, claims, releases, and closes those intents through CQRS receipts and events. |
 | `praxis_workflow_validate` | `workflow` | `advanced` | - | `read` | - | Dry-run a workflow spec to check for errors before executing it. Returns whether the spec is valid, how many jobs it contains, and which agents each job resolves to. |
 
 ## Tool Reference
@@ -444,6 +467,101 @@ Example input:
 }
 ```
 
+#### `praxis_healer_catalog`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:healer-catalog`
+- Risks: `read`
+- CLI entrypoint: `workflow healer-catalog`
+- CLI schema help: `workflow tools describe praxis_healer_catalog`
+- When to use: List registered healer authority refs before picking one for praxis_healer_run, or to inspect what repairs are available after a verifier fails. Returns each healer's auto_mode, safety_mode, action_ref, and the verifier_refs it's bound to.
+- When not to use: Do not use it to actually run a healer — use praxis_healer_run for that. This is a read-only catalog query.
+- Recommended alias: `workflow healer-catalog`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "enabled": true,
+  "limit": 50
+}
+```
+
+#### `praxis_healer_register`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:healer-register`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow healer-register`
+- CLI schema help: `workflow tools describe praxis_healer_register`
+- When to use: Register (or update) a healer authority ref without authoring a SQL migration. Use when adding a new healer that will be bound to one or more verifiers. action_ref must name a built-in handler from runtime.verifier_builtins.run_builtin_healer.
+- When not to use: Do not use this to RUN a healer — that's praxis_healer_run. Do not use it to register verifiers — that's praxis_verifier_register.
+- Recommended alias: `workflow healer-register`
+- Selector: none
+- Required args: `healer_ref`, `display_name`, `action_ref`, `decision_ref`
+
+Example input:
+
+```json
+{
+  "healer_ref": "healer.platform.example_repair",
+  "display_name": "Example platform repair",
+  "action_ref": "heal_schema_bootstrap",
+  "auto_mode": "manual",
+  "safety_mode": "guarded",
+  "decision_ref": "decision.example.repair.20260501"
+}
+```
+
+#### `praxis_healer_run`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:healer-run`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow healer-run`
+- CLI schema help: `workflow tools describe praxis_healer_run`
+- When to use: Manually trigger a healer to repair a verifier failure. verifier_ref is required; healer_ref is optional (auto-resolves from verifier bindings when exactly one is bound). The runtime reruns the bound verifier as post-verification — succeeded status means BOTH healer action AND post-verification passed.
+- When not to use: Do not use it for fuzzy LLM-driven repair — healers are deterministic. The internal scheduler (run_due_platform_verifications) already runs canonical heals automatically; use this surface for manual repair gates.
+- Recommended alias: `workflow healer-run`
+- Selector: none
+- Required args: `verifier_ref`
+
+Example input:
+
+```json
+{
+  "verifier_ref": "verifier.platform.schema_authority"
+}
+```
+
+#### `praxis_healer_runs_list`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:healer-runs`
+- Risks: `read`
+- CLI entrypoint: `workflow healer-runs`
+- CLI schema help: `workflow tools describe praxis_healer_runs_list`
+- When to use: List past healing_runs newest-first to inspect repair history. Filter by healer_ref / verifier_ref (which verifier triggered the heal) / target / status / trailing-window. Use to confirm a heal succeeded, audit failure rates, or check whether a specific target has been auto-repaired recently.
+- When not to use: Do not use it to RUN a healer — use praxis_healer_run.
+- Recommended alias: `workflow healer-runs`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "healer_ref": "healer.platform.schema_bootstrap",
+  "limit": 20
+}
+```
+
 #### `praxis_patterns`
 
 - Surface: `evidence`
@@ -484,6 +602,105 @@ Example input:
 {
   "action": "search",
   "query": "sandbox timeout"
+}
+```
+
+#### `praxis_verifier_catalog`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:verifier-catalog`
+- Risks: `read`
+- CLI entrypoint: `workflow verifier-catalog`
+- CLI schema help: `workflow tools describe praxis_verifier_catalog`
+- When to use: List registered verifier authority refs before picking one for a bug-resolve, code-change preflight, or workflow-packet review gate. Returns each verifier's verifier_ref, kind (platform / receipt / run / path), enabled state, and any bound suggested-healer refs.
+- When not to use: Do not use it to actually run a verifier — that path is still internal to verifier_authority (and reachable via praxis_bugs action=resolve). This is a read-only catalog query.
+- Recommended alias: `workflow verifier-catalog`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "enabled": true,
+  "limit": 50
+}
+```
+
+#### `praxis_verifier_register`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:verifier-register`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow verifier-register`
+- CLI schema help: `workflow tools describe praxis_verifier_register`
+- When to use: Register (or update) a verifier authority ref without authoring a SQL migration. Use when adding a new verifier — replaces the old hand-edited verifier_builtins.py + migration pattern. Optional bind_healer_refs creates verifier_healer_bindings in the same call.
+- When not to use: Do not use this to RUN a verifier — that's praxis_verifier_run. Do not use it to register healers — that's praxis_healer_register.
+- Recommended alias: `workflow verifier-register`
+- Selector: none
+- Required args: `verifier_ref`, `display_name`, `verifier_kind`, `decision_ref`
+
+Example input:
+
+```json
+{
+  "verifier_ref": "verifier.platform.example_check",
+  "display_name": "Example platform check",
+  "verifier_kind": "builtin",
+  "builtin_ref": "verify_schema_authority",
+  "decision_ref": "decision.example.check.20260501"
+}
+```
+
+#### `praxis_verifier_run`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:verifier-run`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow verifier-run`
+- CLI schema help: `workflow tools describe praxis_verifier_run`
+- When to use: Run a registered verifier against a target as a deterministic review gate — receipt-backed, replayable, links to a verification_runs row. Use this from a workflow packet (integration_id=praxis_verifier_run, integration_action=run) to express a verify step without going through bug-resolve, or interactively to confirm a verifier passes against a specific target.
+- When not to use: Do not use it for fuzzy LLM-driven review — verifiers are deterministic. For control-plane scheduler runs that should auto-file bugs on failure, set promote_bug=True; otherwise leave the default (False).
+- Recommended alias: `workflow verifier-run`
+- Selector: none
+- Required args: `verifier_ref`
+
+Example input:
+
+```json
+{
+  "verifier_ref": "verifier.job.python.py_compile",
+  "target_kind": "path",
+  "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/runtime/example.py",
+  "inputs": {
+    "path": "/Users/nate/Praxis/Code&DBs/Workflow/runtime/example.py"
+  }
+}
+```
+
+#### `praxis_verifier_runs_list`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:verifier-runs`
+- Risks: `read`
+- CLI entrypoint: `workflow verifier-runs`
+- CLI schema help: `workflow tools describe praxis_verifier_runs_list`
+- When to use: List past verification_runs newest-first to confirm a verifier actually ran on a target. Filter by verifier_ref, target_kind, target_ref, status, or trailing window. Use before resolving a bug to FIXED to verify the evidence chain, or to inspect failure rates of a specific verifier.
+- When not to use: Do not use it to RUN a verifier — that path is still internal (via praxis_bugs action=resolve). This is read-only history.
+- Recommended alias: `workflow verifier-runs`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "verifier_ref": "verifier.job.python.pytest_file",
+  "limit": 20
 }
 ```
 
@@ -1506,6 +1723,50 @@ Example input:
 }
 ```
 
+#### `praxis_dispatch_choice_commit`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_dispatch_choice_commit`
+- CLI schema help: `workflow tools describe praxis_dispatch_choice_commit`
+- When to use: Record one operator-selected dispatch option before running it.
+- When not to use: Do not use it to force a disabled or unseen candidate; the command rejects those.
+- Selector: none
+- Required args: `candidate_set_hash`
+
+Example input:
+
+```json
+{
+  "candidate_set_hash": "<hash from praxis_dispatch_options_list>",
+  "selected_candidate_ref": "<candidate ref>",
+  "selection_kind": "explicit_click"
+}
+```
+
+#### `praxis_dispatch_options_list`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_dispatch_options_list`
+- CLI schema help: `workflow tools describe praxis_dispatch_options_list`
+- When to use: Render or audit a dispatch picker before committing one option.
+- When not to use: Do not use it as proof that a selected option actually ran; pair with dispatch_choice.commit and execution proof.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "task_slug": "auto/chat"
+}
+```
+
 #### `praxis_evolve_operation_field`
 
 - Surface: `operations`
@@ -1532,6 +1793,25 @@ Example input:
   "db_table": "operator_decisions",
   "db_column": "decision_provenance"
 }
+```
+
+#### `praxis_execution_targets_list`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_execution_targets_list`
+- CLI schema help: `workflow tools describe praxis_execution_targets_list`
+- When to use: Inspect what execution targets and profiles are available before dispatch.
+- When not to use: Do not use it to launch work; it is read-only.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{}
 ```
 
 #### `praxis_execution_truth`
@@ -2101,6 +2381,28 @@ Example input:
 {}
 ```
 
+#### `praxis_paid_model_access`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow tools call praxis_paid_model_access`
+- CLI schema help: `workflow tools describe praxis_paid_model_access`
+- When to use: Preview, grant, revoke, bind, or inspect exact one-run leases for paid model access.
+- When not to use: Do not use it for broad provider enables or unpaid route changes; use praxis_access_control for hard-off policy.
+- Selector: `action`; default `status`; values `status`, `preview`, `grant_once`, `bind_run`, `revoke`, `consume`, `soft_off`, `soft_on`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "preview",
+  "runtime_profile_ref": "praxis"
+}
+```
+
 #### `praxis_provider_availability_refresh`
 
 - Surface: `operations`
@@ -2491,7 +2793,7 @@ Example input:
 
 ```json
 {
-  "task_type": "compile",
+  "task_type": "materialize",
   "provider_slug": "openai",
   "model_slug": "gpt-5.4",
   "temperature": 0.2,
@@ -3875,6 +4177,179 @@ Example input:
 
 ### Workflow
 
+#### `praxis_agent_delegate`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_agent_delegate`
+- CLI schema help: `workflow tools describe praxis_agent_delegate`
+- When to use: Create a governed delegation from one agent principal to a child task.
+- When not to use: Do not use it for human operator workflow launches.
+- Selector: none
+- Required args: `parent_agent_ref`, `child_task`, `child_intent`
+
+Example input:
+
+```json
+{
+  "parent_agent_ref": "agent.exec.parent",
+  "child_task": "review"
+}
+```
+
+#### `praxis_agent_describe`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_agent_describe`
+- CLI schema help: `workflow tools describe praxis_agent_describe`
+- When to use: Inspect one durable agent principal, including trust and scope metadata.
+- When not to use: Do not use it for mutation; use register/status/wake tools for writes.
+- Selector: none
+- Required args: `agent_principal_ref`
+
+Example input:
+
+```json
+{
+  "agent_principal_ref": "agent.exec.example"
+}
+```
+
+#### `praxis_agent_forge`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_agent_forge`
+- CLI schema help: `workflow tools describe praxis_agent_forge`
+- When to use: Preview and validate the CQRS path before registering or changing an agent principal.
+- When not to use: Do not use it to mutate agent state; call praxis_agent_register after forge validation.
+- Selector: none
+- Required args: `agent_principal_ref`
+
+Example input:
+
+```json
+{
+  "agent_principal_ref": "agent.exec.example"
+}
+```
+
+#### `praxis_agent_list`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_agent_list`
+- CLI schema help: `workflow tools describe praxis_agent_list`
+- When to use: List durable agent principals and their current lifecycle status.
+- When not to use: Do not use it to inspect one agent in depth; use praxis_agent_describe.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "status": "active"
+}
+```
+
+#### `praxis_agent_register`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_agent_register`
+- CLI schema help: `workflow tools describe praxis_agent_register`
+- When to use: Register or update one durable agent principal after praxis_agent_forge validation.
+- When not to use: Do not use it for wake execution, delegation, or status-only reads.
+- Selector: none
+- Required args: `agent_principal_ref`, `title`
+
+Example input:
+
+```json
+{
+  "agent_principal_ref": "agent.exec.example",
+  "title": "Example Agent"
+}
+```
+
+#### `praxis_agent_status`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_agent_status`
+- CLI schema help: `workflow tools describe praxis_agent_status`
+- When to use: Pause, activate, or kill one durable agent principal.
+- When not to use: Do not use it for ordinary run/job status; use praxis_workflow.
+- Selector: none
+- Required args: `agent_principal_ref`, `status`
+
+Example input:
+
+```json
+{
+  "agent_principal_ref": "agent.exec.example",
+  "status": "paused"
+}
+```
+
+#### `praxis_agent_wake`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_agent_wake`
+- CLI schema help: `workflow tools describe praxis_agent_wake`
+- When to use: Record or request one agent wake through the agent-principal authority.
+- When not to use: Do not use it for direct workflow launches; use praxis_workflow or praxis_solution.
+- Selector: none
+- Required args: `agent_principal_ref`, `trigger_kind`
+
+Example input:
+
+```json
+{
+  "agent_principal_ref": "agent.exec.example",
+  "trigger_kind": "manual"
+}
+```
+
+#### `praxis_agent_wake_list`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_agent_wake_list`
+- CLI schema help: `workflow tools describe praxis_agent_wake_list`
+- When to use: List recent agent wake records for inspection and debugging.
+- When not to use: Do not use it to create wakes; use praxis_agent_wake.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "agent_principal_ref": "agent.exec.example",
+  "limit": 10
+}
+```
+
 #### `praxis_approve_proposed_plan`
 
 - Surface: `workflow`
@@ -4162,7 +4637,7 @@ Example input:
 - When to use: Use for consistent model selection: same Workflow spec, same fixtures, same verifier, varied model/prompt/provider configuration.
 - When not to use: Do not use as a production route mutation surface. The promote action emits a proposal only.
 - Recommended alias: `workflow model-eval`
-- Selector: `action`; default `plan`; values `plan`, `run`, `inspect`, `compare`, `promote`, `export`
+- Selector: `action`; default `plan`; values `plan`, `run`, `inspect`, `compare`, `promote`, `export`, `benchmark_ingest`
 - Required args: (none)
 
 Example input:
@@ -4177,17 +4652,17 @@ Example input:
 }
 ```
 
-#### `praxis_moon`
+#### `praxis_canvas`
 
 - Surface: `workflow`
 - Tier: `advanced`
-- Badges: `advanced`, `workflow`, `alias:moon`, `mutates-state`, `launches-work`
+- Badges: `advanced`, `workflow`, `alias:canvas`, `mutates-state`, `launches-work`
 - Risks: `launch`, `read`, `write`
-- CLI entrypoint: `workflow moon`
-- CLI schema help: `workflow tools describe praxis_moon`
-- When to use: Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_moon tool name and moon alias remain compatibility entrypoints.
+- CLI entrypoint: `workflow canvas`
+- CLI schema help: `workflow tools describe praxis_canvas`
+- When to use: Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_canvas tool name and canvas alias remain compatibility entrypoints.
 - When not to use: Do not use it for unrelated roadmap, bug, provider-routing, or direct database work. Read the graph before mutating fields.
-- Recommended alias: `workflow moon`
+- Recommended alias: `workflow canvas`
 - Selector: `action`; default `get_build`; values `get_build`, `compose`, `suggest_next`, `mutate_field`, `launch`
 - Required args: (none)
 
@@ -4241,6 +4716,29 @@ Example input:
 {
   "source_experiment_receipt_id": "receipt:compose-experiment:1234",
   "source_config_index": 0
+}
+```
+
+#### `praxis_solution`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:solution`, `launches-work`
+- Risks: `launch`, `read`
+- CLI entrypoint: `workflow solution`
+- CLI schema help: `workflow tools describe praxis_solution`
+- When to use: Submit, list, or inspect durable multi-workflow Solutions.
+- When not to use: Do not use it for one workflow run; use praxis_workflow.
+- Recommended alias: `workflow solution`
+- Selector: `action`; default `status`; values `submit`, `start`, `status`, `show`, `list`, `observe`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "list",
+  "limit": 10
 }
 ```
 
@@ -4491,25 +4989,49 @@ Example input:
 }
 ```
 
-#### `praxis_wave`
+#### `praxis_tool_gap_file`
 
 - Surface: `workflow`
 - Tier: `advanced`
-- Badges: `advanced`, `workflow`, `mutates-state`, `launches-work`
-- Risks: `launch`, `read`, `write`
-- CLI entrypoint: `workflow tools call praxis_wave`
-- CLI schema help: `workflow tools describe praxis_wave`
-- When to use: Observe or coordinate wave-based execution programs.
-- When not to use: Do not use it for single workflow runs with no wave orchestration.
-- Selector: `action`; default `observe`; values `observe`, `start`, `next`, `record`
+- Badges: `advanced`, `workflow`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_tool_gap_file`
+- CLI schema help: `workflow tools describe praxis_tool_gap_file`
+- When to use: File a missing-tool gap as roadmap fuel before improvising around the missing capability.
+- When not to use: Do not use it for ordinary bug reports; use praxis_bugs.
+- Selector: none
+- Required args: `reporter_agent_ref`, `missing_capability`, `attempted_task`, `blocked_action`
+
+Example input:
+
+```json
+{
+  "reporter_agent_ref": "agent.exec.example",
+  "missing_capability": "calendar read",
+  "attempted_task": "schedule prep",
+  "blocked_action": "inspect availability"
+}
+```
+
+#### `praxis_tool_gap_list`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_tool_gap_list`
+- CLI schema help: `workflow tools describe praxis_tool_gap_list`
+- When to use: List filed tool gaps and their triage state.
+- When not to use: Do not use it to file a new gap; use praxis_tool_gap_file.
+- Selector: none
 - Required args: (none)
 
 Example input:
 
 ```json
 {
-  "action": "next",
-  "wave_id": "wave_1"
+  "status": "open",
+  "limit": 10
 }
 ```
 
@@ -4531,6 +5053,28 @@ Example input:
 ```json
 {
   "action": "list"
+}
+```
+
+#### `praxis_workflow_repair_queue`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:repair`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow repair`
+- CLI schema help: `workflow tools describe praxis_workflow_repair_queue`
+- When to use: Use after a Solution, Workflow, or Job fails and you need a durable repair item instead of rediscovering lost run state.
+- When not to use: Do not use it to launch fresh workflow work; use praxis_workflow or praxis_solution for execution.
+- Recommended alias: `workflow repair`
+- Selector: `action`; default `list`; values `list`, `queue`, `status`, `summary`, `claim`, `release`, `complete`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "summary"
 }
 ```
 

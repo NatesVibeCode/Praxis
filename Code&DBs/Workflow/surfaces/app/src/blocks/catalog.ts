@@ -8,6 +8,7 @@ export interface BlockCatalogEntry {
   type: BlockType;
   defaultSpan: string;
   description: string;
+  icon?: string;
 }
 
 export const blockCatalog = catalog as BlockCatalogEntry[];

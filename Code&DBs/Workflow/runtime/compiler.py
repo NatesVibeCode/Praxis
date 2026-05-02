@@ -21,15 +21,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
-from runtime.compile_observability import compile_trace_scope
-from runtime.compile_reuse import module_surface_revision, stable_hash
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
+from runtime.materialize_observability import compile_trace_scope
+from runtime.materialize_reuse import module_surface_revision, stable_hash
 from runtime.build_authority import apply_authority_bundle, build_authority_bundle
 import runtime.compiler_components as _compiler_components
 import runtime.compiler_output_builders as _compiler_output_builders
-from runtime.compile_index import (
-    CompileIndexAuthorityError,
-    CompileIndexSnapshot,
+from runtime.materialize_index import (
+    MaterializeIndexAuthorityError,
+    MaterializeIndexSnapshot,
     _load_integrations as _compile_index_load_integrations,
     _load_object_types as _compile_index_load_object_types,
     _load_reference_catalog as _compile_index_load_reference_catalog,
@@ -37,7 +37,7 @@ from runtime.compile_index import (
     refresh_compile_index,
 )
 from runtime.capability_catalog import load_capability_catalog
-from runtime.definition_compile_kernel import (
+from runtime.definition_materialize_kernel import (
     build_definition as _kernel_build_definition,
     detect_triggers as _kernel_detect_triggers,
 )
@@ -85,7 +85,7 @@ def compile_prose(
     enable_llm: bool | None = None,
     compile_index_ref: str | None = None,
     compile_surface_revision: str | None = None,
-    compile_index_snapshot: CompileIndexSnapshot | None = None,
+    compile_index_snapshot: MaterializeIndexSnapshot | None = None,
     conn: Any | None = None,
 ) -> dict[str, Any]:
     """Compile user prose into a structured operating model."""
@@ -119,7 +119,7 @@ def _compile_prose_inner(
     enable_llm: bool | None,
     compile_index_ref: str | None,
     compile_surface_revision: str | None,
-    compile_index_snapshot: CompileIndexSnapshot | None,
+    compile_index_snapshot: MaterializeIndexSnapshot | None,
     conn: Any | None,
     _trace: Any,
 ) -> dict[str, Any]:
@@ -149,7 +149,7 @@ def _compile_prose_inner(
                 compile_index_ref=compile_index_ref,
                 compile_surface_revision=compile_surface_revision,
             )
-    except CompileIndexAuthorityError as exc:
+    except MaterializeIndexAuthorityError as exc:
         logger.warning("Failed to load compile index snapshot: %s", exc)
         raise RuntimeError(f"{exc.reason_code}: {exc}") from exc
     except PostgresConfigurationError as exc:
@@ -160,7 +160,7 @@ def _compile_prose_inner(
         raise RuntimeError(f"compile_index.load_failed: {exc}") from exc
 
     llm_requested = _compiler_llm_enabled() if enable_llm is None else enable_llm
-    compile_provenance = _definition_compile_provenance(
+    materialize_provenance = _definition_compile_provenance(
         source_prose=clean_prose,
         title=title,
         llm_requested=llm_requested,
@@ -169,13 +169,13 @@ def _compile_prose_inner(
 
     # Check for reusable artifact
     if conn is not None:
-        artifact_store = CompileArtifactStore(conn)
+        artifact_store = MaterializeArtifactStore(conn)
         try:
             reusable_definition = artifact_store.load_reusable_artifact(
                 artifact_kind="definition",
-                input_fingerprint=compile_provenance["input_fingerprint"],
+                input_fingerprint=materialize_provenance["input_fingerprint"],
             )
-        except CompileArtifactError as exc:
+        except MaterializeArtifactError as exc:
             logger.error("Reusable definition artifact authority failed: %s", exc)
             raise RuntimeError(f"compile_artifact.reuse_failed: {exc}") from exc
         if reusable_definition is not None:
@@ -195,7 +195,7 @@ def _compile_prose_inner(
                     "artifact_kind": "definition",
                     "decision": "reused",
                     "reason_code": "definition.compile.exact_input_match",
-                    "input_fingerprint": compile_provenance["input_fingerprint"],
+                    "input_fingerprint": materialize_provenance["input_fingerprint"],
                     "artifact_ref": reusable_definition.artifact_ref,
                     "revision_ref": reusable_definition.revision_ref,
                     "content_hash": reusable_definition.content_hash,
@@ -298,19 +298,20 @@ def _compile_prose_inner(
         if llm_guard_reason:
             errors.append(f"llm_compile_guarded: {llm_guard_reason}")
 
-    compiled_prose = _as_text(compiled.get("prose")) or clean_prose
+    materialized_prose = _as_text(compiled.get("prose")) or clean_prose
     authority = _as_text(compiled.get("authority"))
     sla = compiled.get("sla") if isinstance(compiled.get("sla"), dict) else {}
 
     # Reference extraction and resolution
-    references = _extract_references(compiled_prose)
+    references = _extract_references(materialized_prose)
     resolved_references, unresolved = _resolve_references(
         references, catalog,
         route_hints=route_hints,
         route_hints_cache=_COMPILER_ROUTE_HINTS_CACHE,
     )
     provisional_jobs = _generate_jobs(
-        compiled_prose, resolved_references,
+        materialized_prose, resolved_references,
+        conn=conn,
         route_hints=route_hints,
         route_hints_cache=_COMPILER_ROUTE_HINTS_CACHE,
     )
@@ -318,8 +319,8 @@ def _compile_prose_inner(
     # Capability selection (inline delegation)
     capabilities = _compiler_components.select_capabilities(
         original_prose=clean_prose,
-        compiled_prose=compiled_prose,
-        compiled_capability_slugs=_as_string_list(compiled.get("capabilities")),
+        materialized_prose=materialized_prose,
+        materialized_capability_slugs=_as_string_list(compiled.get("capabilities")),
         references=resolved_references,
         jobs=provisional_jobs,
         catalog=capability_catalog,
@@ -328,7 +329,7 @@ def _compile_prose_inner(
     # Definition building (inline delegation to kernel)
     definition = _kernel_build_definition(
         source_prose=clean_prose,
-        compiled_prose=compiled_prose,
+        materialized_prose=materialized_prose,
         references=resolved_references,
         capabilities=capabilities,
         authority=authority,
@@ -336,7 +337,7 @@ def _compile_prose_inner(
     )
 
     # Execution setup, surface manifest, build receipt (inline delegation)
-    setup_title = title or _as_text(compiled.get("title")) or _derive_title(clean_prose, compiled_prose)
+    setup_title = title or _as_text(compiled.get("title")) or _derive_title(clean_prose, materialized_prose)
     execution_setup = _compiler_output_builders.build_execution_setup(
         title=setup_title,
         definition=definition,
@@ -371,20 +372,20 @@ def _compile_prose_inner(
         definition=definition,
         unresolved=unresolved,
     )
-    definition["compile_provenance"] = {
-        **compile_provenance,
+    definition["materialize_provenance"] = {
+        **materialize_provenance,
         "semantic_retrieval": dict(semantic_retrieval),
     }
 
     # Persist artifact
     if conn is not None:
         try:
-            artifact_store = CompileArtifactStore(conn)
+            artifact_store = MaterializeArtifactStore(conn)
             artifact_store.record_definition(
                 definition=definition,
                 authority_refs=[cap.get("slug", "") for cap in capabilities if isinstance(cap, dict) and cap.get("slug")],
                 decision_ref=f"decision.compile.definition.{definition['definition_revision']}",
-                input_fingerprint=compile_provenance["input_fingerprint"],
+                input_fingerprint=materialize_provenance["input_fingerprint"],
             )
         except Exception as exc:
             logger.error("Definition compile artifact persistence failed: %s", exc)
@@ -415,7 +416,7 @@ def _compile_prose_inner(
             "artifact_kind": "definition",
             "decision": "compiled",
             "reason_code": "definition.compile.miss",
-            "input_fingerprint": compile_provenance["input_fingerprint"],
+            "input_fingerprint": materialize_provenance["input_fingerprint"],
         },
         matched_building_blocks=matched_refs,
         composition_plan=composition,
@@ -424,16 +425,16 @@ def _compile_prose_inner(
 
 
 def _empty_result(error: str, prose: str = "") -> dict[str, Any]:
-    compiled_prose = prose
+    materialized_prose = prose
     definition = _kernel_build_definition(
         source_prose=prose,
-        compiled_prose=compiled_prose,
+        materialized_prose=materialized_prose,
         references=[],
         capabilities=[],
         authority="",
         sla={},
     )
-    setup_title = _derive_title(prose, compiled_prose)
+    setup_title = _derive_title(prose, materialized_prose)
     execution_setup = _compiler_output_builders.build_execution_setup(
         title=setup_title,
         definition=definition,
@@ -491,7 +492,7 @@ def _propagate_agent_bindings_to_phases(definition: dict[str, Any]) -> None:
     Bindings of kind='agent' carry their resolved target_ref (e.g.
     'task_type_routing:auto/review'); the consuming step's phase needs
     `agent_route` populated for the build to harden. This is normally
-    done by hand in the Moon UI; for the autonomous compile_finalize
+    done by hand in the Canvas UI; for the autonomous compile_finalize
     path we propagate explicitly.
     """
     ledger = definition.get("binding_ledger")
@@ -542,7 +543,7 @@ def _finalize_compile_result(
     title: str | None,
     conn: Any | None,
     errors: list[str],
-    compile_index: CompileIndexSnapshot | None,
+    compile_index: MaterializeIndexSnapshot | None,
     semantic_retrieval: dict[str, Any],
     refinement: dict[str, Any],
     reuse_provenance: dict[str, Any] | None,
@@ -556,7 +557,7 @@ def _finalize_compile_result(
         build_reviewable_plan,
     )
 
-    compiled_spec: dict[str, Any] | None = None
+    materialized_spec: dict[str, Any] | None = None
     planning_notes: list[str] = []
     authority_bundle = build_authority_bundle(definition)
     projection_state = _as_text(authority_bundle.get("projection_status", {}).get("state")) or "blocked"
@@ -569,8 +570,8 @@ def _finalize_compile_result(
             "Compile produced bootstrap planning state with unresolved authority. Review and resolve blockers before hardening."
         )
 
-    hydrated_definition = apply_authority_bundle(definition, compiled_spec=compiled_spec)
-    authority_bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
+    hydrated_definition = apply_authority_bundle(definition, materialized_spec=materialized_spec)
+    authority_bundle = build_authority_bundle(hydrated_definition, materialized_spec=materialized_spec)
 
     # compile_finalize: voting-shaped auto-resolver for blocking binding gates.
     # Only fires when (a) LLM was actually used to compile (no point on cache
@@ -598,8 +599,8 @@ def _finalize_compile_result(
                 # the UI normally writes phase.agent_route by hand,
                 # so autonomous-first compile must do it explicitly.
                 _propagate_agent_bindings_to_phases(hydrated_definition)
-                hydrated_definition = apply_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
-                authority_bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
+                hydrated_definition = apply_authority_bundle(hydrated_definition, materialized_spec=materialized_spec)
+                authority_bundle = build_authority_bundle(hydrated_definition, materialized_spec=materialized_spec)
             finalize_summary = {
                 "ran": True,
                 "blocking_count": finalize_result.get("blocking_count"),
@@ -634,7 +635,7 @@ def _finalize_compile_result(
                 payload={
                     "build_state": _as_text(projection_status.get("state")) or "blocked",
                     "blocker_count": len(blocking_issues),
-                    "has_spec": compiled_spec is not None,
+                    "has_spec": materialized_spec is not None,
                 },
                 emitted_by="compiler",
             )
@@ -656,13 +657,13 @@ def _finalize_compile_result(
         definition=hydrated_definition,
         workflow_id=_as_text(hydrated_definition.get("workflow_id")) or None,
         conn=conn,
-        compiled_spec=compiled_spec,
+        materialized_spec=materialized_spec,
     )
     reviewable_plan = build_reviewable_plan(
         definition=hydrated_definition,
         workflow_id=_as_text(hydrated_definition.get("workflow_id")) or None,
         conn=conn,
-        compiled_spec=compiled_spec,
+        materialized_spec=materialized_spec,
         candidate_manifest=candidate_resolution_manifest,
     )
     intent_brief = build_intent_brief(
@@ -689,8 +690,8 @@ def _finalize_compile_result(
         "build_issues": authority_bundle["build_issues"],
         "projection_status": projection_status,
         "planning_notes": planning_notes,
-        "compiled_spec": compiled_spec,
-        "compiled_spec_projection": authority_bundle["compiled_spec_projection"],
+        "materialized_spec": materialized_spec,
+        "materialized_spec_projection": authority_bundle["materialized_spec_projection"],
         "candidate_resolution_manifest": candidate_resolution_manifest,
         "reviewable_plan": reviewable_plan,
         "finalize_summary": finalize_summary,
@@ -751,7 +752,7 @@ def _definition_compile_provenance(
     source_prose: str,
     title: str | None,
     llm_requested: bool,
-    compile_index: CompileIndexSnapshot,
+    compile_index: MaterializeIndexSnapshot,
 ) -> dict[str, Any]:
     surface_revision = _compiler_surface_revision()
     input_payload = {
@@ -779,11 +780,11 @@ def _definition_compile_provenance(
     }
 
 
-def _fallback_compile_index_snapshot(*, reason: str) -> CompileIndexSnapshot:
+def _fallback_compile_index_snapshot(*, reason: str) -> MaterializeIndexSnapshot:
     now = datetime.now(timezone.utc)
     repo_root = str(_compiler_repo_root())
     surface_revision = _compiler_surface_revision()
-    return CompileIndexSnapshot(
+    return MaterializeIndexSnapshot(
         schema_version=1,
         compile_index_ref="compile_index:fallback",
         compile_surface_revision=surface_revision,
@@ -809,7 +810,7 @@ def _fallback_compile_index_snapshot(*, reason: str) -> CompileIndexSnapshot:
         reference_catalog=(),
         integration_registry=(),
         object_types=(),
-        compiler_route_hints=(),
+        materializer_route_hints=(),
         capability_catalog=(),
         payload={"fallback": True, "reason": reason},
     )
@@ -836,7 +837,7 @@ def _load_compile_index_snapshot_with_auto_refresh(
     *,
     compile_index_ref: str | None,
     compile_surface_revision: str | None,
-) -> CompileIndexSnapshot:
+) -> MaterializeIndexSnapshot:
     repo_root = _compiler_repo_root()
     try:
         return load_compile_index_snapshot(
@@ -847,7 +848,7 @@ def _load_compile_index_snapshot_with_auto_refresh(
             require_fresh=True,
             repo_root=repo_root,
         )
-    except CompileIndexAuthorityError as exc:
+    except MaterializeIndexAuthorityError as exc:
         if compile_index_ref is not None or compile_surface_revision is not None:
             raise
         if exc.reason_code not in _REFRESHABLE_COMPILE_INDEX_REASON_CODES:
@@ -866,7 +867,7 @@ def _load_compiler_route_hints(conn: Any) -> tuple[tuple[str, str], ...]:
     rows = conn.execute(
         """
         SELECT hint_text, route_slug
-          FROM compiler_route_hints
+          FROM materializer_route_hints
          WHERE enabled = TRUE
          ORDER BY priority ASC, hint_text ASC
         """
@@ -973,8 +974,8 @@ def _slugify(value: Any) -> str:
     return text.strip("-/")
 
 
-def _derive_title(prose: str, compiled_prose: str) -> str:
-    return derive_title(prose, compiled_prose)
+def _derive_title(prose: str, materialized_prose: str) -> str:
+    return derive_title(prose, materialized_prose)
 
 
 def _workflow_id_for_title(title: str) -> str:

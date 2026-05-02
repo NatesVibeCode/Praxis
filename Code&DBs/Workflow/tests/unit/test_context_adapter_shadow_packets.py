@@ -176,7 +176,7 @@ def _shadow_packet_config() -> dict[str, object]:
                 ],
                 "capabilities": [{"slug": "capability.alpha"}],
             },
-            "compiled_spec_row": {
+            "materialized_spec_row": {
                 "definition_revision": "def_alpha",
                 "plan_revision": "plan_alpha",
             },
@@ -216,7 +216,7 @@ def _explicit_job_shadow_packet_config() -> dict[str, object]:
                     }
                 ],
             },
-            "compiled_spec_row": {
+            "materialized_spec_row": {
                 "definition_revision": "def_alpha",
                 "plan_revision": "plan_alpha",
                 "jobs": [
@@ -483,7 +483,7 @@ def test_context_compiler_hydrates_shadow_packet_from_explicit_job_authority(tmp
     assert row["capability_bindings"][0]["tool_bucket"] == "build"
     assert "praxis_query" in row["capability_bindings"][0]["mcp_tools"]
     assert row["verify_refs"] == ["verify_ref.python.explicit_job"]
-    assert row["authority_inputs"]["compiled_job_row"]["label"] == "job.alpha"
+    assert row["authority_inputs"]["materialized_job_row"]["label"] == "job.alpha"
     assert row["authority_inputs"]["definition_job_row"]["label"] == "job.alpha"
 
 
@@ -502,7 +502,7 @@ def test_context_compiler_reuses_shadow_packet_lineage_on_retry(tmp_path) -> Non
     assert first.status == "succeeded"
     assert second.status == "succeeded"
     assert len(conn.compile_artifact_rows) == 1
-    assert conn.rows[0]["payload"]["compile_provenance"]["reuse"]["decision"] == "reused"
+    assert conn.rows[0]["payload"]["materialize_provenance"]["reuse"]["decision"] == "reused"
     assert conn.rows[0]["parent_artifact_ref"] == conn.compile_artifact_rows[0]["revision_ref"]
 
 
@@ -539,7 +539,7 @@ def test_context_compiler_fails_closed_when_reference_binding_authority_is_missi
             "job_label": "job.alpha",
             "packet_provenance": {
                 "source_kind": "workflow_runtime",
-                "compiled_spec_row": {
+                "materialized_spec_row": {
                     "definition_revision": "def_alpha",
                     "plan_revision": "plan_alpha",
                     "jobs": [],

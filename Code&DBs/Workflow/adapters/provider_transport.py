@@ -280,6 +280,7 @@ def resolve_lane_policy(
     *,
     profiles: Mapping[str, ProviderCLIProfile],
 ) -> dict[str, Any] | None:
+    """Return the policy record only when the lane is admitted by policy."""
     profile = profiles.get(provider_slug)
     if profile is None:
         return None
@@ -291,6 +292,26 @@ def resolve_lane_policy(
     if not _lane_policy_is_admitted(policy):
         return None
     return dict(policy)
+
+
+def resolve_lane_policy_record(
+    provider_slug: str,
+    adapter_type: str,
+    *,
+    profiles: Mapping[str, ProviderCLIProfile],
+) -> dict[str, Any] | None:
+    """Return the raw lane policy record if present, including non-admitted entries."""
+    profile = profiles.get(provider_slug)
+    if profile is None:
+        return None
+    normalized_adapter_type = (adapter_type or "").strip().lower()
+    if not normalized_adapter_type:
+        return None
+    lane_policies = profile.lane_policies or {}
+    policy = lane_policies.get(normalized_adapter_type)
+    if isinstance(policy, Mapping):
+        return dict(policy)
+    return None
 
 
 def _cli_failure_mapping(failure_mappings: Mapping[str, dict[str, str]]) -> dict[str, str]:

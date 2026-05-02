@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from runtime.operations.queries import operator_observability
@@ -11,10 +12,12 @@ class _FakeConn:
         self,
         *,
         zone_rows=None,
+        in_flight_rows=None,
         fail_zone_lookup: bool = False,
         fail_in_flight: bool = False,
     ) -> None:
         self._zone_rows = zone_rows or []
+        self._in_flight_rows = in_flight_rows or []
         self._fail_zone_lookup = fail_zone_lookup
         self._fail_in_flight = fail_in_flight
 
@@ -26,7 +29,9 @@ class _FakeConn:
         if "FROM workflow_runs" in sql:
             if self._fail_in_flight:
                 raise RuntimeError("workflow run authority unavailable")
-            return []
+            return self._in_flight_rows
+        if "FROM workflow_outbox" in sql:
+            raise AssertionError("status snapshot must not derive completion from workflow_outbox")
         raise AssertionError(f"Unexpected SQL: {sql}")
 
 
@@ -162,6 +167,97 @@ def test_operator_status_snapshot_degrades_when_in_flight_readback_fails(monkeyp
         error["code"] == "in_flight_workflows_lookup_failed"
         for error in result["errors"]
     )
+    assert "in_flight_workflows" not in result
+
+
+def test_operator_status_snapshot_uses_unified_run_status_for_in_flight(
+    monkeypatch,
+) -> None:
+    requested_at = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+    conn = _FakeConn(
+        in_flight_rows=[
+            {
+                "run_id": "workflow_live",
+                "current_state": "running",
+                "requested_at": requested_at,
+            }
+        ]
+    )
+    subsystems = SimpleNamespace(get_pg_conn=lambda: conn)
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.list_receipts",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.receipt_stats",
+        lambda **_kwargs: {"totals": {"receipts": 0}},
+    )
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.get_run_status",
+        lambda _conn, run_id: {
+            "run_id": run_id,
+            "workflow_id": "workflow.spec",
+            "status": "running",
+            "spec_name": "Canonical Status Workflow",
+            "total_jobs": 3,
+            "completed_jobs": 1,
+            "created_at": requested_at,
+        },
+    )
+
+    result = operator_observability.handle_query_operator_status_snapshot(
+        operator_observability.QueryOperatorStatusSnapshot(since_hours=24),
+        subsystems,
+    )
+
+    assert result["in_flight_status_authority"] == (
+        "runtime.workflow.unified.get_run_status"
+    )
+    assert len(result["in_flight_workflows"]) == 1
+    run = result["in_flight_workflows"][0]
+    assert run["run_id"] == "workflow_live"
+    assert run["workflow_id"] == "workflow.spec"
+    assert run["workflow_name"] == "Canonical Status Workflow"
+    assert run["status"] == "running"
+    assert run["total_jobs"] == 3
+    assert run["completed_jobs"] == 1
+    assert isinstance(run["elapsed_seconds"], float)
+    assert run["status_authority"] == "runtime.workflow.unified.get_run_status"
+
+
+def test_operator_status_snapshot_hides_terminal_runs_from_active_view(monkeypatch) -> None:
+    conn = _FakeConn(
+        in_flight_rows=[
+            {
+                "run_id": "workflow_done",
+                "current_state": "running",
+                "requested_at": None,
+            }
+        ]
+    )
+    subsystems = SimpleNamespace(get_pg_conn=lambda: conn)
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.list_receipts",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.receipt_stats",
+        lambda **_kwargs: {"totals": {"receipts": 0}},
+    )
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.get_run_status",
+        lambda _conn, _run_id: {
+            "status": "succeeded",
+            "total_jobs": 3,
+            "completed_jobs": 3,
+        },
+    )
+
+    result = operator_observability.handle_query_operator_status_snapshot(
+        operator_observability.QueryOperatorStatusSnapshot(since_hours=24),
+        subsystems,
+    )
+
     assert "in_flight_workflows" not in result
 
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ManifestTree, PrxTable, SectionStrip, TokenChip } from '../primitives';
+import { ManifestTree, PrxTable, SectionStrip, TableFilterInput, TokenChip } from '../primitives';
 import { statusCapProps } from '../primitives-prx';
 import type { AtlasElement, AtlasPayload } from './AtlasPage';
 
@@ -227,13 +227,10 @@ export function AtlasTableView({
           getRowProps={(row) => ({ 'data-id': row.id })}
           emptyState="no nodes match · clear filters"
           toolbar={
-            <input
-              className="prx-table-filter"
+            <TableFilterInput
               placeholder="filter…"
               value={filter}
               onChange={(e) => onFilterChange(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
             />
           }
           filters={

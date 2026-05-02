@@ -10,7 +10,7 @@ if str(_WORKFLOW_ROOT) not in sys.path:
 
 import pytest
 
-from runtime import spec_compiler
+from runtime import spec_materializer
 from runtime.intent_composition import (
     ComposeAndLaunchBlocked,
     PlanLifecycle,
@@ -25,7 +25,7 @@ from runtime.intent_decomposition import (
     DecompositionRequiresLLMError,
     StepIntent,
 )
-from runtime.spec_compiler import CompiledSpec, LaunchReceipt, PlanPacket
+from runtime.spec_materializer import MaterializedSpec, LaunchReceipt, PlanPacket
 
 
 class _FakeConn:
@@ -35,7 +35,7 @@ class _FakeConn:
 def _stub_compile_spec(intent_dict, *, conn):
     label = intent_dict.get("label") or intent_dict["description"].split()[0].lower()
     return (
-        CompiledSpec(
+        MaterializedSpec(
             prompt=f"PROMPT({intent_dict['description']})",
             scope_write=list(intent_dict.get("write") or []),
             capabilities=["cap"],
@@ -49,7 +49,7 @@ def _stub_compile_spec(intent_dict, *, conn):
 
 
 def _install_quiet_preview_and_binding(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     import runtime.intent_binding as intent_binding_mod
 
@@ -260,7 +260,7 @@ def test_compose_and_launch_happy_path(monkeypatch) -> None:
 
 
 def test_compose_and_launch_refuses_unresolved_routes_by_default(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    monkeypatch.setattr(spec_materializer, "compile_spec", _stub_compile_spec)
 
     import runtime.intent_binding as intent_binding_mod
 

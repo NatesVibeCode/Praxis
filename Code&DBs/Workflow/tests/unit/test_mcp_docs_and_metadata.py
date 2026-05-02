@@ -77,7 +77,7 @@ def test_catalog_examples_match_current_tool_contracts() -> None:
     heal = catalog["praxis_heal"].example_input()
     roadmap = catalog["praxis_operator_roadmap_view"].example_input()
     validate = catalog["praxis_workflow_validate"].example_input()
-    wave = catalog["praxis_wave"].example_input()
+    solution = catalog["praxis_solution"].example_input()
 
     assert artifacts["action"] == "list"
     assert artifacts["sandbox_id"] == "sandbox_20260423_001"
@@ -88,8 +88,8 @@ def test_catalog_examples_match_current_tool_contracts() -> None:
     assert heal["job_label"] == "build"
     assert roadmap == {}
     assert (repo_root / validate["spec_path"]).is_file()
-    assert wave["action"] == "next"
-    assert wave["wave_id"] == "wave_1"
+    assert solution["action"] == "list"
+    assert solution["limit"] == 10
 
 
 def test_tool_display_name_omits_redundant_praxis_prefix() -> None:

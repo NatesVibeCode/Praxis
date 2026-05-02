@@ -79,23 +79,23 @@ Only behaviors pure CSS can't express.
 | `Tabstrip` | active tab, kbd accelerators | `<Tabstrip tabs={...} value={...} onChange={...} />` |
 | `DispatchButton` | hash calc, replay-cache tracking, dry-run | `<DispatchButton op="…" payload={...} idempotencyPolicy="…" onDispatch={...} />` |
 
-## Moon UI adoption map
+## Canvas UI adoption map
 
-| Moon file | swap target |
+| Canvas file | swap target |
 |---|---|
-| `moon/MoonBuildPage.tsx` | `prx-flow[data-layout="dag"]`, `prx-flow-node` (incl. placeholder), `prx-edge-halo`, `prx-flow-cursor`, `<Tabstrip>` |
-| `moon/MoonNodeDetail.tsx` | `prx-node-band` header, `prx-icon-tile` capability id, `<Tabstrip>` body, schema-driven form |
-| `moon/MoonPickers.tsx` | `<Tabstrip>` for verb-grouping, `<PromptInput>` for describe-path, `prx-icon-tile` per row |
-| `moon/MoonReleaseTray.tsx` | `prx-runlog` checklist + `<DispatchButton opensDrawer={false}>` for fire vs `▸` chevron drawer-opener |
-| `moon/MoonRunOverlay.tsx` | `prx-flow-cursor`, `<StatsRow>` (renders status-rail), `prx-runlog` |
-| `moon/MoonEdges.tsx` | `prx-edge-halo` gradient, tighten edge labels |
-| `moon/MoonOutcomeContract.tsx` | `prx-tree`, `prx-chip[data-source]`, `prx-gate` |
-| `moon/MoonDataDictionaryPanel.tsx` | `<DataTable>` + drawer |
-| `moon/MoonDecisionsPanel.tsx` | `<DataTable>` + `prx-frame[data-tone="warn"]` for active orders |
-| `moon/MoonIntegrationsPanel.tsx` | `<DataTable>` |
-| `moon/MoonBindingReviewQueue.tsx` | `prx-gate` rows |
-| `moon/MoonSurfaceReviewPanel.tsx` | `<StatsRow>` (status-rail), `prx-frame` |
-| `moon/MoonRunPanel.tsx` | `<ActivityFeed>` + `<DataTable>` for runs |
+| `canvas/CanvasBuildPage.tsx` | `prx-flow[data-layout="dag"]`, `prx-flow-node` (incl. placeholder), `prx-edge-halo`, `prx-flow-cursor`, `<Tabstrip>` |
+| `canvas/CanvasNodeDetail.tsx` | `prx-node-band` header, `prx-icon-tile` capability id, `<Tabstrip>` body, schema-driven form |
+| `canvas/CanvasPickers.tsx` | `<Tabstrip>` for verb-grouping, `<PromptInput>` for describe-path, `prx-icon-tile` per row |
+| `canvas/CanvasReleaseTray.tsx` | `prx-runlog` checklist + `<DispatchButton opensDrawer={false}>` for fire vs `▸` chevron drawer-opener |
+| `canvas/CanvasRunOverlay.tsx` | `prx-flow-cursor`, `<StatsRow>` (renders status-rail), `prx-runlog` |
+| `canvas/CanvasEdges.tsx` | `prx-edge-halo` gradient, tighten edge labels |
+| `canvas/CanvasOutcomeContract.tsx` | `prx-tree`, `prx-chip[data-source]`, `prx-gate` |
+| `canvas/CanvasDataDictionaryPanel.tsx` | `<DataTable>` + drawer |
+| `canvas/CanvasDecisionsPanel.tsx` | `<DataTable>` + `prx-frame[data-tone="warn"]` for active orders |
+| `canvas/CanvasIntegrationsPanel.tsx` | `<DataTable>` |
+| `canvas/CanvasBindingReviewQueue.tsx` | `prx-gate` rows |
+| `canvas/CanvasSurfaceReviewPanel.tsx` | `<StatsRow>` (status-rail), `prx-frame` |
+| `canvas/CanvasRunPanel.tsx` | `<ActivityFeed>` + `<DataTable>` for runs |
 | `dashboard/Dashboard.tsx` | `<StatsRow>` replaces card-shaped readouts |
 | `dashboard/RunDetailView.tsx` | `<ActivityFeed>`, `prx-receipt`, `<Tabstrip>` |
 | `dashboard/RunEvidencePanel.tsx` | `prx-event-chain` (raw classes), `prx-receipt` |
@@ -113,7 +113,7 @@ Only behaviors pure CSS can't express.
 5. PRs touching `primitives/`, `primitives-prx/`, or `styles/primitives*.css` require approval from the design-system owner per CODEOWNERS.
 6. Each refactor PR runs the contract test (`primitives/__tests__/contract.test.tsx`) — fails on PR if a primitive loses its `prx-*` class.
 
-## Phase 2 sequencing — Moon UI adoption (19 files)
+## Phase 2 sequencing — Canvas UI adoption (19 files)
 
 Sequenced by complexity to build pattern confidence on small files before tackling the canvas-grade complexity. Parallel agents OK within a phase, never across phases.
 
@@ -123,9 +123,9 @@ Small, high-test-coverage files that pressure-test the adapters under real consu
 
 | file | LOC | adapters used |
 |---|---|---|
-| `moon/MoonEdges.tsx` | 230 | raw `prx-flow-edge` + `prx-edge-halo` gradient |
+| `canvas/CanvasEdges.tsx` | 230 | raw `prx-flow-edge` + `prx-edge-halo` gradient |
 | `launcher/LauncherFrontdoor.tsx` | 318 | `<PromptInput>`, `<Tabstrip>` |
-| `moon/MoonSurfaceReviewPanel.tsx` | (small) | `<StatsRow>` + raw `prx-frame` |
+| `canvas/CanvasSurfaceReviewPanel.tsx` | (small) | `<StatsRow>` + raw `prx-frame` |
 
 **Exit criteria:** all 3 land + tests pass + design-system owner reviews the diffs and signs off on the pattern.
 
@@ -135,11 +135,11 @@ The hard ones. Land only after 2.a proves the adapter pattern.
 
 | file | LOC | adapters used |
 |---|---|---|
-| `moon/MoonNodeDetail.tsx` | 2,782 | raw `prx-node-band` + `<Tabstrip>` + schema-driven `<DataTable>` for inputs |
-| `moon/MoonBuildPage.tsx` | 3,113 | raw `prx-flow[data-layout="dag"]`, `prx-flow-node`, `prx-flow-cursor`, `<Tabstrip>` |
-| `moon/MoonPickers.tsx` | 783 | `<PromptInput>`, `<Tabstrip>`, raw `prx-icon-tile` |
-| `moon/MoonReleaseTray.tsx` | 480 | raw `prx-runlog` + `<DispatchButton opensDrawer>` |
-| `moon/MoonRunOverlay.tsx` | 376 | raw `prx-flow-cursor` + `<StatsRow>` + `<ActivityFeed>` |
+| `canvas/CanvasNodeDetail.tsx` | 2,782 | raw `prx-node-band` + `<Tabstrip>` + schema-driven `<DataTable>` for inputs |
+| `canvas/CanvasBuildPage.tsx` | 3,113 | raw `prx-flow[data-layout="dag"]`, `prx-flow-node`, `prx-flow-cursor`, `<Tabstrip>` |
+| `canvas/CanvasPickers.tsx` | 783 | `<PromptInput>`, `<Tabstrip>`, raw `prx-icon-tile` |
+| `canvas/CanvasReleaseTray.tsx` | 480 | raw `prx-runlog` + `<DispatchButton opensDrawer>` |
+| `canvas/CanvasRunOverlay.tsx` | 376 | raw `prx-flow-cursor` + `<StatsRow>` + `<ActivityFeed>` |
 
 **Exit criteria:** all canvas surfaces render through the primitives. No bespoke release/inspector/picker markup remains.
 
@@ -147,17 +147,17 @@ The hard ones. Land only after 2.a proves the adapter pattern.
 
 Straight `<DataTable>` consumers. Lower risk; can be parallelized.
 
-- `moon/MoonDataDictionaryPanel.tsx`
-- `moon/MoonDecisionsPanel.tsx`
-- `moon/MoonIntegrationsPanel.tsx`
-- `moon/MoonBindingReviewQueue.tsx`
-- `moon/MoonOutcomeContract.tsx`
+- `canvas/CanvasDataDictionaryPanel.tsx`
+- `canvas/CanvasDecisionsPanel.tsx`
+- `canvas/CanvasIntegrationsPanel.tsx`
+- `canvas/CanvasBindingReviewQueue.tsx`
+- `canvas/CanvasOutcomeContract.tsx`
 
 ### 2.d — Run / Dashboard (weeks 7–8)
 
 Runlog + event-chain consumers. Pairs with the receipt drawer pattern from 2.b.
 
-- `moon/MoonRunPanel.tsx`
+- `canvas/CanvasRunPanel.tsx`
 - `dashboard/RunDetailView.tsx`
 - `dashboard/RunEvidencePanel.tsx`
 - `dashboard/CostsPanel.tsx`

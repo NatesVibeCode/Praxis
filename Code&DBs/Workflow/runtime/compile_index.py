@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from runtime.capability_catalog import load_capability_catalog, sync_capability_catalog
-from runtime.compile_reuse import module_surface_manifest
+from runtime.materialize_reuse import module_surface_manifest
 from runtime.integrations.display_names import (
     base_integration_name,
     display_name_for_integration,
@@ -51,7 +51,7 @@ _COMPILE_INDEX_SURFACE_COMPONENTS: tuple[object, ...] = (
 )
 
 
-class CompileIndexAuthorityError(RuntimeError):
+class MaterializeIndexAuthorityError(RuntimeError):
     """Raised when compile-index authority is missing, stale, or malformed."""
 
     def __init__(
@@ -71,8 +71,8 @@ def _error(
     message: str,
     *,
     details: Mapping[str, Any] | None = None,
-) -> CompileIndexAuthorityError:
-    return CompileIndexAuthorityError(reason_code, message, details=details)
+) -> MaterializeIndexAuthorityError:
+    return MaterializeIndexAuthorityError(reason_code, message, details=details)
 
 
 def _require_text(value: object, *, field_name: str) -> str:
@@ -248,7 +248,7 @@ def current_repo_fingerprint(repo_root: str | Path | None = None) -> dict[str, A
 
 
 @dataclass(frozen=True, slots=True)
-class CompileIndexSnapshot:
+class MaterializeIndexSnapshot:
     """Immutable compile-index snapshot loaded from Postgres."""
 
     schema_version: int
@@ -270,7 +270,7 @@ class CompileIndexSnapshot:
     reference_catalog: tuple[dict[str, Any], ...]
     integration_registry: tuple[dict[str, Any], ...]
     object_types: tuple[dict[str, Any], ...]
-    compiler_route_hints: tuple[tuple[str, str], ...]
+    materializer_route_hints: tuple[tuple[str, str], ...]
     capability_catalog: tuple[dict[str, Any], ...]
     payload: Mapping[str, Any]
 
@@ -284,7 +284,7 @@ class CompileIndexSnapshot:
     def route_hint_cache(self) -> tuple[tuple[str, str], ...]:
         return tuple(
             (hint, route)
-            for hint, route in self.compiler_route_hints
+            for hint, route in self.materializer_route_hints
             if hint and route
         )
 
@@ -334,7 +334,7 @@ def refresh_compile_index(
     stale_after_seconds: int | None = None,
     decision_ref: str | None = None,
     surface_name: str = _DEFAULT_SURFACE_NAME,
-) -> CompileIndexSnapshot:
+) -> MaterializeIndexSnapshot:
     """Refresh the durable compile index snapshot explicitly."""
     if conn is None:
         raise _error(
@@ -364,7 +364,7 @@ def refresh_compile_index(
 
     reference_catalog = _load_reference_catalog(conn)
     capability_catalog = load_capability_catalog(conn)
-    compiler_route_hints = _load_compiler_route_hints(conn)
+    materializer_route_hints = _load_compiler_route_hints(conn)
     repo_info = current_repo_fingerprint(resolved_repo_root)
     surface_manifest = current_compile_surface_manifest(resolved_repo_root)
 
@@ -377,12 +377,12 @@ def refresh_compile_index(
         "reference_catalog": reference_catalog,
         "integration_registry": integrations,
         "object_types": object_types,
-        "compiler_route_hints": [
+        "materializer_route_hints": [
             {
                 "hint_text": hint_text,
                 "route_slug": route_slug,
             }
-            for hint_text, route_slug in compiler_route_hints
+            for hint_text, route_slug in materializer_route_hints
         ],
         "capability_catalog": capability_catalog,
     }
@@ -390,8 +390,8 @@ def refresh_compile_index(
         "reference_catalog": _stable_hash(reference_catalog),
         "integration_registry": _stable_hash(integrations),
         "object_types": _stable_hash(object_types),
-        "compiler_route_hints": _stable_hash(
-            [{"hint_text": hint, "route_slug": route} for hint, route in compiler_route_hints]
+        "materializer_route_hints": _stable_hash(
+            [{"hint_text": hint, "route_slug": route} for hint, route in materializer_route_hints]
         ),
         "capability_catalog": _stable_hash(capability_catalog),
     }
@@ -399,7 +399,7 @@ def refresh_compile_index(
         "reference_catalog": len(reference_catalog),
         "integration_registry": len(integrations),
         "object_types": len(object_types),
-        "compiler_route_hints": len(compiler_route_hints),
+        "materializer_route_hints": len(materializer_route_hints),
         "capability_catalog": len(capability_catalog),
     }
     snapshot_payload["source_fingerprints"] = source_fingerprints
@@ -494,7 +494,7 @@ def load_compile_index_snapshot(
     surface_name: str = _DEFAULT_SURFACE_NAME,
     require_fresh: bool = True,
     repo_root: str | Path | None = None,
-) -> CompileIndexSnapshot:
+) -> MaterializeIndexSnapshot:
     """Load the latest or pinned compile-index snapshot from Postgres."""
     if conn is None:
         raise _error(
@@ -618,7 +618,7 @@ def load_compile_index_snapshot(
             },
         )
 
-    return CompileIndexSnapshot(
+    return MaterializeIndexSnapshot(
         schema_version=snapshot.schema_version,
         compile_index_ref=snapshot.compile_index_ref,
         compile_surface_revision=snapshot.compile_surface_revision,
@@ -638,14 +638,14 @@ def load_compile_index_snapshot(
         reference_catalog=snapshot.reference_catalog,
         integration_registry=snapshot.integration_registry,
         object_types=snapshot.object_types,
-        compiler_route_hints=snapshot.compiler_route_hints,
+        materializer_route_hints=snapshot.materializer_route_hints,
         capability_catalog=snapshot.capability_catalog,
         payload=snapshot.payload,
     )
 
 
 def _evaluate_freshness(
-    snapshot: CompileIndexSnapshot,
+    snapshot: MaterializeIndexSnapshot,
     *,
     repo_root: str | Path | None = None,
 ) -> dict[str, str | None]:
@@ -658,14 +658,14 @@ def _evaluate_freshness(
         if manifest_revision:
             try:
                 current_manifest = current_compile_surface_manifest(repo_root)
-            except CompileIndexAuthorityError as exc:
+            except MaterializeIndexAuthorityError as exc:
                 return {"state": "stale", "reason": exc.reason_code}
             if _as_text(current_manifest.get("surface_revision")) != manifest_revision:
                 return {"state": "stale", "reason": "surface_manifest_mismatch"}
         else:
             try:
                 current = current_repo_fingerprint(repo_root)
-            except CompileIndexAuthorityError as exc:
+            except MaterializeIndexAuthorityError as exc:
                 return {"state": "stale", "reason": exc.reason_code}
             if _as_text(current.get("repo_fingerprint")) != snapshot.repo_fingerprint:
                 return {"state": "stale", "reason": "repo_fingerprint_mismatch"}
@@ -673,7 +673,7 @@ def _evaluate_freshness(
     return {"state": "fresh", "reason": None}
 
 
-def _snapshot_from_row(row: dict[str, Any]) -> CompileIndexSnapshot:
+def _snapshot_from_row(row: dict[str, Any]) -> MaterializeIndexSnapshot:
     payload = _json_object(row.get("payload"))
     repo_info = _json_object(payload.get("repo_info"))
     surface_manifest = _json_object(payload.get("surface_manifest"))
@@ -691,11 +691,11 @@ def _snapshot_from_row(row: dict[str, Any]) -> CompileIndexSnapshot:
         _normalize_object_type_row(item)
         for item in _json_list(payload.get("object_types"))
     )
-    compiler_route_hints = tuple(
+    materializer_route_hints = tuple(
         route_hint
         for route_hint in (
             _normalize_route_hint_row(item)
-            for item in _json_list(payload.get("compiler_route_hints"))
+            for item in _json_list(payload.get("materializer_route_hints"))
         )
         if route_hint[0] and route_hint[1]
     )
@@ -748,7 +748,7 @@ def _snapshot_from_row(row: dict[str, Any]) -> CompileIndexSnapshot:
             details={"compile_index_ref": compile_index_ref},
         )
 
-    return CompileIndexSnapshot(
+    return MaterializeIndexSnapshot(
         schema_version=schema_version,
         compile_index_ref=compile_index_ref,
         compile_surface_revision=compile_surface_revision,
@@ -771,7 +771,7 @@ def _snapshot_from_row(row: dict[str, Any]) -> CompileIndexSnapshot:
         reference_catalog=reference_catalog,
         integration_registry=integration_registry,
         object_types=object_types,
-        compiler_route_hints=compiler_route_hints,
+        materializer_route_hints=materializer_route_hints,
         capability_catalog=capability_catalog,
         payload=payload,
     )
@@ -970,7 +970,7 @@ def _load_compiler_route_hints(conn: Any) -> list[tuple[str, str]]:
     rows = conn.execute(
         """
         SELECT hint_text, route_slug
-          FROM compiler_route_hints
+          FROM materializer_route_hints
          WHERE enabled = TRUE
          ORDER BY priority ASC, hint_text ASC
         """
@@ -985,8 +985,8 @@ def _load_compiler_route_hints(conn: Any) -> list[tuple[str, str]]:
 
 
 __all__ = [
-    "CompileIndexAuthorityError",
-    "CompileIndexSnapshot",
+    "MaterializeIndexAuthorityError",
+    "MaterializeIndexSnapshot",
     "current_repo_fingerprint",
     "load_compile_index_snapshot",
     "refresh_compile_index",

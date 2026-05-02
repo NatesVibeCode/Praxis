@@ -6,12 +6,12 @@ row registered in migration 226 (Phase 1.6 of the public beta ramp).
 
 Known emitters (wiring lands packet-by-packet):
 - ``runtime.catalog_type_contract_validation`` findings
-- ``runtime.spec_compiler.UnresolvedSourceRefError``
-- ``runtime.spec_compiler.UnresolvedStageError``
-- ``runtime.spec_compiler.UnresolvedWriteScopeError``
-- ``runtime.spec_compiler._compute_verification_gaps`` entries
+- ``runtime.spec_materializer.UnresolvedSourceRefError``
+- ``runtime.spec_materializer.UnresolvedStageError``
+- ``runtime.spec_materializer.UnresolvedWriteScopeError``
+- ``runtime.spec_materializer._compute_verification_gaps`` entries
 - ``runtime.build_authority`` typed build issues
-- future: Moon composer + ``compose_plan_from_intent`` type-flow errors
+- future: Canvas composer + ``compose_plan_from_intent`` type-flow errors
 
 Payload shape (matches ``payload_keys`` declared in migration 226):
 ::
@@ -291,7 +291,7 @@ def emit_typed_gaps_for_compile_errors(
     *,
     source_ref: str | None = None,
 ) -> int:
-    """Promote a spec_compiler Unresolved* error's entries to
+    """Promote a spec_materializer Unresolved* error's entries to
     ``typed_gap.created`` events (one per unresolved entry).
 
     Dispatches by error type:
@@ -316,7 +316,7 @@ def emit_typed_gaps_for_compile_errors(
     Returns the count of emitted events. Best-effort on emission.
     """
     try:
-        from runtime.spec_compiler import (
+        from runtime.spec_materializer import (
             UnresolvedSourceRefError,
             UnresolvedStageError,
             UnresolvedWriteScopeError,
@@ -402,7 +402,7 @@ def emit_typed_gaps_for_type_flow_errors(
     missing types parsed into the event context. Unparseable error
     strings still emit with the raw error captured — no drop-on-floor.
 
-    Opt-in with conn: callers (Moon commit handler, compose_plan_from_intent)
+    Opt-in with conn: callers (Canvas commit handler, compose_plan_from_intent)
     pass the live Postgres conn and their source_ref ("commit:wf_id" /
     "compose_plan:{plan_name}"). Callers without a conn skip emission.
 
@@ -446,7 +446,7 @@ def emit_typed_gaps_for_verification_gaps(
     """Promote ``_compute_verification_gaps`` entries to ``typed_gap.created``
     events.
 
-    Opt-in companion to ``runtime.spec_compiler._compute_verification_gaps``.
+    Opt-in companion to ``runtime.spec_materializer._compute_verification_gaps``.
     Callers with a live conn (typically at packet_map assembly time in
     ``launch_plan`` or ``launch_proposed``) can pass the gap list here to
     get one ``typed_gap.created`` event per gap. ``source_ref`` (e.g.

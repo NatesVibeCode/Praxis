@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-import runtime.compile_index as compile_index
+import runtime.materialize_index as compile_index
 
 _REPO_ROOT = str(Path(__file__).resolve().parents[4])
 
@@ -139,20 +139,20 @@ def _snapshot_row(
             "reference_catalog": "catalog-fingerprint",
             "integration_registry": "integration-fingerprint",
             "object_types": "object-type-fingerprint",
-            "compiler_route_hints": "route-hint-fingerprint",
+            "materializer_route_hints": "route-hint-fingerprint",
             "capability_catalog": "capability-fingerprint",
         },
         "source_counts": {
             "reference_catalog": 1,
             "integration_registry": 1,
             "object_types": 1,
-            "compiler_route_hints": 1,
+            "materializer_route_hints": 1,
             "capability_catalog": 1,
         },
         "reference_catalog": _source_rows()["catalog"],
         "integration_registry": _source_rows()["integrations"],
         "object_types": _source_rows()["object_types"],
-        "compiler_route_hints": [
+        "materializer_route_hints": [
             {"hint_text": hint, "route_slug": route}
             for hint, route in _source_rows()["route_hints"]
         ],
@@ -258,7 +258,7 @@ def test_refresh_compile_index_materializes_durable_snapshot(monkeypatch: pytest
         "reference_catalog": 1,
         "integration_registry": 1,
         "object_types": 1,
-        "compiler_route_hints": 1,
+        "materializer_route_hints": 1,
         "capability_catalog": 1,
     }
     assert snapshot.summary()["route_hint_count"] == 1
@@ -292,7 +292,7 @@ def test_load_compile_index_snapshot_returns_latest_fresh_snapshot() -> None:
 def test_load_compile_index_snapshot_missing_fails_closed() -> None:
     conn = _CompileIndexConn(rows=[])
 
-    with pytest.raises(compile_index.CompileIndexAuthorityError) as exc_info:
+    with pytest.raises(compile_index.MaterializeIndexAuthorityError) as exc_info:
         compile_index.load_compile_index_snapshot(
             conn,
             surface_name="compiler",
@@ -312,7 +312,7 @@ def test_load_compile_index_snapshot_stale_fails_closed() -> None:
         ]
     )
 
-    with pytest.raises(compile_index.CompileIndexAuthorityError) as exc_info:
+    with pytest.raises(compile_index.MaterializeIndexAuthorityError) as exc_info:
         compile_index.load_compile_index_snapshot(
             conn,
             surface_name="compiler",
@@ -382,7 +382,7 @@ def test_load_compile_index_snapshot_stales_when_surface_manifest_changes(
         },
     )
 
-    with pytest.raises(compile_index.CompileIndexAuthorityError) as exc_info:
+    with pytest.raises(compile_index.MaterializeIndexAuthorityError) as exc_info:
         compile_index.load_compile_index_snapshot(
             conn,
             surface_name="compiler",

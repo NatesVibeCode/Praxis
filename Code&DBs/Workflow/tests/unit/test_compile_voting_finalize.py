@@ -92,7 +92,7 @@ def test_resolve_top_k_voters_picks_best_affinity_match(monkeypatch) -> None:
     _install_pg_fake(monkeypatch, profile_row=profile_row, candidate_rows=candidate_rows)
 
     voters = compiler_llm.resolve_top_k_voters(
-        "compile_finalize", k=2, diverse_providers=False
+        "materialize_finalize", k=2, diverse_providers=False
     )
     assert len(voters) == 2
     assert voters[0]["model_slug"] == "vendor/strong"
@@ -141,7 +141,7 @@ def test_resolve_top_k_voters_prefers_provider_diversity(monkeypatch) -> None:
     _install_pg_fake(monkeypatch, profile_row=profile_row, candidate_rows=candidate_rows)
 
     voters = compiler_llm.resolve_top_k_voters(
-        "compile_finalize", k=2, diverse_providers=True
+        "materialize_finalize", k=2, diverse_providers=True
     )
     providers = sorted(v["provider_slug"] for v in voters)
     assert providers == ["openrouter", "together"], (
@@ -179,7 +179,7 @@ def test_resolve_top_k_voters_benchmark_weights_break_ties(monkeypatch) -> None:
     ]
     _install_pg_fake(monkeypatch, profile_row=profile_row, candidate_rows=candidate_rows)
 
-    voters = compiler_llm.resolve_top_k_voters("compile_finalize", k=2)
+    voters = compiler_llm.resolve_top_k_voters("materialize_finalize", k=2)
     # smarter: 60×1.0 + 50×0.5 = 85
     # dumber:  30×1.0 + 200×0.5 = 130
     # dumber wins on benchmark score
@@ -230,7 +230,7 @@ def test_voting_unanimous_early_stops_after_min_votes(monkeypatch) -> None:
         return json.loads(raw)["answer"]
 
     result = compiler_llm._call_voting_sub_task(
-        task_type="compile_finalize",
+        task_type="materialize_finalize",
         prompt="...",
         parser=_parse,
         min_votes=3,
@@ -258,7 +258,7 @@ def test_voting_round1_majority_short_circuits(monkeypatch) -> None:
     monkeypatch.setattr(compiler_llm, "_call_specific_route", _fake_route)
 
     result = compiler_llm._call_voting_sub_task(
-        task_type="compile_finalize",
+        task_type="materialize_finalize",
         prompt="...",
         parser=lambda r: __import__("json").loads(r)["answer"],
         min_votes=3,
@@ -287,7 +287,7 @@ def test_voting_expands_to_round2_then_tiebreaks(monkeypatch) -> None:
     monkeypatch.setattr(compiler_llm, "_call_specific_route", _fake_route)
 
     result = compiler_llm._call_voting_sub_task(
-        task_type="compile_finalize",
+        task_type="materialize_finalize",
         prompt="...",
         parser=lambda r: __import__("json").loads(r)["answer"],
         min_votes=3,
@@ -316,7 +316,7 @@ def test_voting_failed_voter_does_not_break_tally(monkeypatch) -> None:
     monkeypatch.setattr(compiler_llm, "_call_specific_route", _fake_route)
 
     result = compiler_llm._call_voting_sub_task(
-        task_type="compile_finalize",
+        task_type="materialize_finalize",
         prompt="...",
         parser=lambda r: __import__("json").loads(r)["answer"],
         min_votes=3,

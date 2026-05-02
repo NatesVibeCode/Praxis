@@ -38,7 +38,7 @@ from runtime.workflow._workflow_execution import (
     WorkflowExecutionContext,
     execute_admitted_workflow_request,
 )
-from runtime.workflow_graph_compiler import (
+from runtime.workflow_graph_materializer import (
     GraphWorkflowCompileError,
     compile_graph_workflow_request,
     spec_uses_graph_runtime,
@@ -77,7 +77,7 @@ from runtime.dynamic_timeout import (
     calculate_timeout_seconds,
     max_complexity_tier,
 )
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
 from runtime.queue_admission import (
     DEFAULT_QUEUE_CRITICAL_THRESHOLD,
     QueueAdmissionGate,
@@ -301,9 +301,9 @@ def _graph_packet_definition_revision(
     packet_provenance: Mapping[str, object] | None,
 ) -> str:
     provenance = packet_provenance or {}
-    compiled_spec_row = (
-        provenance.get("compiled_spec_row")
-        if isinstance(provenance.get("compiled_spec_row"), Mapping)
+    materialized_spec_row = (
+        provenance.get("materialized_spec_row")
+        if isinstance(provenance.get("materialized_spec_row"), Mapping)
         else {}
     )
     definition_row = (
@@ -312,7 +312,7 @@ def _graph_packet_definition_revision(
         else {}
     )
     for candidate in (
-        compiled_spec_row.get("definition_revision"),
+        materialized_spec_row.get("definition_revision"),
         definition_row.get("definition_revision"),
         spec_dict.get("definition_revision"),
         request.workflow_definition_id,
@@ -330,13 +330,13 @@ def _graph_packet_plan_revision(
     packet_provenance: Mapping[str, object] | None,
 ) -> str:
     provenance = packet_provenance or {}
-    compiled_spec_row = (
-        provenance.get("compiled_spec_row")
-        if isinstance(provenance.get("compiled_spec_row"), Mapping)
+    materialized_spec_row = (
+        provenance.get("materialized_spec_row")
+        if isinstance(provenance.get("materialized_spec_row"), Mapping)
         else {}
     )
     for candidate in (
-        compiled_spec_row.get("plan_revision"),
+        materialized_spec_row.get("plan_revision"),
         spec_dict.get("plan_revision"),
         request.workflow_definition_id,
     ):
@@ -568,9 +568,9 @@ def _build_graph_execution_packet(
                     if isinstance(provenance.get("definition_row"), Mapping)
                     else {"definition_revision": definition_revision}
                 ),
-                "compiled_spec_row": (
-                    dict(provenance.get("compiled_spec_row"))
-                    if isinstance(provenance.get("compiled_spec_row"), Mapping)
+                "materialized_spec_row": (
+                    dict(provenance.get("materialized_spec_row"))
+                    if isinstance(provenance.get("materialized_spec_row"), Mapping)
                     else {
                         "definition_revision": definition_revision,
                         "plan_revision": plan_revision,
@@ -608,9 +608,9 @@ def _build_graph_execution_packet(
                     if isinstance(provenance.get("definition_row"), Mapping)
                     else {"definition_revision": definition_revision}
                 ),
-                "compiled_spec_row": (
-                    dict(provenance.get("compiled_spec_row"))
-                    if isinstance(provenance.get("compiled_spec_row"), Mapping)
+                "materialized_spec_row": (
+                    dict(provenance.get("materialized_spec_row"))
+                    if isinstance(provenance.get("materialized_spec_row"), Mapping)
                     else {
                         "definition_revision": definition_revision,
                         "plan_revision": plan_revision,
@@ -645,7 +645,7 @@ def _build_graph_execution_packet(
         "verify_refs": verify_refs,
         "authority_inputs": authority_inputs,
         "file_inputs": file_inputs,
-        "compile_provenance": {
+        "materialize_provenance": {
             "artifact_kind": "packet_lineage",
             "input_fingerprint": "",
             "surface_revision": "workflow_graph_runtime.packet_submit",
@@ -658,10 +658,10 @@ def _build_graph_execution_packet(
             "authority_inputs": reuse_authority_inputs,
         },
     }
-    compile_provenance = dict(packet_payload["compile_provenance"])
+    materialize_provenance = dict(packet_payload["materialize_provenance"])
     compile_input_payload = {
-        "artifact_kind": compile_provenance["artifact_kind"],
-        "surface_revision": compile_provenance["surface_revision"],
+        "artifact_kind": materialize_provenance["artifact_kind"],
+        "surface_revision": materialize_provenance["surface_revision"],
         "definition_revision": definition_revision,
         "plan_revision": plan_revision,
         "workflow_id": request.workflow_id,
@@ -671,13 +671,13 @@ def _build_graph_execution_packet(
         "reference_bindings": reference_bindings,
         "capability_bindings": capability_bindings,
         "verify_refs": verify_refs,
-        "file_inputs": compile_provenance["file_inputs"],
-        "authority_inputs": compile_provenance["authority_inputs"],
+        "file_inputs": materialize_provenance["file_inputs"],
+        "authority_inputs": materialize_provenance["authority_inputs"],
     }
-    compile_provenance["input_fingerprint"] = canonical_hash(compile_input_payload)
-    packet_payload["compile_provenance"] = compile_provenance
+    materialize_provenance["input_fingerprint"] = canonical_hash(compile_input_payload)
+    packet_payload["materialize_provenance"] = materialize_provenance
     try:
-        return CompileArtifactStore(conn).persist_execution_packet_with_reuse(
+        return MaterializeArtifactStore(conn).persist_execution_packet_with_reuse(
             packet=packet_payload,
             authority_refs=[definition_revision, plan_revision],
             parent_artifact_ref=plan_revision,
@@ -1154,6 +1154,44 @@ def _preview_route_payload(job: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _model_eval_worker_contract_error(job: Mapping[str, object]) -> str | None:
+    task_type = str(job.get("task_type") or "").strip()
+    if task_type != "model_eval_worker":
+        return None
+    try:
+        from runtime.model_eval.pins import (
+            PinnedModelEvalRouteError,
+            validate_model_eval_model_config,
+            validate_pinned_agent_slug,
+        )
+    except Exception as exc:  # pragma: no cover - import failure should fail closed.
+        return f"model_eval_worker pin validator unavailable: {exc}"
+
+    agent_slug = str(job.get("agent") or "").strip()
+    try:
+        validate_pinned_agent_slug(agent_slug)
+    except PinnedModelEvalRouteError as exc:
+        return str(exc)
+
+    candidate_ref = str(job.get("model_eval_candidate_ref") or "").strip()
+    model_config = job.get("model_config")
+    if not candidate_ref and not isinstance(model_config, Mapping):
+        return "model_eval_worker requires model_eval_candidate_ref or full model_config"
+    if isinstance(model_config, Mapping):
+        config_payload = dict(model_config)
+        config_agent = str(
+            config_payload.get("agent") or config_payload.get("agent_slug") or ""
+        ).strip()
+        if config_agent and config_agent != agent_slug:
+            return "model_eval_worker job.agent must match model_config.agent"
+        config_payload.setdefault("agent", agent_slug)
+        try:
+            validate_model_eval_model_config(config_payload)
+        except PinnedModelEvalRouteError as exc:
+            return str(exc)
+    return None
+
+
 def preview_workflow_execution(
     conn: SyncPostgresConnection,
     *,
@@ -1214,10 +1252,22 @@ def preview_workflow_execution(
 
     spec_verify_refs = _normalize_paths(raw_snapshot.get("verify_refs"))
     warnings: list[str] = []
+    model_eval_worker_errors = [
+        f"{str(job.get('label') or 'job').strip() or 'job'}: {error}"
+        for job in spec.jobs
+        for error in [_model_eval_worker_contract_error(job)]
+        if error
+    ]
+    warnings.extend(model_eval_worker_errors)
+    routable_jobs = [
+        job
+        for job in spec.jobs
+        if str(job.get("task_type") or "").strip() != "model_eval_worker"
+    ]
 
     auto_llm_jobs = [
         str(job.get("label") or job.get("agent") or "").strip()
-        for job in spec.jobs
+        for job in routable_jobs
         if str(job.get("agent") or "auto/build").strip().startswith("auto/")
         and str(job.get("adapter_type") or "").strip().lower()
         in {"", "cli_llm", "llm_task"}
@@ -1228,12 +1278,12 @@ def preview_workflow_execution(
             "resolve auto/* routes in preview; refusing to route against "
             "the global provider candidate catalog"
         )
-    else:
+    elif routable_jobs:
         try:
             from runtime.task_type_router import TaskTypeRouter
 
             TaskTypeRouter(conn).resolve_spec_jobs(
-                spec.jobs,
+                routable_jobs,
                 runtime_profile_ref=runtime_profile_ref or None,
             )
         except Exception as exc:
@@ -1248,6 +1298,14 @@ def preview_workflow_execution(
     for index, job in enumerate(spec.jobs):
         label = str(job.get("label") or f"job_{index}")
         route_payload = _preview_route_payload(job)
+        worker_contract_error = _model_eval_worker_contract_error(job)
+        if worker_contract_error:
+            route_payload.update(
+                {
+                    "route_status": "rejected",
+                    "route_reason": f"model_eval_worker contract rejected: {worker_contract_error}",
+                }
+            )
         route_reason = str(route_payload.get("route_reason") or "").strip()
         if route_reason:
             warnings.append(f"{label}: {route_reason}")
@@ -1590,15 +1648,15 @@ def _submit_graph_workflow_inline(
         packet_provenance=packet_provenance,
     )
     packet_reuse_provenance = None
-    compile_provenance = execution_packet.get("compile_provenance")
-    if isinstance(compile_provenance, dict) and isinstance(
-        compile_provenance.get("reuse"),
+    materialize_provenance = execution_packet.get("materialize_provenance")
+    if isinstance(materialize_provenance, dict) and isinstance(
+        materialize_provenance.get("reuse"),
         dict,
     ):
-        packet_reuse_provenance = dict(compile_provenance["reuse"])
+        packet_reuse_provenance = dict(materialize_provenance["reuse"])
         packet_reuse_provenance.setdefault(
             "input_fingerprint",
-            str(compile_provenance.get("input_fingerprint") or "").strip(),
+            str(materialize_provenance.get("input_fingerprint") or "").strip(),
         )
     payload = {
         "run_id": intake_outcome.run_id,
@@ -1867,21 +1925,34 @@ def _do_submit_workflow(
     """
     now = datetime.now(timezone.utc)
     runtime_profile_ref = _runtime_profile_ref_from_spec(spec, conn=conn)
+    for job in spec.jobs:
+        contract_error = _model_eval_worker_contract_error(job)
+        if contract_error:
+            label = str(job.get("label") or "job").strip() or "job"
+            raise RuntimeError(
+                f"model_eval_worker job {label!r} rejected: {contract_error}"
+            )
 
     # Resolve auto/ agent slugs via task_type_router
-    try:
-        from runtime.task_type_router import TaskTypeRouter
-        router = TaskTypeRouter(conn)
-        router.resolve_spec_jobs(
-            spec.jobs,
-            runtime_profile_ref=runtime_profile_ref or None,
-        )
-    except Exception as exc:
-        if runtime_profile_ref:
-            raise RuntimeError(
-                f"workflow submit failed closed for runtime profile {runtime_profile_ref!r}: {exc}",
-            ) from exc
-        logger.error("Task type routing failed: %s", exc)
+    routable_jobs = [
+        job
+        for job in spec.jobs
+        if str(job.get("task_type") or "").strip() != "model_eval_worker"
+    ]
+    if routable_jobs:
+        try:
+            from runtime.task_type_router import TaskTypeRouter
+            router = TaskTypeRouter(conn)
+            router.resolve_spec_jobs(
+                routable_jobs,
+                runtime_profile_ref=runtime_profile_ref or None,
+            )
+        except Exception as exc:
+            if runtime_profile_ref:
+                raise RuntimeError(
+                    f"workflow submit failed closed for runtime profile {runtime_profile_ref!r}: {exc}",
+                ) from exc
+            logger.error("Task type routing failed: %s", exc)
 
     raw_snapshot = spec._raw.copy()
     if "jobs" in raw_snapshot:
@@ -1902,11 +1973,13 @@ def _do_submit_workflow(
         if not failover_chain:
             failover_chain = [str(job.get("agent") or "auto/build").strip()]
         route_origin_slug = str(getattr(route_plan, "original_slug", "") or "").strip()
+        route_candidates = list(getattr(route_plan, "route_candidates", ()) or [])
         if label:
             route_plan_manifest[label] = {
                 "route_task_type": route_task_type,
                 "failover_chain": [str(item).strip() for item in failover_chain if str(item).strip()],
                 "route_origin_slug": route_origin_slug,
+                "route_candidates": route_candidates,
             }
     authority = _ensure_workflow_authority(
         conn,
@@ -1958,13 +2031,14 @@ def _do_submit_workflow(
             failover_chain = list(route_plan.chain)
         if not failover_chain:
             failover_chain = [agent_slug]
-        _enforce_effective_provider_job_catalog(
-            conn,
-            runtime_profile_ref=runtime_profile_ref,
-            route_task_type=route_task_type,
-            failover_chain=[str(item).strip() for item in failover_chain if str(item).strip()],
-            job_label=str(label),
-        )
+        if route_task_type != "model_eval_worker":
+            _enforce_effective_provider_job_catalog(
+                conn,
+                runtime_profile_ref=runtime_profile_ref,
+                route_task_type=route_task_type,
+                failover_chain=[str(item).strip() for item in failover_chain if str(item).strip()],
+                job_label=str(label),
+            )
 
         initial_status = "pending" if depends_on else "ready"
         max_attempts = int(job.get("max_attempts", 3) or 3)
@@ -2079,12 +2153,12 @@ def _do_submit_workflow(
     )
     packet_reuse_provenance = None
     if execution_packet is not None:
-        compile_provenance = execution_packet.get("compile_provenance")
-        if isinstance(compile_provenance, dict) and isinstance(compile_provenance.get("reuse"), dict):
-            packet_reuse_provenance = dict(compile_provenance["reuse"])
+        materialize_provenance = execution_packet.get("materialize_provenance")
+        if isinstance(materialize_provenance, dict) and isinstance(materialize_provenance.get("reuse"), dict):
+            packet_reuse_provenance = dict(materialize_provenance["reuse"])
             packet_reuse_provenance.setdefault(
                 "input_fingerprint",
-                str(compile_provenance.get("input_fingerprint") or "").strip(),
+                str(materialize_provenance.get("input_fingerprint") or "").strip(),
             )
 
     persisted_job_labels = {label for _, label, _ in job_rows}
@@ -2454,7 +2528,7 @@ def load_execution_packets(
 ) -> tuple[dict[str, object], ...]:
     """Load shadow execution packet truth for runtime inspection."""
 
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     return tuple(dict(packet.payload) for packet in store.load_execution_packets(run_id=run_id))
 
 
@@ -2470,16 +2544,16 @@ def _retry_packet_reuse_provenance(
     reuse validation is strict and stale artifacts fail closed.
     """
 
-    store = CompileArtifactStore(conn)
+    store = MaterializeArtifactStore(conn)
     packets = store.load_execution_packets(run_id=run_id)
     if not packets:
         return None
 
     input_fingerprints = {
-        str(packet.payload.get("compile_provenance", {}).get("input_fingerprint") or "").strip()
+        str(packet.payload.get("materialize_provenance", {}).get("input_fingerprint") or "").strip()
         for packet in packets
-        if isinstance(packet.payload.get("compile_provenance"), dict)
-        and str(packet.payload.get("compile_provenance", {}).get("input_fingerprint") or "").strip()
+        if isinstance(packet.payload.get("materialize_provenance"), dict)
+        and str(packet.payload.get("materialize_provenance", {}).get("input_fingerprint") or "").strip()
     }
     if len(input_fingerprints) > 1:
         raise RuntimeError(
@@ -2487,23 +2561,23 @@ def _retry_packet_reuse_provenance(
         )
 
     packet = packets[0]
-    compile_provenance = (
-        dict(packet.payload.get("compile_provenance"))
-        if isinstance(packet.payload.get("compile_provenance"), dict)
+    materialize_provenance = (
+        dict(packet.payload.get("materialize_provenance"))
+        if isinstance(packet.payload.get("materialize_provenance"), dict)
         else {}
     )
-    input_fingerprint = str(compile_provenance.get("input_fingerprint") or "").strip()
+    input_fingerprint = str(materialize_provenance.get("input_fingerprint") or "").strip()
     if not input_fingerprint:
         return None
 
-    recorded_lineage_revision = str(compile_provenance.get("packet_lineage_revision") or "").strip()
-    recorded_lineage_hash = str(compile_provenance.get("packet_lineage_hash") or "").strip()
+    recorded_lineage_revision = str(materialize_provenance.get("packet_lineage_revision") or "").strip()
+    recorded_lineage_hash = str(materialize_provenance.get("packet_lineage_hash") or "").strip()
     try:
         reusable_lineage = store.load_reusable_artifact(
             artifact_kind="packet_lineage",
             input_fingerprint=input_fingerprint,
         )
-    except CompileArtifactError as exc:
+    except MaterializeArtifactError as exc:
         raise RuntimeError(f"retry compile reuse failed closed: {exc}") from exc
     if reusable_lineage is None:
         raise RuntimeError(
@@ -2520,8 +2594,8 @@ def _retry_packet_reuse_provenance(
         )
 
     recorded_reuse = (
-        dict(compile_provenance.get("reuse"))
-        if isinstance(compile_provenance.get("reuse"), dict)
+        dict(materialize_provenance.get("reuse"))
+        if isinstance(materialize_provenance.get("reuse"), dict)
         else {}
     )
     return {

@@ -7,8 +7,8 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
-from runtime.compile_reuse import module_surface_revision, stable_hash
+from runtime.materialize_artifacts import MaterializeArtifactError, MaterializeArtifactStore
+from runtime.materialize_reuse import module_surface_revision, stable_hash
 from runtime.execution_packet_authority import (
     inspect_execution_packets,
 )
@@ -159,19 +159,19 @@ def _job_verify_refs(*job_rows: Mapping[str, Any]) -> list[str]:
 def _has_reference_authority(
     *,
     provenance: Mapping[str, Any],
-    compiled_spec_row: Mapping[str, Any],
+    materialized_spec_row: Mapping[str, Any],
     definition_row: Mapping[str, Any],
-    compiled_job_row: Mapping[str, Any],
+    materialized_job_row: Mapping[str, Any],
     definition_job_row: Mapping[str, Any],
 ) -> bool:
     return any(
         (
             "reference_bindings" in provenance,
-            "references" in compiled_spec_row,
+            "references" in materialized_spec_row,
             "references" in definition_row,
-            "reference_slugs" in compiled_job_row,
+            "reference_slugs" in materialized_job_row,
             "reference_slugs" in definition_job_row,
-            "references" in compiled_job_row,
+            "references" in materialized_job_row,
             "references" in definition_job_row,
         )
     )
@@ -182,9 +182,9 @@ def _has_capability_authority(
     config: Mapping[str, Any],
     payload: Mapping[str, Any],
     provenance: Mapping[str, Any],
-    compiled_spec_row: Mapping[str, Any],
+    materialized_spec_row: Mapping[str, Any],
     definition_row: Mapping[str, Any],
-    compiled_job_row: Mapping[str, Any],
+    materialized_job_row: Mapping[str, Any],
     definition_job_row: Mapping[str, Any],
 ) -> bool:
     return any(
@@ -194,11 +194,11 @@ def _has_capability_authority(
             "allowed_tools" in config,
             "capabilities" in payload,
             "allowed_tools" in payload,
-            "capabilities" in compiled_spec_row,
+            "capabilities" in materialized_spec_row,
             "capabilities" in definition_row,
-            "capabilities" in compiled_job_row,
+            "capabilities" in materialized_job_row,
             "capabilities" in definition_job_row,
-            "allowed_tools" in compiled_job_row,
+            "allowed_tools" in materialized_job_row,
             "allowed_tools" in definition_job_row,
         )
     )
@@ -209,9 +209,9 @@ def _has_verify_authority(
     config: Mapping[str, Any],
     payload: Mapping[str, Any],
     provenance: Mapping[str, Any],
-    compiled_spec_row: Mapping[str, Any],
+    materialized_spec_row: Mapping[str, Any],
     definition_row: Mapping[str, Any],
-    compiled_job_row: Mapping[str, Any],
+    materialized_job_row: Mapping[str, Any],
     definition_job_row: Mapping[str, Any],
 ) -> bool:
     return any(
@@ -219,9 +219,9 @@ def _has_verify_authority(
             "verify_refs" in config,
             "verify_refs" in payload,
             "verify_refs" in provenance,
-            "verify_refs" in compiled_spec_row,
+            "verify_refs" in materialized_spec_row,
             "verify_refs" in definition_row,
-            "verify_refs" in compiled_job_row,
+            "verify_refs" in materialized_job_row,
             "verify_refs" in definition_job_row,
         )
     )
@@ -250,7 +250,7 @@ def _resolve_revision(
     field_name: str,
     reason_code: str,
 ) -> str:
-    provenance_compiled_spec = _mapping(provenance.get("compiled_spec_row"))
+    provenance_compiled_spec = _mapping(provenance.get("materialized_spec_row"))
     provenance_definition = _mapping(provenance.get("definition_row"))
     for candidate in (
         config.get(field_name),
@@ -284,16 +284,16 @@ def _reference_bindings(
         provided = _mapping_list(provenance.get("reference_bindings"))
         return [_mapping(_json_clone(item)) for item in provided]
 
-    compiled_spec_row = _mapping(provenance.get("compiled_spec_row"))
+    materialized_spec_row = _mapping(provenance.get("materialized_spec_row"))
     definition_row = _mapping(provenance.get("definition_row"))
-    compiled_job_row = _job_row(compiled_spec_row, job_label=job_label)
+    materialized_job_row = _job_row(materialized_spec_row, job_label=job_label)
     definition_job_row = _job_row(definition_row, job_label=job_label)
 
     if not _has_reference_authority(
         provenance=provenance,
-        compiled_spec_row=compiled_spec_row,
+        materialized_spec_row=materialized_spec_row,
         definition_row=definition_row,
-        compiled_job_row=compiled_job_row,
+        materialized_job_row=materialized_job_row,
         definition_job_row=definition_job_row,
     ):
         raise ShadowExecutionPacketError(
@@ -304,15 +304,15 @@ def _reference_bindings(
 
     reference_rows: list[dict[str, Any]] = []
     for source in (
-        compiled_job_row,
+        materialized_job_row,
         definition_job_row,
-        compiled_spec_row,
+        materialized_spec_row,
         definition_row,
     ):
         reference_rows.extend(_mapping_list(source.get("references")))
 
     reference_slugs = _dedupe_strings(
-        _job_reference_slugs(compiled_job_row, definition_job_row)
+        _job_reference_slugs(materialized_job_row, definition_job_row)
         + [
             str(row.get("slug") or row.get("raw") or "").strip()
             for row in reference_rows
@@ -327,7 +327,7 @@ def _reference_bindings(
             "model_slug": model_slug,
             "task_type": task_type,
             "depends_on": _dedupe_strings(
-                _string_list(compiled_job_row.get("depends_on"))
+                _string_list(materialized_job_row.get("depends_on"))
                 + _string_list(definition_job_row.get("depends_on"))
             ),
             "scope_read": list(scope_read),
@@ -359,17 +359,17 @@ def _capability_bindings(
         provided = _mapping_list(provenance.get("capability_bindings"))
         return [_mapping(_json_clone(item)) for item in provided]
 
-    compiled_spec_row = _mapping(provenance.get("compiled_spec_row"))
+    materialized_spec_row = _mapping(provenance.get("materialized_spec_row"))
     definition_row = _mapping(provenance.get("definition_row"))
-    compiled_job_row = _job_row(compiled_spec_row, job_label=job_label)
+    materialized_job_row = _job_row(materialized_spec_row, job_label=job_label)
     definition_job_row = _job_row(definition_row, job_label=job_label)
     if not _has_capability_authority(
         config=config,
         payload=payload,
         provenance=provenance,
-        compiled_spec_row=compiled_spec_row,
+        materialized_spec_row=materialized_spec_row,
         definition_row=definition_row,
-        compiled_job_row=compiled_job_row,
+        materialized_job_row=materialized_job_row,
         definition_job_row=definition_job_row,
     ):
         raise ShadowExecutionPacketError(
@@ -380,8 +380,8 @@ def _capability_bindings(
     capabilities = _dedupe_strings(
         _string_list(config.get("capabilities"))
         + _string_list(payload.get("capabilities"))
-        + _job_capabilities(compiled_job_row, definition_job_row)
-        + _string_list(compiled_spec_row.get("capabilities"))
+        + _job_capabilities(materialized_job_row, definition_job_row)
+        + _string_list(materialized_spec_row.get("capabilities"))
         + [
             str(cap.get("slug") or "").strip()
             for cap in _mapping_list(definition_row.get("capabilities"))
@@ -391,7 +391,7 @@ def _capability_bindings(
     allowed_tools = _dedupe_strings(
         _string_list(config.get("allowed_tools"))
         + _string_list(payload.get("allowed_tools"))
-        + _job_allowed_tools(compiled_job_row, definition_job_row)
+        + _job_allowed_tools(materialized_job_row, definition_job_row)
     )
     return [
         {
@@ -454,9 +454,9 @@ def build_shadow_execution_packet(
     model_slug = str(payload.get("model_slug") or "").strip()
     task_type = str(config.get("task_type") or payload.get("task_type") or "").strip()
     workdir = str(payload.get("workdir") or "").strip()
-    compiled_spec_row = _mapping(provenance.get("compiled_spec_row"))
+    materialized_spec_row = _mapping(provenance.get("materialized_spec_row"))
     definition_row = _mapping(provenance.get("definition_row"))
-    compiled_job_row = _job_row(compiled_spec_row, job_label=job_label)
+    materialized_job_row = _job_row(materialized_spec_row, job_label=job_label)
     definition_job_row = _job_row(definition_row, job_label=job_label)
     if not str(provenance.get("source_kind") or "").strip():
         raise ShadowExecutionPacketError(
@@ -468,9 +468,9 @@ def build_shadow_execution_packet(
         config=config,
         payload=payload,
         provenance=provenance,
-        compiled_spec_row=compiled_spec_row,
+        materialized_spec_row=materialized_spec_row,
         definition_row=definition_row,
-        compiled_job_row=compiled_job_row,
+        materialized_job_row=materialized_job_row,
         definition_job_row=definition_job_row,
     ):
         raise ShadowExecutionPacketError(
@@ -482,9 +482,9 @@ def build_shadow_execution_packet(
         _string_list(config.get("verify_refs"))
         + _string_list(payload.get("verify_refs"))
         + _string_list(provenance.get("verify_refs"))
-        + _string_list(compiled_spec_row.get("verify_refs"))
+        + _string_list(materialized_spec_row.get("verify_refs"))
         + _string_list(definition_row.get("verify_refs"))
-        + _job_verify_refs(compiled_job_row, definition_job_row)
+        + _job_verify_refs(materialized_job_row, definition_job_row)
     )
 
     normalized_scope_read = _dedupe_strings(list(scope_read))
@@ -568,9 +568,9 @@ def build_shadow_execution_packet(
         "source_authority": _mapping(_json_clone(provenance.get("authority_inputs"))),
         "workflow_row": _mapping(_json_clone(provenance.get("workflow_row"))),
         "definition_row": _mapping(_json_clone(definition_row)),
-        "compiled_spec_row": _mapping(_json_clone(compiled_spec_row)),
+        "materialized_spec_row": _mapping(_json_clone(materialized_spec_row)),
         "definition_job_row": _mapping(_json_clone(definition_job_row)),
-        "compiled_job_row": _mapping(_json_clone(compiled_job_row)),
+        "materialized_job_row": _mapping(_json_clone(materialized_job_row)),
     }
     file_inputs = {
         "workdir": workdir,
@@ -600,7 +600,7 @@ def build_shadow_execution_packet(
         "verify_refs": verify_refs,
         "authority_inputs": authority_inputs,
         "file_inputs": file_inputs,
-        "compile_provenance": _shadow_packet_compile_provenance(
+        "materialize_provenance": _shadow_packet_compile_provenance(
             workflow_id=workflow_id,
             definition_revision=definition_revision,
             plan_revision=plan_revision,
@@ -636,13 +636,13 @@ def persist_shadow_execution_packet(
         )
     try:
         packet_dict = dict(packet)
-        artifact_store = CompileArtifactStore(conn)
+        artifact_store = MaterializeArtifactStore(conn)
         finalized_packet = artifact_store.persist_execution_packet_with_reuse(
             packet=packet_dict,
             authority_refs=[packet_dict["definition_revision"], packet_dict["plan_revision"]],
             parent_artifact_ref=packet_dict["plan_revision"],
         )
-    except CompileArtifactError as exc:
+    except MaterializeArtifactError as exc:
         raise ShadowExecutionPacketError(
             "shadow_packet.reuse_failed_closed",
             f"shadow packet lineage reuse failed closed: {exc}",
@@ -697,9 +697,9 @@ def _shadow_packet_compile_provenance(
         "packet_provenance": _mapping(_json_clone(authority_inputs.get("packet_provenance"))),
         "source_authority": _mapping(_json_clone(authority_inputs.get("source_authority"))),
         "definition_row": _mapping(_json_clone(authority_inputs.get("definition_row"))),
-        "compiled_spec_row": _mapping(_json_clone(authority_inputs.get("compiled_spec_row"))),
+        "materialized_spec_row": _mapping(_json_clone(authority_inputs.get("materialized_spec_row"))),
         "definition_job_row": _mapping(_json_clone(authority_inputs.get("definition_job_row"))),
-        "compiled_job_row": _mapping(_json_clone(authority_inputs.get("compiled_job_row"))),
+        "materialized_job_row": _mapping(_json_clone(authority_inputs.get("materialized_job_row"))),
     }
     input_payload = {
         "artifact_kind": "packet_lineage",

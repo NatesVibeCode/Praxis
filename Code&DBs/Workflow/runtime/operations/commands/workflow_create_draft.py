@@ -1,7 +1,7 @@
 """Gateway-friendly command for creating a minimal workflow draft.
 
 Wraps ``runtime.canonical_workflows.save_workflow`` for the
-``moon_compose_from_prose`` chat tool (and any other authoring agent) so
+``canvas_compose`` chat tool (and any other authoring agent) so
 "build me a workflow" can land on a real, editable workflow row in one
 chained call: workflow_create_draft -> workflow_build_mutate(subpath=
 'bootstrap').

@@ -73,7 +73,7 @@ class ComposeViaLLMResult:
 
 
 def _packet_to_translatable(packet: AuthoredPacket) -> dict[str, Any]:
-    return {
+    out: dict[str, Any] = {
         "label": packet.label, "stage": packet.stage,
         "description": packet.description, "write": list(packet.write),
         "depends_on": list(packet.depends_on),
@@ -87,6 +87,13 @@ def _packet_to_translatable(packet: AuthoredPacket) -> dict[str, Any]:
         "budget": dict(packet.budget) if packet.budget else None,
         "prompt": packet.prompt,
     }
+    if packet.integration_id:
+        out["integration_id"] = packet.integration_id
+    if packet.integration_action:
+        out["integration_action"] = packet.integration_action
+    if packet.integration_args:
+        out["integration_args"] = dict(packet.integration_args)
+    return out
 
 
 def _empty_report() -> ValidationReport:

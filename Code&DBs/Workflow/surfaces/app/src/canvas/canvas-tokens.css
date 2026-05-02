@@ -1,0 +1,416 @@
+/* Canvas Build — design tokens (single source of truth) */
+
+@layer canvas-tokens {
+  .canvas-page {
+    /* ---- Base geometry & rhythm ---- */
+    --canvas-node-height: var(--canvas-layout-node-height, 116px);
+    --canvas-node-size: var(--canvas-layout-node-size, 72px);
+    --canvas-node-shadow: var(--canvas-layout-projected-node-size, 52px);
+    --canvas-node-spacing: var(--canvas-layout-node-spacing, 144px);
+    --canvas-node-width: var(--canvas-layout-node-width, 300px);
+    --canvas-canvas-pad: var(--canvas-layout-canvas-pad, 120px);
+    --canvas-graph-append-size: var(--canvas-layout-graph-append-size, 48px);
+    --canvas-label-max: 16ch;
+
+    --canvas-icon-size: 22px;
+    --canvas-dock-open: 33%;
+    --canvas-dock-side-min: 360px;
+    --canvas-dock-side-max: 520px;
+    --canvas-dock-tb-min: 200px;
+    --canvas-dock-pad-v: 44px;
+    --canvas-dock-pad-h: 36px;
+    --canvas-popout-width: 260px;
+    --canvas-popout-min-h: 112px;
+    --canvas-compose-width: 480px;
+    --canvas-nav-clearance: 52px;
+
+    --canvas-arc-weight: 2px;
+    --canvas-connector-weight: 1.5px;
+
+    --canvas-z-chrome: 10;
+    --canvas-z-overlay: 6;
+    --canvas-z-dock: 5;
+    --canvas-z-arc: 3;
+
+    --canvas-motion-dock: 240ms ease;
+    --canvas-motion-popout: 150ms ease;
+    --canvas-motion-node: 180ms ease;
+    --canvas-motion-fast: 160ms ease;
+    --canvas-motion-micro: 100ms ease;
+
+    --canvas-font-size-xxs: 11px;
+    --canvas-font-size-xs: 12px;
+    --canvas-font-size-sm: 13px;
+    --canvas-font-size-md: 14px;
+    --canvas-font-size-lg: 16px;
+    --canvas-font-size-xl: 18px;
+    --canvas-font-weight-medium: 500;
+    --canvas-font-weight-semibold: 600;
+    --canvas-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --canvas-font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    --canvas-radius-pill: 999px;
+    --canvas-radius-sm: 8px;
+    --canvas-radius-md: 10px;
+    --canvas-radius-lg: 12px;
+    --canvas-radius-xl: 14px;
+    --canvas-radius-2xl: 16px;
+    --canvas-radius-3xl: 18px;
+    --canvas-radius-4xl: 20px;
+
+    /* ---- Palette ---- */
+    --canvas-color-white: #ffffff;
+    --canvas-color-black: #000000;
+
+    --canvas-palette-accent: #f3eee4;
+    --canvas-palette-amber: #d29922;
+    --canvas-palette-amber-strong: #f0883e;
+    --canvas-palette-error: #f85149;
+    --canvas-palette-error-dim: #f85149;
+    --canvas-palette-success: #3fb950;
+    --canvas-palette-success-bright: #7ee787;
+    --canvas-palette-neutral-dark: #706b62;
+    --canvas-palette-neutral-soft: #9ea7b3;
+    --canvas-palette-foreground: #f4f6f8;
+    --canvas-palette-foreground-muted: #8b949e;
+    --canvas-palette-legacy-accent: #6cb6ff;
+
+    --canvas-accent: var(--canvas-palette-accent);
+    --canvas-accent-alt: var(--canvas-palette-legacy-accent);
+    --canvas-glow: var(--canvas-color-white);
+    --canvas-error: var(--canvas-palette-error);
+    /*
+     * Solid danger token — the only color we let leak onto the canvas. Used
+     * on after_failure edges and their gate pods so "this is the failure
+     * path" reads at a glance without sacrificing the monochrome language.
+     * Softened from --canvas-error so it reads as tint-of-concern, not alarm.
+     */
+    --canvas-danger: #ff8a6a;
+    --canvas-gate-yellow: var(--canvas-palette-amber);
+    --canvas-gate-green: var(--canvas-palette-success);
+    --canvas-gate-red: var(--canvas-palette-error);
+    --canvas-warning: var(--canvas-palette-amber);
+    --canvas-text-inverse: var(--canvas-color-black);
+
+    --canvas-fg: var(--text);
+    --canvas-fg-muted: var(--text-muted);
+    --canvas-text-muted: var(--canvas-palette-foreground-muted);
+    --canvas-fg-dim: var(--canvas-palette-neutral-dark);
+    --canvas-fg-soft: var(--canvas-palette-neutral-soft);
+    --canvas-muted: var(--canvas-fg-dim);
+
+    --canvas-border: var(--canvas-white-a08);
+    --canvas-rule: var(--canvas-white-a04);
+    --canvas-surface: rgba(12, 12, 12, 0.84);
+    --canvas-surface-hover: rgba(255, 255, 255, 0.04);
+
+    --canvas-state-success: var(--canvas-palette-success);
+    --canvas-state-success-soft: var(--canvas-palette-success-bright);
+    --canvas-state-error: var(--canvas-palette-error);
+    --canvas-state-warning: var(--canvas-palette-amber);
+
+    /*
+     * ---- Run/job status scale ----
+     *
+     * Canvas's visual language is monochrome + coral-for-failure. Status is
+     * carried by FILL density and motion, not hue. The scale below is the
+     * single source of truth for any surface that shows a running/idle/
+     * succeeded/failed state (build-view ghosts, run-view job tiles, the
+     * dashboard thumbnails, the launcher nucleus satellites).
+     *
+     * pending  — queued; ring visible at the dimmest opacity.
+     * idle     — ready-to-run; same ring, slightly warmer (reads as "waiting
+     *            its turn" vs. "hasn't been noticed yet").
+     * active   — running/claimed; outline stays white, motion (rotating
+     *            dash, conic sweep) communicates life. NO hue shift.
+     * ok       — succeeded; outline fills to full white. This is the
+     *            moment the shape "locks."
+     * failed   — failed/blocked/dead_letter/parent_failed. The only hue
+     *            permitted on the canvas. Softened coral, not alarm red.
+     *
+     * Platform surfaces outside Canvas (modules/primitives that show status
+     * dots with traffic-light semantics) should use --status-* tokens in
+     * styles/tokens.css instead — those keep a calibrated palette for
+     * category differentiation.
+     */
+    --canvas-status-pending: var(--canvas-muted-slate);
+    --canvas-status-idle: var(--canvas-palette-foreground-muted);
+    --canvas-status-active: var(--canvas-color-white);
+    --canvas-status-ok: var(--canvas-color-white);
+    --canvas-status-failed: var(--canvas-danger);
+    --canvas-status-cancelled: var(--canvas-palette-foreground-muted);
+    --canvas-status-pending-soft: var(--canvas-white-a08);
+    --canvas-status-idle-soft: var(--canvas-white-a12);
+    --canvas-status-active-soft: var(--canvas-white-a25);
+    --canvas-status-ok-soft: var(--canvas-white-a20);
+    --canvas-status-failed-soft: var(--canvas-danger-a22);
+
+    --canvas-surface-card-strong: rgba(255, 255, 255, 0.025);
+    --canvas-glass-bg: rgba(20, 20, 20, 0.4);
+    --canvas-glass-border: rgba(255, 255, 255, 0.08);
+    --canvas-glass-blur: blur(14px);
+    
+    --canvas-shadow-ambient: 0 20px 50px rgba(0, 0, 0, 0.4);
+    --canvas-shadow-lifted: 0 30px 70px rgba(0, 0, 0, 0.5);
+    --canvas-shadow-glow: 0 0 20px rgba(255, 255, 255, 0.16);
+    --canvas-surface-card-soft: rgba(255, 255, 255, 0.03);
+    --canvas-surface-card-muted: rgba(255, 255, 255, 0.02);
+    --canvas-surface-card-active: rgba(255, 255, 255, 0.06);
+    --canvas-compose-input-bg: rgba(10, 10, 10, 0.92);
+    --canvas-run-overlay-bg: rgba(13, 17, 23, 0.92);
+    --canvas-run-overlay-bg-soft: rgba(13, 17, 23, 0.88);
+    --canvas-run-overlay-bg-strong: rgba(13, 17, 23, 0.96);
+    --canvas-run-overlay-pre-bg: rgba(0, 0, 0, 0.35);
+
+    --canvas-state-focus-outline: color-mix(in srgb, var(--canvas-accent) 28%, var(--canvas-color-black));
+    --canvas-state-shadow: 0 0 0 3px var(--canvas-accent);
+
+    --canvas-glow-white-soft: 0 0 14px rgba(255, 255, 255, 0.10), 0 0 0 1px var(--canvas-black-a20);
+    --canvas-glow-white-mid: 0 0 18px rgba(255, 255, 255, 0.16), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-glow-white-strong: 0 0 22px rgba(255, 255, 255, 0.24), 0 0 0 1px var(--canvas-black-a34);
+    --canvas-accent-glow-soft: 0 0 10px var(--canvas-accent-a16), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-accent-glow-mid: 0 0 16px var(--canvas-accent-a28), 0 0 0 1px var(--canvas-black-a34);
+    --canvas-accent-glow-strong: 0 0 24px var(--canvas-accent-a40), 0 0 0 2px var(--canvas-black-a34);
+    --canvas-success-glow-soft: 0 0 10px var(--canvas-success-a16), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-success-glow-mid: 0 0 14px var(--canvas-success-a24), 0 0 0 1px var(--canvas-black-a34);
+    --canvas-success-glow-strong: 0 0 22px var(--canvas-success-a34), 0 0 0 2px var(--canvas-black-a34);
+    --canvas-danger-glow-soft: 0 0 10px var(--canvas-danger-a16), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-danger-glow-mid: 0 0 14px var(--canvas-danger-a24), 0 0 0 1px var(--canvas-black-a34);
+    --canvas-danger-glow-strong: 0 0 20px var(--canvas-danger-a34), 0 0 0 2px var(--canvas-black-a34);
+    --canvas-neutral-glow-soft: 0 0 10px var(--canvas-white-a08), 0 0 0 1px var(--canvas-black-a20);
+    --canvas-neutral-glow-mid: 0 0 14px var(--canvas-white-a12), 0 0 0 1px var(--canvas-black-a22);
+    --canvas-neutral-glow-strong: 0 0 20px var(--canvas-white-a16), 0 0 0 2px var(--canvas-black-a22);
+
+    --canvas-ring-pulse-duration: 1.2s;
+    --canvas-nucleus-pulse-duration: 4s;
+    --canvas-glow-pulse-duration: 1.8s;
+    --canvas-glow-motion: 160ms ease;
+
+    /* ---- Reusable alpha tokens (source-of-truth for status/interaction) ---- */
+    --canvas-white-a02: rgba(255, 255, 255, 0.02);
+    --canvas-white-a025: rgba(255, 255, 255, 0.025);
+    --canvas-white-a03: rgba(255, 255, 255, 0.03);
+    --canvas-white-a04: rgba(255, 255, 255, 0.04);
+    --canvas-white-a05: rgba(255, 255, 255, 0.05);
+    --canvas-white-a06: rgba(255, 255, 255, 0.06);
+    --canvas-white-a08: rgba(255, 255, 255, 0.08);
+    --canvas-white-a10: rgba(255, 255, 255, 0.1);
+    --canvas-white-a12: rgba(255, 255, 255, 0.12);
+    --canvas-white-a14: rgba(255, 255, 255, 0.14);
+    --canvas-white-a16: rgba(255, 255, 255, 0.16);
+    --canvas-white-a18: rgba(255, 255, 255, 0.18);
+    --canvas-white-a20: rgba(255, 255, 255, 0.2);
+    --canvas-white-a24: rgba(255, 255, 255, 0.24);
+    --canvas-white-a25: rgba(255, 255, 255, 0.25);
+    --canvas-white-a85: rgba(255, 255, 255, 0.85);
+    --canvas-black-a16: rgba(0, 0, 0, 0.16);
+    --canvas-black-a18: rgba(0, 0, 0, 0.18);
+    --canvas-black-a20: rgba(0, 0, 0, 0.2);
+    --canvas-black-a22: rgba(0, 0, 0, 0.22);
+    --canvas-black-a30: rgba(0, 0, 0, 0.3);
+    --canvas-black-a34: rgba(0, 0, 0, 0.34);
+    --canvas-black-a35: rgba(0, 0, 0, 0.35);
+    --canvas-black-a36: rgba(0, 0, 0, 0.36);
+    --canvas-black-a42: rgba(0, 0, 0, 0.42);
+    --canvas-black-a34-shadow: 0 20px 46px rgba(0, 0, 0, 0.34);
+    --canvas-black-a45: rgba(0, 0, 0, 0.45);
+    --canvas-black-a50: rgba(0, 0, 0, 0.5);
+    --canvas-glow-outline-soft: var(--canvas-black-a20);
+    --canvas-glow-outline-mid: var(--canvas-black-a30);
+    --canvas-glow-outline-strong: var(--canvas-black-a36);
+
+    --canvas-accent-a03: rgba(210, 153, 34, 0.03);
+    --canvas-accent-a05: rgba(210, 153, 34, 0.05);
+    --canvas-accent-a06: rgba(210, 153, 34, 0.06);
+    --canvas-accent-a08: rgba(210, 153, 34, 0.08);
+    --canvas-accent-a10: rgba(210, 153, 34, 0.1);
+    --canvas-accent-a12: rgba(210, 153, 34, 0.12);
+    --canvas-accent-a16: rgba(210, 153, 34, 0.16);
+    --canvas-accent-a20: rgba(210, 153, 34, 0.2);
+    --canvas-accent-a24: rgba(210, 153, 34, 0.24);
+    --canvas-accent-a25: rgba(210, 153, 34, 0.25);
+    --canvas-accent-a28: rgba(210, 153, 34, 0.28);
+    --canvas-accent-a30: rgba(210, 153, 34, 0.3);
+    --canvas-accent-a32: rgba(210, 153, 34, 0.32);
+    --canvas-accent-a34: rgba(210, 153, 34, 0.34);
+    --canvas-accent-a35: rgba(210, 153, 34, 0.35);
+    --canvas-accent-a035: rgba(210, 153, 34, 0.035);
+    --canvas-accent-a40: rgba(210, 153, 34, 0.4);
+    --canvas-accent-a42: rgba(210, 153, 34, 0.42);
+    --canvas-accent-a44: rgba(210, 153, 34, 0.44);
+    --canvas-accent-a45: rgba(210, 153, 34, 0.45);
+    --canvas-accent-a48: rgba(210, 153, 34, 0.48);
+    --canvas-accent-a80: rgba(210, 153, 34, 0.8);
+    --canvas-warning-a08: rgba(210, 153, 34, 0.08);
+    --canvas-warning-a32: rgba(210, 153, 34, 0.32);
+
+    --canvas-neutral-1: rgba(139, 147, 157, 0.2);
+    --canvas-neutral-2: rgba(139, 147, 157, 0.25);
+    --canvas-neutral-3: rgba(139, 147, 157, 0.26);
+    --canvas-neutral-4: rgba(139, 147, 157, 0.28);
+    --canvas-neutral-5: rgba(139, 147, 157, 0.35);
+    --canvas-neutral-6: rgba(139, 147, 157, 0.18);
+    --canvas-neutral-7: rgba(139, 147, 157, 0.14);
+    --canvas-neutral-8: rgba(139, 147, 157, 0.45);
+    --canvas-muted-slate: #484f58;
+
+    --canvas-success-a08: rgba(63, 185, 80, 0.08);
+    --canvas-success-a10: rgba(63, 185, 80, 0.1);
+    --canvas-success-a14: rgba(63, 185, 80, 0.14);
+    --canvas-success-a16: rgba(63, 185, 80, 0.16);
+    --canvas-success-a24: rgba(63, 185, 80, 0.24);
+    --canvas-success-a30: rgba(63, 185, 80, 0.3);
+    --canvas-success-a34: rgba(63, 185, 80, 0.34);
+    --canvas-success-a48: rgba(63, 185, 80, 0.48);
+
+    --canvas-danger-a22: rgba(248, 81, 73, 0.22);
+    --canvas-danger-a25: rgba(248, 81, 73, 0.25);
+    --canvas-danger-a28: rgba(248, 81, 73, 0.28);
+    --canvas-danger-a30: rgba(248, 81, 73, 0.3);
+    --canvas-danger-a32: rgba(248, 81, 73, 0.32);
+    --canvas-danger-a34: rgba(248, 81, 73, 0.34);
+    --canvas-danger-a45: rgba(248, 81, 73, 0.45);
+    --canvas-danger-a16: rgba(248, 81, 73, 0.16);
+    --canvas-danger-a12: rgba(248, 81, 73, 0.12);
+    --canvas-danger-a08: rgba(248, 81, 73, 0.08);
+    --canvas-danger-a06: rgba(248, 81, 73, 0.06);
+
+    --canvas-ring-strong: rgba(244, 246, 248, 0.4);
+    --canvas-shell-dark: rgba(18, 18, 18, 0.25);
+    --canvas-shell-slab: rgba(18, 18, 18, 0.35);
+    --canvas-shell-sand: rgba(18, 18, 18, 0.45);
+    --canvas-shell-overlay-start: rgba(18, 18, 18, 0.45);
+    --canvas-shell-overlay-end: rgba(18, 18, 18, 0.25);
+    --canvas-shell-faint: rgba(18, 18, 18, 0.6);
+    --canvas-shell-mid: rgba(30, 30, 30, 0.6);
+    --canvas-shell-soft: rgba(18, 18, 18, 0.84);
+    --canvas-shell-strong: rgba(18, 18, 18, 0.66);
+    --canvas-shell-ghost: rgba(20, 20, 20, 0.4);
+    --canvas-shell-glass: rgba(20, 24, 30, 0.9);
+    --canvas-shell-midnight: rgba(12, 12, 12, 0.72);
+    --canvas-shell-lower: rgba(12, 12, 12, 0.52);
+    --canvas-shell-surface: rgba(24, 13, 13, 0.96);
+    --canvas-shell-surface-alt: rgba(40, 59, 81, 0.96);
+    --canvas-surface-soft: rgba(16, 24, 33, 0.96);
+    --canvas-surface-muted: rgba(15, 18, 24, 0.92);
+    --canvas-surface-dense: rgba(15, 18, 24, 0.94);
+    --canvas-surface-dense-2: rgba(15, 18, 24, 0.98);
+    --canvas-surface-dark: rgba(26, 31, 39, 0.92);
+    --canvas-surface-dark-2: rgba(26, 31, 39, 0.98);
+    --canvas-shell-shadow-sm: 0 0 20px rgba(255, 255, 255, 0.08);
+    --canvas-shell-shadow-lg: 0 0 30px rgba(255, 255, 255, 0.12);
+    --canvas-shell-shadow-glow: 0 0 40px rgba(255, 255, 255, 0.25);
+    --canvas-shell-shadow-subtle: 0 16px 40px var(--canvas-black-a45);
+    --canvas-shell-shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.45);
+
+    --canvas-theme-glow-profile: soft;
+    --canvas-strict-accent-glow-soft: 0 0 6px var(--canvas-accent-a06), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-strict-accent-glow-mid: 0 0 10px var(--canvas-accent-a10), 0 0 0 1px var(--canvas-black-a34);
+    --canvas-strict-accent-glow-strong: 0 0 14px var(--canvas-accent-a16), 0 0 0 1px var(--canvas-black-a34);
+    --canvas-strict-success-glow-soft: 0 0 6px var(--canvas-success-a08), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-strict-success-glow-mid: 0 0 10px var(--canvas-success-a10), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-strict-success-glow-strong: 0 0 14px var(--canvas-success-a14), 0 0 0 1px var(--canvas-black-a34);
+    --canvas-strict-danger-glow-soft: 0 0 6px var(--canvas-danger-a08), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-strict-danger-glow-mid: 0 0 10px var(--canvas-danger-a12), 0 0 0 1px var(--canvas-black-a30);
+    --canvas-strict-danger-glow-strong: 0 0 14px var(--canvas-danger-a16), 0 0 0 1px var(--canvas-black-a34);
+    --canvas-strict-neutral-glow-soft: 0 0 8px var(--canvas-white-a06), 0 0 0 1px var(--canvas-black-a16);
+    --canvas-strict-neutral-glow-mid: 0 0 12px var(--canvas-white-a08), 0 0 0 1px var(--canvas-black-a20);
+    --canvas-strict-neutral-glow-strong: 0 0 16px var(--canvas-white-a10), 0 0 0 1px var(--canvas-black-a22);
+    --canvas-strict-white-glow-soft: 0 0 8px var(--canvas-white-a06), 0 0 0 1px var(--canvas-black-a16);
+    --canvas-strict-white-glow-mid: 0 0 12px var(--canvas-white-a10), 0 0 0 1px var(--canvas-black-a18);
+    --canvas-strict-white-glow-strong: 0 0 16px var(--canvas-white-a14), 0 0 0 1px var(--canvas-black-a20);
+    --canvas-motion-glow-pulse: 2600ms;
+    --canvas-motion-glow-pulse-strict: 4200ms;
+    --canvas-glow-line-soft: var(--canvas-glow-outline-soft);
+    --canvas-glow-line-mid: var(--canvas-glow-outline-mid);
+    --canvas-glow-line-strong: var(--canvas-glow-outline-strong);
+    --canvas-glow-line-soft-shadow: var(--canvas-shadow-line-soft);
+    --canvas-shadow-white-soft: var(--canvas-glow-white-soft);
+    --canvas-shadow-white-mid: var(--canvas-glow-white-mid);
+    --canvas-shadow-white-strong: var(--canvas-glow-white-strong);
+    --canvas-shadow-black-soft: 0 0 0 1px var(--canvas-black-a20), var(--canvas-glow-white-soft);
+    --canvas-shadow-black-mid: 0 0 0 1px var(--canvas-black-a30), var(--canvas-glow-white-mid);
+    --canvas-shadow-black-strong: 0 0 0 1px var(--canvas-black-a36), var(--canvas-glow-white-strong);
+    --canvas-shadow-line-soft: 0 0 0 1px var(--canvas-glow-line-soft), var(--canvas-glow-white-soft);
+    --canvas-shadow-line-mid: 0 0 0 1px var(--canvas-glow-line-mid), var(--canvas-glow-white-mid);
+    --canvas-shadow-line-strong: 0 0 0 1px var(--canvas-glow-line-strong), var(--canvas-glow-white-strong);
+    --canvas-shadow-accent-line-soft: 0 0 0 1px var(--canvas-glow-line-soft), var(--canvas-accent-glow-soft);
+    --canvas-shadow-accent-line-mid: 0 0 0 1px var(--canvas-glow-line-mid), var(--canvas-accent-glow-mid);
+    --canvas-shadow-accent-line-strong: 0 0 0 1px var(--canvas-glow-line-strong), var(--canvas-accent-glow-strong);
+    --canvas-shadow-ring-accent-soft:
+      0 0 0 3px var(--canvas-accent),
+      0 0 0 1px var(--canvas-glow-line-strong),
+      var(--canvas-accent-glow-soft);
+    --canvas-shadow-ring-accent-mid:
+      0 0 0 3px var(--canvas-accent),
+      0 0 0 1px var(--canvas-glow-line-strong),
+      var(--canvas-accent-glow-mid);
+    --canvas-shadow-float-soft: 0 10px 24px var(--canvas-black-a16);
+    --canvas-plus-text-glow:
+      0 0 1px var(--canvas-color-black),
+      0 0 2px var(--canvas-color-black),
+      0 0 3px var(--canvas-color-black),
+      0 0 1px var(--canvas-white-a12),
+      0 0 8px var(--canvas-white-a16),
+      0 0 0 1px var(--canvas-glow-line-soft);
+    --canvas-plus-text-glow-strong:
+      0 0 1px var(--canvas-color-black),
+      0 0 2px var(--canvas-color-black),
+      0 0 4px var(--canvas-color-black),
+      0 0 2px var(--canvas-white-a16),
+      0 0 12px var(--canvas-white-a20),
+      0 0 0 1px var(--canvas-glow-line-mid);
+
+    /* ---- Shadow name aliases (components.css uses --canvas-glow-<kind>-<depth>) ---- */
+    --canvas-glow-black-soft: var(--canvas-shadow-black-soft);
+    --canvas-glow-black-mid: var(--canvas-shadow-black-mid);
+    --canvas-glow-black-strong: var(--canvas-shadow-black-strong);
+    --canvas-glow-accent-soft: var(--canvas-accent-glow-soft);
+    --canvas-glow-accent-mid: var(--canvas-accent-glow-mid);
+    --canvas-glow-accent-strong: var(--canvas-accent-glow-strong);
+    --canvas-glow-success-soft: var(--canvas-success-glow-soft);
+    --canvas-glow-success-mid: var(--canvas-success-glow-mid);
+    --canvas-glow-success-strong: var(--canvas-success-glow-strong);
+    --canvas-glow-danger-soft: var(--canvas-danger-glow-soft);
+    --canvas-glow-danger-mid: var(--canvas-danger-glow-mid);
+    --canvas-glow-danger-strong: var(--canvas-danger-glow-strong);
+    --canvas-glow-neutral-soft: var(--canvas-neutral-glow-soft);
+    --canvas-glow-neutral-mid: var(--canvas-neutral-glow-mid);
+    --canvas-glow-neutral-strong: var(--canvas-neutral-glow-strong);
+
+    /* Lite default node glow — subtle halo always present on graph nodes */
+    --canvas-node-glow-lite: 0 0 0 1px var(--canvas-white-a08), 0 0 10px var(--canvas-white-a08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-page {
+    --canvas-ring-pulse-duration: 0s;
+    --canvas-nucleus-pulse-duration: 0s;
+    --canvas-glow-pulse-duration: 0s;
+    --canvas-motion-glow: 0s linear;
+  }
+}
+
+.canvas-page[data-canvas-glow-profile='strict'] {
+  --canvas-theme-glow-profile: strict;
+  --canvas-glow-white-soft: var(--canvas-strict-white-glow-soft);
+  --canvas-glow-white-mid: var(--canvas-strict-white-glow-mid);
+  --canvas-glow-white-strong: var(--canvas-strict-white-glow-strong);
+  --canvas-accent-glow-soft: var(--canvas-strict-accent-glow-soft);
+  --canvas-accent-glow-mid: var(--canvas-strict-accent-glow-mid);
+  --canvas-accent-glow-strong: var(--canvas-strict-accent-glow-strong);
+  --canvas-success-glow-soft: var(--canvas-strict-success-glow-soft);
+  --canvas-success-glow-mid: var(--canvas-strict-success-glow-mid);
+  --canvas-success-glow-strong: var(--canvas-strict-success-glow-strong);
+  --canvas-danger-glow-soft: var(--canvas-strict-danger-glow-soft);
+  --canvas-danger-glow-mid: var(--canvas-strict-danger-glow-mid);
+  --canvas-danger-glow-strong: var(--canvas-strict-danger-glow-strong);
+  --canvas-neutral-glow-soft: var(--canvas-strict-neutral-glow-soft);
+  --canvas-neutral-glow-mid: var(--canvas-strict-neutral-glow-mid);
+  --canvas-neutral-glow-strong: var(--canvas-strict-neutral-glow-strong);
+  --canvas-motion-glow-pulse: var(--canvas-motion-glow-pulse-strict);
+  --canvas-glow-line-soft: var(--canvas-black-a16);
+  --canvas-glow-line-mid: var(--canvas-black-a18);
+  --canvas-glow-line-strong: var(--canvas-black-a20);
+}

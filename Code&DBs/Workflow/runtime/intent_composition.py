@@ -6,8 +6,8 @@ This is the end-to-end shortcut that turns a prose intent into a
   1. :func:`runtime.intent_decomposition.decompose_intent` splits the
      prose into ordered :class:`StepIntent` records.
   2. :func:`packets_from_steps` translates each step into a
-     :class:`runtime.spec_compiler.PlanPacket`.
-  3. :func:`runtime.spec_compiler.propose_plan` compiles + previews
+     :class:`runtime.spec_materializer.PlanPacket`.
+  3. :func:`runtime.spec_materializer.propose_plan` compiles + previews
      the resulting packet list (which also runs bind_data_pills per
      packet description).
 
@@ -29,7 +29,7 @@ from runtime.intent_decomposition import (
     StepIntent,
     decompose_intent,
 )
-from runtime.spec_compiler import (
+from runtime.spec_materializer import (
     LaunchReceipt,
     PlanPacket,
     ProposedPlan,
@@ -108,7 +108,7 @@ def _validate_composed_plan_type_flow(proposed: ProposedPlan) -> list[str]:
     architecture::fail-closed-at-compile-no-silent-defaults: ``compose_plan_
     from_intent`` folds the errors into the ProposedPlan's warnings list
     so callers see them before approving or launching the plan. The
-    Moon commit path independently rejects at save time (Phase 1.2.a).
+    Canvas commit path independently rejects at save time (Phase 1.2.a).
 
     Degraded substrate (type_contracts module unavailable) returns [] —
     the compose path must not block on optional validation infrastructure.
@@ -304,7 +304,7 @@ def compose_plan_from_intent(
 
     # Type-flow validation per architecture-policy::platform-architecture::
     # fail-closed-at-compile-no-silent-defaults. Errors surface in warnings
-    # (visible, not silent). Moon commitDefinition independently rejects at
+    # (visible, not silent). Canvas commitDefinition independently rejects at
     # the save boundary via Phase 1.2.a — this layer exposes the failure at
     # preview/propose time so callers don't approve a plan that can't save.
     type_flow_errors = _validate_composed_plan_type_flow(proposed)
@@ -693,7 +693,7 @@ class PlanLifecycle:
 
     Q-side of the planning stack's CQRS pattern: command paths emit
     plan.composed / plan.launched through the gateway-backed
-    ``authority_events`` stream; this dataclass pulls them back for Moon,
+    ``authority_events`` stream; this dataclass pulls them back for Canvas,
     CLI, or ad-hoc inspection without consulting the legacy observability
     sidecar.
     """

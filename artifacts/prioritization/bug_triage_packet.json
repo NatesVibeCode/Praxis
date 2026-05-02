@@ -680,7 +680,7 @@
     },
     {
       "bug_id": "BUG-2729F8B7",
-      "title": "Moon generated workflow has no release gates or typed gate contracts",
+      "title": "Canvas generated workflow has no release gates or typed gate contracts",
       "status": "OPEN",
       "severity": "P1",
       "category": "WIRING",
@@ -847,7 +847,7 @@
     },
     {
       "bug_id": "BUG-3CC5D3AD",
-      "title": "Moon dev API crash loop blocks compose engine handoff",
+      "title": "Canvas dev API crash loop blocks compose engine handoff",
       "status": "OPEN",
       "severity": "P1",
       "category": "RUNTIME",
@@ -1063,7 +1063,7 @@
     },
     {
       "bug_id": "BUG-5861F7F9",
-      "title": "Moon trigger picker hangs while loading available triggers because catalog API does not return",
+      "title": "Canvas trigger picker hangs while loading available triggers because catalog API does not return",
       "status": "OPEN",
       "severity": "P2",
       "category": "RUNTIME",
@@ -1135,7 +1135,7 @@
     },
     {
       "bug_id": "BUG-5DD67C2A",
-      "title": "Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty",
+      "title": "Canvas generated nodes leave data dictionary, bindings, imports, and DB object contracts empty",
       "status": "OPEN",
       "severity": "P1",
       "category": "WIRING",
@@ -1303,7 +1303,7 @@
     },
     {
       "bug_id": "BUG-6F69A6DF",
-      "title": "Moon node state styling uses filled alarm circles as primary graph language",
+      "title": "Canvas node state styling uses filled alarm circles as primary graph language",
       "status": "OPEN",
       "severity": "P2",
       "category": "OTHER",
@@ -1446,7 +1446,7 @@
     },
     {
       "bug_id": "BUG-8742C732",
-      "title": "MoonBuildPage dock authority tests fail because node-popout is absent",
+      "title": "CanvasBuildPage dock authority tests fail because node-popout is absent",
       "status": "OPEN",
       "severity": "P2",
       "category": "TEST",
@@ -1518,7 +1518,7 @@
     },
     {
       "bug_id": "BUG-8DADDD64",
-      "title": "Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled",
+      "title": "Canvas compose creates local drafts with no trigger or jobs, leaving release dispatch disabled",
       "status": "OPEN",
       "severity": "P2",
       "category": "WIRING",
@@ -2142,7 +2142,7 @@
     },
     {
       "bug_id": "BUG-B7A075E2",
-      "title": "persona_profiles is empty \u2014 Moon compose path has no response_contract / system_prompt to teach the LLM the build shape",
+      "title": "persona_profiles is empty \u2014 Canvas compose path has no response_contract / system_prompt to teach the LLM the build shape",
       "status": "OPEN",
       "severity": "P2",
       "category": "OTHER",
@@ -4735,7 +4735,7 @@
     },
     {
       "bug_id": "BUG-11898FCA",
-      "title": "Moon interactions lack standard zoom, pan, and delete controls",
+      "title": "Canvas interactions lack standard zoom, pan, and delete controls",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
@@ -4798,7 +4798,7 @@
     },
     {
       "bug_id": "BUG-15F67F63",
-      "title": "Moon/Vite dev server hangs root and crash-loops API on port conflict",
+      "title": "Canvas/Vite dev server hangs root and crash-loops API on port conflict",
       "status": "FIXED",
       "severity": "P1",
       "category": "RUNTIME",
@@ -4888,7 +4888,7 @@
     },
     {
       "bug_id": "BUG-1A0B4E94",
-      "title": "Moon harden produces no compiled spec for manual two-node workflow and requires unrelated ap_invoice bundle",
+      "title": "Canvas harden produces no compiled spec for manual two-node workflow and requires unrelated ap_invoice bundle",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
@@ -6411,7 +6411,7 @@
     },
     {
       "bug_id": "BUG-67CEB47D",
-      "title": "Moon edge release normalization collapses validation approval and retry gates",
+      "title": "Canvas edge release normalization collapses validation approval and retry gates",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
@@ -6518,7 +6518,7 @@
     },
     {
       "bug_id": "BUG-6D4D0B3D",
-      "title": "MoonBuildPage interaction coverage missing for delete and canvas controls",
+      "title": "CanvasBuildPage interaction coverage missing for delete and canvas controls",
       "status": "FIXED",
       "severity": "P2",
       "category": "TEST",
@@ -7072,7 +7072,7 @@
     },
     {
       "bug_id": "BUG-84EDBF9A",
-      "title": "Moon build harden can wedge API during release preview",
+      "title": "Canvas build harden can wedge API during release preview",
       "status": "FIXED",
       "severity": "P1",
       "category": "RUNTIME",
@@ -7303,7 +7303,7 @@
     },
     {
       "bug_id": "BUG-8F7EEB0E",
-      "title": "Moon builder compiles whole prompt into malformed graph instead of progressive validated units",
+      "title": "Canvas builder compiles whole prompt into malformed graph instead of progressive validated units",
       "status": "FIXED",
       "severity": "P2",
       "category": "ARCHITECTURE",
@@ -7597,7 +7597,7 @@
     },
     {
       "bug_id": "BUG-984AFD8B",
-      "title": "Moon Run now hides approved-manifest rejection",
+      "title": "Canvas Run now hides approved-manifest rejection",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
@@ -7662,7 +7662,7 @@
     },
     {
       "bug_id": "BUG-99B9DC7E",
-      "title": "Moon composer turns uncertainty into human Provide nodes instead of typed gaps with fallback branches",
+      "title": "Canvas composer turns uncertainty into human Provide nodes instead of typed gaps with fallback branches",
       "status": "FIXED",
       "severity": "P2",
       "category": "ARCHITECTURE",
@@ -7767,7 +7767,7 @@
     },
     {
       "bug_id": "BUG-9B4C9384",
-      "title": "Moon interaction lacks standard canvas navigation and deletion controls",
+      "title": "Canvas interaction lacks standard canvas navigation and deletion controls",
       "status": "FIXED",
       "severity": "P2",
       "category": "VERIFY",
@@ -7788,7 +7788,7 @@
     },
     {
       "bug_id": "BUG-9B904118",
-      "title": "Moon picker APIs hardcode provider choices outside effective catalog",
+      "title": "Canvas picker APIs hardcode provider choices outside effective catalog",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
@@ -8061,7 +8061,7 @@
     },
     {
       "bug_id": "BUG-A6E390EA",
-      "title": "Moon canvas pan can render invalid NaN transform",
+      "title": "Canvas canvas pan can render invalid NaN transform",
       "status": "FIXED",
       "severity": "P2",
       "category": "WIRING",
@@ -8272,7 +8272,7 @@
     },
     {
       "bug_id": "BUG-B357177E",
-      "title": "Moon dashboard metrics disagree with recent run ledger",
+      "title": "Canvas dashboard metrics disagree with recent run ledger",
       "status": "FIXED",
       "severity": "P1",
       "category": "WIRING",
@@ -8358,7 +8358,7 @@
     },
     {
       "bug_id": "BUG-B82F8737",
-      "title": "Moon dock authority test used stale Detail dock contract",
+      "title": "Canvas dock authority test used stale Detail dock contract",
       "status": "FIXED",
       "severity": "P3",
       "category": "TEST",
@@ -8486,7 +8486,7 @@
     },
     {
       "bug_id": "BUG-BA265A8A",
-      "title": "Moon UI path shown with shell-escaped ampersand in bootstrap DONE and README",
+      "title": "Canvas UI path shown with shell-escaped ampersand in bootstrap DONE and README",
       "status": "FIXED",
       "severity": "P3",
       "category": "OTHER",
@@ -8718,7 +8718,7 @@
     },
     {
       "bug_id": "BUG-C6EE740C",
-      "title": "Regression: Moon composer emits prose-shaped auto/build nodes instead of executable typed workflow units",
+      "title": "Regression: Canvas composer emits prose-shaped auto/build nodes instead of executable typed workflow units",
       "status": "FIXED",
       "severity": "P1",
       "category": "ARCHITECTURE",
@@ -9519,7 +9519,7 @@
     },
     {
       "bug_id": "BUG-EBFFD508",
-      "title": "Moon inspector and action panels hide bottom controls below viewport",
+      "title": "Canvas inspector and action panels hide bottom controls below viewport",
       "status": "FIXED",
       "severity": "P2",
       "category": "OTHER",
@@ -9708,7 +9708,7 @@
     },
     {
       "bug_id": "BUG-F2B3E693",
-      "title": "Graph-first Moon compiled specs use unresolved auto agent routes",
+      "title": "Graph-first Canvas compiled specs use unresolved auto agent routes",
       "status": "FIXED",
       "severity": "P1",
       "category": "RUNTIME",
@@ -9813,7 +9813,7 @@
     },
     {
       "bug_id": "BUG-FA546993",
-      "title": "Moon graph and inspector text overlaps or wraps into unreadable labels",
+      "title": "Canvas graph and inspector text overlaps or wraps into unreadable labels",
       "status": "FIXED",
       "severity": "P2",
       "category": "OTHER",
@@ -9855,7 +9855,7 @@
     },
     {
       "bug_id": "BUG-FC232024",
-      "title": "Moon suggest-next request times out without graceful partial-state fallback",
+      "title": "Canvas suggest-next request times out without graceful partial-state fallback",
       "status": "FIXED",
       "severity": "P2",
       "category": "RUNTIME",

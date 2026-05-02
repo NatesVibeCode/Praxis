@@ -1928,7 +1928,7 @@ def tool_praxis_launch_plan(params: dict) -> dict:
                 "reason_code": "postgres.authority.unavailable",
             }
         try:
-            from runtime.spec_compiler import (
+            from runtime.spec_materializer import (
                 ApprovalHashMismatchError,
                 ApprovedPlan,
                 LaunchSubmitFailedError,
@@ -2036,7 +2036,7 @@ def tool_praxis_launch_plan(params: dict) -> dict:
 
     try:
         if preview_only:
-            from runtime.spec_compiler import propose_plan
+            from runtime.spec_materializer import propose_plan
 
             proposed = propose_plan(plan, conn=pg_conn, workdir=workdir)
             payload = proposed.to_dict()
@@ -2067,7 +2067,7 @@ def tool_praxis_plan_lifecycle(params: dict) -> dict:
 
     Q-side of the planning stack's CQRS pattern: gateway-dispatched plan
     commands emit plan.composed / plan.launched through receipt-backed
-    authority_events; this tool pulls the canonical stream back for Moon,
+    authority_events; this tool pulls the canonical stream back for Canvas,
     CLI, or ad-hoc inspection.
     """
     workflow_id = params.get("workflow_id")
@@ -2162,7 +2162,7 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
             ComposeAndLaunchBlocked,
             compose_and_launch,
         )
-        from runtime.spec_compiler import (
+        from runtime.spec_materializer import (
             ApprovalHashMismatchError,
             LaunchSubmitFailedError,
         )
@@ -2414,7 +2414,7 @@ def tool_praxis_approve_proposed_plan(params: dict) -> dict:
         }
 
     try:
-        from runtime.spec_compiler import (
+        from runtime.spec_materializer import (
             ProposedPlan,
             approve_proposed_plan,
             ProviderFreshnessGateError,
@@ -3087,7 +3087,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": (
                             "Pipeline selector for materialize. True (default) routes through "
                             "compose_plan_via_llm (synthesis + N-way fork-out, plan_synthesis + "
-                            "plan_fork_author task types). False routes through compile_prose "
+                            "plan_fork_author task types). False routes through materialize_prose "
                             "(compile_synthesize → compile_pill_match → compile_author → "
                             "compile_finalize sub-tasks; runs voting-based binding-gate "
                             "auto-resolution)."
@@ -3439,7 +3439,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "Q-side of the planning stack: read every plan.* authority_event for one "
                 "workflow_id in order. Pair with gateway-backed praxis_compose_plan / "
                 "praxis_launch_plan on the C side.\n\n"
-                "USE WHEN: an operator or Moon wants to inspect what happened to a plan "
+                "USE WHEN: an operator or Canvas wants to inspect what happened to a plan "
                 "— composed when, launched with which run_id, and the event payload "
                 "that was receipt-backed by the command gateway.\n\n"
                 "DO NOT USE TO: read workflow_run status. That's a separate Q on the "

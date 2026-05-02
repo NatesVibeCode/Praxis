@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from runtime.spec_compiler import CompiledSpec, PlanPacket, _packet_to_job
+from runtime.spec_materializer import MaterializedSpec, PlanPacket, _packet_to_job
 from runtime.workflow.job_runtime_context import (
     load_workflow_job_authority_binding,
     load_workflow_job_runtime_context,
@@ -42,8 +42,8 @@ _SAMPLE_BINDING = {
 }
 
 
-def _compiled() -> CompiledSpec:
-    return CompiledSpec(
+def _compiled() -> MaterializedSpec:
+    return MaterializedSpec(
         prompt="do the thing",
         scope_write=[],
         label="step_1",

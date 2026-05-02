@@ -24,6 +24,9 @@ export interface ChatSendOptions {
   model?: string | null;
   maxTokens?: number | null;
   timeoutMs?: number | null;
+  dispatchChoiceRef?: string | null;
+  selectedCandidateRef?: string | null;
+  candidateSetHash?: string | null;
 }
 
 const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream';
@@ -259,6 +262,9 @@ export function useChat() {
             selection_context: selectionContext,
             model: options?.model || undefined,
             max_tokens: options?.maxTokens || undefined,
+            dispatch_choice_ref: options?.dispatchChoiceRef || undefined,
+            selected_candidate_ref: options?.selectedCandidateRef || undefined,
+            candidate_set_hash: options?.candidateSetHash || undefined,
           }),
           signal: controller.signal,
         }),

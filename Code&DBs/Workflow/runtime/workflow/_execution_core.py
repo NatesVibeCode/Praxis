@@ -10,11 +10,11 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
 
 from ._shared import _circuit_breakers, _WORKFLOW_TERMINAL_STATES
 from ._claiming import mark_running, complete_job
-from ._routing import _runtime_profile_ref_for_run
+from ._routing import _route_candidate_entries_from_plan, _runtime_profile_ref_for_run
 from ._workflow_state import _workflow_run_envelope
 from ._context_building import (
     _capture_submission_baseline_if_required,
@@ -73,6 +73,7 @@ def _route_execution_knobs(
     route_task_type: str,
     provider_slug: str,
     model_slug: str,
+    transport_type: str = "",
 ) -> dict[str, object]:
     """Read provider request knobs from task route authority.
 
@@ -84,6 +85,9 @@ def _route_execution_knobs(
     normalized_task_type = str(route_task_type or "").strip()
     normalized_provider = str(provider_slug or "").strip()
     normalized_model = str(model_slug or "").strip()
+    normalized_transport = str(transport_type or "").strip().upper()
+    if normalized_transport not in {"CLI", "API"}:
+        normalized_transport = ""
     route_max_tokens: int | None = None
     reasoning_effort: str | None = None
 
@@ -94,10 +98,12 @@ def _route_execution_knobs(
                WHERE task_type = $1
                  AND provider_slug = $2
                  AND model_slug = $3
+                 AND ($4::text IS NULL OR transport_type = $4)
                LIMIT 1""",
             normalized_task_type,
             normalized_provider,
             normalized_model,
+            normalized_transport or None,
         )
         if rows:
             row = rows[0]
@@ -112,10 +118,13 @@ def _route_execution_knobs(
         rows = conn.execute(
             """SELECT reasoning_control
                FROM provider_model_candidates
-               WHERE provider_slug = $1 AND model_slug = $2
+               WHERE provider_slug = $1
+                 AND model_slug = $2
+                 AND ($3::text IS NULL OR transport_type = $3)
                LIMIT 1""",
             normalized_provider,
             normalized_model,
+            normalized_transport or None,
         )
         if rows:
             candidate_reasoning = rows[0].get("reasoning_control") or {}
@@ -139,6 +148,25 @@ def _agent_config_with_max_output_tokens(agent_config: object, max_output_tokens
         attrs = dict(getattr(agent_config, "__dict__", {}) or {})
         attrs["max_output_tokens"] = max_output_tokens
         return SimpleNamespace(**attrs)
+
+
+def _route_candidate_binding_from_envelope(
+    request_envelope: Mapping[str, object],
+    *,
+    job_label: str,
+    agent_slug: str,
+) -> dict[str, object]:
+    manifest = request_envelope.get("route_plan_manifest")
+    if not isinstance(manifest, dict):
+        return {}
+    jobs = manifest.get("jobs")
+    if not isinstance(jobs, dict):
+        return {}
+    route_plan = jobs.get(job_label)
+    if not isinstance(route_plan, dict):
+        return {}
+    entries = _route_candidate_entries_from_plan(route_plan)
+    return dict(entries.get(agent_slug) or {})
 
 
 def _approval_checkpoint_for_job(
@@ -392,6 +420,16 @@ def execute_job(
             error_code="run_cancelled",
         )
         return
+    run_envelope = _workflow_run_envelope(run_row)
+    route_binding = _route_candidate_binding_from_envelope(
+        run_envelope,
+        job_label=str(label),
+        agent_slug=str(agent_slug),
+    )
+    route_transport_type = str(route_binding.get("transport_type") or "").strip().upper()
+    if route_transport_type not in {"CLI", "API"}:
+        route_transport_type = ""
+    route_candidate_ref = str(route_binding.get("candidate_ref") or "").strip()
 
 
     # Check for integration execution FIRST (bypasses LLM entirely)
@@ -435,7 +473,32 @@ def execute_job(
     from registry.agent_config import AgentRegistry
     from storage.postgres.connection import SyncPostgresConnection as _PG, get_workflow_pool
     registry = AgentRegistry.load_from_postgres(conn)
-    agent_config = registry.get(agent_slug)
+    agent_config = None
+    if route_transport_type and "/" in agent_slug:
+        route_provider, _, route_model = str(agent_slug).partition("/")
+        agent_config = AgentRegistry.load_from_postgres_for_route(
+            conn,
+            provider_slug=route_provider,
+            model_slug=route_model,
+            transport_type=route_transport_type,
+            candidate_ref=route_candidate_ref or None,
+        )
+        if route_candidate_ref and agent_config is None:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            complete_job(
+                conn,
+                job_id,
+                status="failed",
+                error_code="route_candidate_mismatch",
+                duration_ms=duration_ms,
+                stdout_preview=(
+                    f"Route selected candidate_ref={route_candidate_ref} for {agent_slug} "
+                    f"transport_type={route_transport_type}, but execution could not load that "
+                    "exact active candidate; refusing fallback."
+                )[:2000],
+            )
+            return
+    agent_config = agent_config or registry.get(agent_slug)
     runtime_profile_ref = _runtime_profile_ref_for_run(conn, run_id)
 
     # Last-resort: if slug is still auto/, resolve via task_type_router now
@@ -688,6 +751,22 @@ def execute_job(
     # Execute based on transport
     transport = resolve_execution_transport(agent_config)
     transport_kind = transport.transport_kind
+    if route_transport_type:
+        expected_transport_kind = "cli" if route_transport_type == "CLI" else "api"
+        if transport_kind != expected_transport_kind:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            complete_job(
+                conn,
+                job_id,
+                status="failed",
+                error_code="route_transport_mismatch",
+                duration_ms=duration_ms,
+                stdout_preview=(
+                    f"Route selected transport_type={route_transport_type} for {agent_slug}, "
+                    f"but execution resolved transport_kind={transport_kind}; refusing drift."
+                )[:2000],
+            )
+            return
 
     try:
         if transport_kind in {"cli", "mcp"}:
@@ -757,6 +836,7 @@ def execute_job(
                 route_task_type=_route_task_type,
                 provider_slug=_provider,
                 model_slug=_model,
+                transport_type=route_transport_type,
             )
             _agent_config = _agent_config_with_max_output_tokens(
                 agent_config,

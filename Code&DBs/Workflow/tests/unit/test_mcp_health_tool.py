@@ -215,10 +215,19 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
         "default_adapter_type": "cli_llm",
         "registered_providers": ["openai", "google"],
         "providers": [
-            {"provider_slug": "openai", "adapters": ["cli_llm", "llm_task"]},
-            {"provider_slug": "google", "adapters": ["cli_llm"]},
+            {
+                "provider_slug": "openai",
+                "adapters": ["cli_llm", "llm_task"],
+                "disabled_adapters": [],
+            },
+            {
+                "provider_slug": "google",
+                "adapters": ["cli_llm"],
+                "disabled_adapters": [],
+            },
         ],
         "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
+        "policy_disabled_adapters": [],
         "provider_registry_status": "loaded_from_db",
         "provider_registry_authority_available": True,
         "provider_registry_fallback_active": False,
@@ -273,6 +282,152 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
         ],
         "recent_limit": 3,
     }
+
+
+def test_tool_dag_health_lists_policy_disabled_adapters_without_degrading(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    provider_probe_calls: list[tuple[str, str]] = []
+
+    class _CapturingPreflightRunner(_FakePreflightRunner):
+        def __init__(self, probes):
+            super().__init__(probes)
+            captured["probe_payloads"] = [probe.payload for probe in probes]
+
+    def _fake_resolve(env=None):
+        captured["env"] = env
+        return "postgresql://repo.test/workflow"
+
+    class _FakePanel:
+        def snapshot(self):
+            return {"posture": "build"}
+
+        def recommend_lane(self):
+            return SimpleNamespace(
+                recommended_posture="build",
+                confidence=1.0,
+                reasons=("healthy",),
+                degraded_cause=None,
+            )
+
+    monkeypatch.setattr(
+        health_tool,
+        "dependency_truth_report",
+        lambda scope="all": {"ok": True, "scope": scope},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"},
+    )
+    monkeypatch.setattr(health_tool, "workflow_database_url_for_repo", lambda repo_root, env=None: _fake_resolve(env=env))
+    monkeypatch.setattr(
+        health_tool,
+        "build_trend_observability",
+        lambda: {"summary": {"critical_trends": 0}},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "get_route_outcomes",
+        lambda: SimpleNamespace(summary=lambda **_kwargs: {"provider_count": 0}),
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "get_context_cache",
+        lambda: SimpleNamespace(stats=lambda: {"hit_rate": 0.0}),
+    )
+    monkeypatch.setattr(missing_detector, "_now", lambda: datetime(2026, 4, 15, tzinfo=timezone.utc))
+    monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
+    monkeypatch.setattr(
+        health_tool,
+        "query_transport_support",
+        lambda **_kwargs: {
+            "default_provider_slug": "openai",
+            "default_adapter_type": "cli_llm",
+            "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
+            "providers": [
+                {
+                    "provider_slug": "openai",
+                    "transports": {
+                        "cli_llm": {"supported": True, "status": "ok"},
+                        "llm_task": {
+                            "supported": True,
+                            "status": "disabled_by_policy",
+                            "details": {"policy_reason": "provider temporarily disabled"},
+                        },
+                    },
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+            "provider_count": 1,
+            "providers": ["openai"],
+        },
+    )
+    monkeypatch.setattr(
+        missing_detector,
+        "_query_entities_and_edges",
+        lambda *_, **__: {"entity_rows": [], "edge_rows": []},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "_subs",
+        SimpleNamespace(
+            get_health_mod=lambda: SimpleNamespace(
+                PostgresProbe=lambda db_url: _FakeProbe(("postgres", db_url)),
+                PostgresConnectivityProbe=lambda db_url: _FakeProbe(
+                    ("postgres_connectivity", db_url)
+                ),
+                DiskSpaceProbe=lambda path: _FakeProbe(("disk", path)),
+                ProviderTransportProbe=lambda provider_slug, adapter_type: (
+                    provider_probe_calls.append((provider_slug, adapter_type))
+                    or _FakeProbe(("provider_transport", provider_slug, adapter_type))
+                ),
+                PreflightRunner=_CapturingPreflightRunner,
+            ),
+            get_pg_conn=lambda: "pg-conn",
+            get_operator_panel=lambda: _FakePanel(),
+            get_memory_engine=lambda: SimpleNamespace(_connect=lambda: object()),
+        ),
+    )
+
+    result = health_tool.tool_dag_health({})
+
+    assert captured["probe_payloads"] == [
+        ("postgres", "postgresql://repo.test/workflow"),
+        ("postgres_connectivity", "postgresql://repo.test/workflow"),
+        ("disk", str(health_tool.REPO_ROOT)),
+        ("provider_transport", "openai", "cli_llm"),
+    ]
+    assert provider_probe_calls == [("openai", "cli_llm")]
+    assert result["preflight"]["overall"] == "healthy"
+    assert result["transport_support_summary"]["providers"] == [
+        {
+            "provider_slug": "openai",
+            "adapters": ["cli_llm"],
+            "disabled_adapters": [
+                {
+                    "adapter_type": "llm_task",
+                    "status": "disabled_by_policy",
+                    "policy_reason": "provider temporarily disabled",
+                }
+            ],
+        }
+    ]
+    assert result["transport_support_summary"]["policy_disabled_adapters"] == [
+        {
+            "provider_slug": "openai",
+            "adapter_type": "llm_task",
+            "policy_reason": "provider temporarily disabled",
+        }
+    ]
 
 
 def test_tool_dag_health_reports_projection_freshness_sla(monkeypatch) -> None:

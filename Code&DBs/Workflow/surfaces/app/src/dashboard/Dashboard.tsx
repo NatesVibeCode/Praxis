@@ -1,9 +1,30 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { APP_CONFIG } from '../config';
-import praxisSymbol from '../assets/praxis-symbol-inverse.svg';
-import { MoonWorkflowSilhouette } from './MoonWorkflowSilhouette';
+import { CanvasWorkflowSilhouette } from './CanvasWorkflowSilhouette';
 import { isAbortError } from '../shared/request';
-import { ReceiptCard } from '../primitives';
+import {
+  Button,
+  EmptyStateExplainer,
+  ListPanel,
+  MetricTile,
+  PanelCard,
+  StatusRail,
+  StatusRow,
+  type StatusRowTone,
+} from '../primitives';
+
+function rowToneFromTone(tone: 'healthy' | 'warning' | 'danger' | 'neutral'): StatusRowTone {
+  if (tone === 'healthy') return 'ok';
+  if (tone === 'warning') return 'live';
+  if (tone === 'danger') return 'err';
+  return 'idle';
+}
+
+function rowToneFromRunStatus(status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'): StatusRowTone {
+  if (status === 'succeeded') return 'ok';
+  if (status === 'failed') return 'err';
+  if (status === 'running') return 'live';
+  return 'idle';
+}
 import './dashboard.css';
 
 interface Workflow {
@@ -273,72 +294,53 @@ function WorkflowCard({
   const silhouetteNodeCount = hasRun ? 3 : 2;
 
   return (
-    <article className="wf-card">
-      <div className="wf-card__header">
-        <div className="wf-card__identity">
-          <div className="wf-card__eyebrow-row">
-            <MoonWorkflowSilhouette
-              nodeCount={silhouetteNodeCount}
-              hasTrigger={hasTrigger}
-              isCron={isCron}
-              lastRunStatus={wf.latest_run?.status}
-              width={72}
-              height={18}
-              label={`${wf.name} silhouette`}
-            />
-            <div className="wf-card__eyebrow">{workflowKind}</div>
-          </div>
-          <div className="wf-card__name">{wf.name}</div>
+    <PanelCard
+      eyebrow={
+        <span className="wf-card__eyebrow-row">
+          <CanvasWorkflowSilhouette
+            nodeCount={silhouetteNodeCount}
+            hasTrigger={hasTrigger}
+            isCron={isCron}
+            lastRunStatus={wf.latest_run?.status}
+            width={72}
+            height={18}
+            label={`${wf.name} silhouette`}
+          />
+          <span>{workflowKind}</span>
+        </span>
+      }
+      title={wf.name}
+      action={<span className={`wf-card__badge ${badge.class_name}`}>{badge.label}</span>}
+      footer={
+        <div className="prx-button-row">
+          <Button size="sm" onClick={onEdit}>Open</Button>
+          <Button tone="primary" size="sm" onClick={onRunNow}>Run now</Button>
+          {hasRun && (
+            <Button size="sm" onClick={onViewRun}>View latest</Button>
+          )}
+          <Button size="sm" tone="danger" onClick={onDelete}>Delete</Button>
         </div>
-        <span className={`wf-card__badge ${badge.class_name}`}>{badge.label}</span>
-      </div>
-
-      <div className="wf-card__desc">
-        {wf.description || 'No description yet. Use the editor to define authority, state, and execution rules.'}
-      </div>
-
-      <div className="wf-card__stat-grid">
-        <div className="wf-card__stat">
-          <span className="wf-card__stat-label">Latest run</span>
-          <strong>{latestRunCopy(wf)}</strong>
-        </div>
-        <div className="wf-card__stat">
-          <span className="wf-card__stat-label">Launch mode</span>
-          <strong>{scheduleCopy(wf)}</strong>
-        </div>
-        <div className="wf-card__stat">
-          <span className="wf-card__stat-label">Runs</span>
-          <strong>{wf.invocation_count ?? 0}</strong>
-        </div>
-        <div className="wf-card__stat">
-          <span className="wf-card__stat-label">Last activity</span>
-          <strong>{timeAgo(wf.last_invoked_at)}</strong>
-        </div>
-      </div>
-
-      <div className="wf-card__actions">
-        <button type="button" className="wf-card__btn wf-card__btn--primary" onClick={onEdit}>
-          Open
-        </button>
-        <button type="button" className="wf-card__btn" onClick={onRunNow}>
-          Run now
-        </button>
-        {hasRun && (
-          <button type="button" className="wf-card__btn" onClick={onViewRun}>
-            View latest
-          </button>
-        )}
-        <button type="button" className="wf-card__btn wf-card__btn--danger" onClick={onDelete}>
-          Delete
-        </button>
-      </div>
-    </article>
+      }
+    >
+      <StatusRail
+        items={[
+          { label: 'Latest run', value: latestRunCopy(wf), tone: 'dim' },
+          { label: 'Launch', value: scheduleCopy(wf), tone: 'dim' },
+          { label: 'Runs', value: wf.invocation_count ?? 0, tone: 'dim' },
+          { label: 'Last', value: timeAgo(wf.last_invoked_at), tone: 'dim' },
+        ]}
+      />
+    </PanelCard>
   );
 }
+
+const SECTION_CAP = 4;
 
 function WorkflowSectionBlock({
   section,
   loading,
+  expanded = false,
+  onToggleExpand = () => {},
   onPrimaryAction,
   onEditWorkflow,
   onEditModel,
@@ -349,6 +351,8 @@ function WorkflowSectionBlock({
 }: {
   section: WorkflowSection;
   loading: boolean;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
   onPrimaryAction: () => void;
   onEditWorkflow: (id: string) => void;
   onEditModel: (id: string) => void;
@@ -357,40 +361,47 @@ function WorkflowSectionBlock({
   onDelete: (workflowId: string) => void;
   primaryActionLabel: string;
 }) {
+  const hasOverflow = section.count > SECTION_CAP;
+  const visible = hasOverflow && !expanded
+    ? section.workflows.slice(0, SECTION_CAP)
+    : section.workflows;
+
   return (
     <section className={`dash-section dash-section--${section.tone}`}>
-      <div className="dash-section__header">
-        <div>
-          <div className="dash-section__eyebrow">{section.eyebrow}</div>
-          <h2 className="dash-section__title">{section.title}</h2>
-          <p className="dash-section__copy">{section.description}</p>
-        </div>
-        <div className="dash-section__count">{loading ? '...' : section.count}</div>
-      </div>
+      <header className="dash-section__bar">
+        <span className="dash-section__label">{section.title}</span>
+        <span className="dash-section__count-badge">{loading ? '…' : section.count}</span>
+      </header>
 
       {loading && section.count === 0 ? (
-        <div className="dash-section__loading">Refreshing workflow inventory...</div>
+        <div className="dash-section__loading">Refreshing…</div>
       ) : section.count > 0 ? (
-        <div className="dash-section__grid">
-          {section.workflows.map((workflow) => (
-            <WorkflowCard
-              key={workflow.id}
-              wf={workflow}
-              onEdit={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
-              onViewRun={() => workflow.latest_run?.run_id && onViewRun(workflow.latest_run.run_id)}
-              onRunNow={() => onRunNow(workflow.id)}
-              onDelete={() => onDelete(workflow.id)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="dash-section__grid">
+            {visible.map((workflow) => (
+              <WorkflowCard
+                key={workflow.id}
+                wf={workflow}
+                onEdit={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
+                onViewRun={() => workflow.latest_run?.run_id && onViewRun(workflow.latest_run.run_id)}
+                onRunNow={() => onRunNow(workflow.id)}
+                onDelete={() => onDelete(workflow.id)}
+              />
+            ))}
+          </div>
+          {hasOverflow && (
+            <button className="dash-section__toggle" onClick={onToggleExpand}>
+              {expanded ? 'Show fewer' : `Show all ${section.count}`}
+            </button>
+          )}
+        </>
       ) : (
-        <div className="dash-empty">
-          <div className="dash-empty__title">{section.emptyTitle}</div>
-          <div className="dash-empty__copy">{section.emptyCopy}</div>
-          <button type="button" className="dash-empty__action" onClick={onPrimaryAction}>
-            {primaryActionLabel}
-          </button>
-        </div>
+        <EmptyStateExplainer
+          title={section.emptyTitle}
+          why={section.emptyCopy}
+          actionLabel={primaryActionLabel}
+          onAction={onPrimaryAction}
+        />
       )}
     </section>
   );
@@ -407,7 +418,9 @@ export function Dashboard({
 }: DashboardProps) {
   const { snapshot, loading, error, refresh } = useDashboardSnapshot();
   const [instanceFiles, setInstanceFiles] = useState<Array<{ id: string; filename: string }>>([]);
+  const [instanceFilesError, setInstanceFilesError] = useState<string | null>(null);
   const instanceFileRef = useRef<HTMLInputElement>(null);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const workflows = snapshot?.workflows ?? [];
   const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow] as const));
   const summary = snapshot?.summary ?? {
@@ -435,14 +448,25 @@ export function Dashboard({
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/files?scope=instance', { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) => {
+        if (!response.ok) throw new Error(`File inventory returned ${response.status}`);
+        return response.json();
+      })
       .then((data) => {
-        if (data?.files) setInstanceFiles(data.files);
-        else if (Array.isArray(data)) setInstanceFiles(data);
+        if (data?.files) {
+          setInstanceFiles(data.files);
+          setInstanceFilesError(null);
+        } else if (Array.isArray(data)) {
+          setInstanceFiles(data);
+          setInstanceFilesError(null);
+        } else {
+          setInstanceFiles([]);
+          setInstanceFilesError('File inventory returned an unexpected shape.');
+        }
       })
       .catch((error) => {
         if (!isAbortError(error)) {
-          // Silent by design: file inventory is auxiliary dashboard context.
+          setInstanceFilesError(error instanceof Error ? error.message : 'File inventory is unavailable.');
         }
       });
     return () => controller.abort();
@@ -503,9 +527,12 @@ export function Dashboard({
       const data = response.ok ? await response.json() : null;
       if (data?.file?.id && data?.file?.filename) {
         setInstanceFiles((current) => [{ id: data.file.id, filename: data.file.filename }, ...current]);
+        setInstanceFilesError(null);
+      } else {
+        setInstanceFilesError('File upload did not return a saved file record.');
       }
     } catch {
-      // Silent: upload failures should not destabilize the dashboard surface.
+      setInstanceFilesError('File upload failed.');
     } finally {
       event.target.value = '';
     }
@@ -516,9 +543,11 @@ export function Dashboard({
       const response = await fetch(`/api/files/${fileId}`, { method: 'DELETE' });
       if (response.ok) {
         setInstanceFiles((current) => current.filter((file) => file.id !== fileId));
+      } else {
+        setInstanceFilesError('File removal failed.');
       }
     } catch {
-      // Silent by design.
+      setInstanceFilesError('File removal failed.');
     }
   };
 
@@ -527,10 +556,8 @@ export function Dashboard({
       && !run.spec_name?.startsWith('fix_bugs')
       && !run.spec_name?.startsWith('hardening_'),
   );
-  const materializedDate = new Date().toISOString().slice(0, 10);
   const passRateLabel = formatPassRate(summary.pass_rate_24h);
   const spendLabel = formatCurrency(summary.total_cost_24h);
-  const sealedRunCount = visibleRuns.filter((run) => run.status === 'succeeded').length;
   const queueTone = summary.queue.status === 'critical'
     ? 'danger'
     : summary.queue.status === 'warning'
@@ -538,27 +565,6 @@ export function Dashboard({
       : summary.queue.status === 'ok'
         ? 'healthy'
         : 'neutral';
-  const stateSpine = [
-    {
-      label: 'State',
-      value: loading ? '...' : health.label,
-      tone: health.tone,
-    },
-    {
-      label: 'Queue',
-      value: loading
-        ? '...'
-        : summary.queue.error
-          ? 'Probe error'
-          : `${summary.queue.depth} waiting`,
-      tone: queueTone,
-    },
-    {
-      label: 'Runs',
-      value: loading ? '...' : `${summary.active_runs} active`,
-      tone: summary.active_runs > 0 ? 'warning' : 'neutral',
-    },
-  ];
   const hasWorkflows = summary.workflow_counts.total > 0;
   const heroTitle = hasWorkflows
     ? 'Continue work'
@@ -669,285 +675,92 @@ export function Dashboard({
     });
   }
 
+  const overviewCards = [
+    {
+      id: 'inventory',
+      title: 'Workflow Inventory',
+      source: '/api/dashboard',
+      value: `${summary.workflow_counts.total} workflow${summary.workflow_counts.total === 1 ? '' : 's'}`,
+      detail: `${summary.workflow_counts.live} live - ${summary.workflow_counts.saved} saved - ${summary.workflow_counts.draft} draft`,
+      action: hasWorkflows ? 'Open builder' : 'Start first lane',
+      onClick: hasWorkflows ? onNewWorkflow : onDescribe,
+      tone: 'neutral' as const,
+    },
+    {
+      id: 'health',
+      title: 'Health Receipts',
+      source: 'summary.health',
+      value: health.label,
+      detail: `${passRateLabel} pass rate - ${spendLabel} spend`,
+      action: 'Inspect spend',
+      onClick: onOpenCosts,
+      tone: health.tone,
+    },
+    {
+      id: 'queue',
+      title: 'Execution Queue',
+      source: 'summary.queue',
+      value: `${summary.queue.depth} waiting`,
+      detail: `${summary.queue.pending} pending - ${summary.queue.ready} ready - ${summary.queue.running} running`,
+      action: 'Open operator lane',
+      onClick: onChat,
+      tone: queueTone,
+    },
+    {
+      id: 'files',
+      title: 'Attached Context',
+      source: '/api/files?scope=instance',
+      value: instanceFilesError ? 'Unavailable' : `${instanceFiles.length} file${instanceFiles.length === 1 ? '' : 's'}`,
+      detail: instanceFilesError ?? 'Instance-scoped files available to the workspace',
+      action: 'Add file',
+      onClick: () => instanceFileRef.current?.click(),
+      tone: instanceFilesError ? 'danger' as const : 'neutral' as const,
+    },
+  ];
+
   return (
     <div className="dash-page">
-      <aside className="dash-sidebar">
-        <div className="dash-sidebar__brand">
-          <img className="dash-sidebar__logo" src={praxisSymbol} alt="Praxis symbol" />
-          <div className="dash-sidebar__brand-copy">
-            <span>Command Surface</span>
-            <strong>{APP_CONFIG.name}</strong>
-          </div>
-        </div>
-
-        <div className="dash-sidebar__overview">
-          <div className="dash-sidebar__overview-kicker">State authority</div>
-          <div className="dash-sidebar__overview-title">{APP_CONFIG.engineName}</div>
-          <div className="dash-sidebar__overview-copy">
-            One visible place to launch, inspect, and recover workflow lanes without losing the shape of the system.
-          </div>
-          <div className="dash-sidebar__spine" aria-label="Control state">
-            {stateSpine.map((row) => (
-              <div key={row.label} className="dash-sidebar__spine-row">
-                <span className={`dash-sidebar__spine-dot dash-sidebar__spine-dot--${row.tone}`} />
-                <span className="dash-sidebar__spine-label">{row.label}</span>
-                <strong>{row.value}</strong>
-              </div>
-            ))}
-          </div>
-          <div className="dash-sidebar__overview-grid">
-            <div className="dash-sidebar__overview-stat">
-              <span>Live</span>
-              <strong>{summary.workflow_counts.live}</strong>
-            </div>
-            <div className="dash-sidebar__overview-stat">
-              <span>Saved</span>
-              <strong>{summary.workflow_counts.saved}</strong>
-            </div>
-            <div className="dash-sidebar__overview-stat">
-              <span>Drafts</span>
-              <strong>{summary.workflow_counts.draft}</strong>
-            </div>
-            <div className="dash-sidebar__overview-stat">
-              <span>Files</span>
-              <strong>{instanceFiles.length}</strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="dash-sidebar__stack">
-          {workflowSections[0]?.workflows.length > 0 && (
-            <div className="dash-sidebar__cluster">
-              <div className="dash-sidebar__section">Live lanes</div>
-              {workflowSections[0].workflows.map((workflow) => (
-                <button
-                  key={workflow.id}
-                  className="dash-sidebar__item dash-sidebar__item--live"
-                  onClick={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
-                >
-                  <span className="dash-sidebar__dot dash-sidebar__dot--live" />
-                  <span className="dash-sidebar__title">{workflow.name}</span>
-                  {(workflow.invocation_count ?? 0) > 0 && (
-                    <span className="dash-sidebar__count">{workflow.invocation_count}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {(workflowSections[1]?.workflows.length > 0 || workflowSections[2]?.workflows.length > 0) && (
-            <div className="dash-sidebar__cluster">
-              <div className="dash-sidebar__section">Workbench</div>
-              {[...(workflowSections[1]?.workflows ?? []), ...(workflowSections[2]?.workflows ?? [])].map((workflow) => (
-                <button
-                  key={workflow.id}
-                  className="dash-sidebar__item"
-                  onClick={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
-                >
-                  <span
-                    className={`dash-sidebar__dot ${
-                      (workflow.invocation_count ?? 0) > 0 ? 'dash-sidebar__dot--done' : 'dash-sidebar__dot--draft'
-                    }`}
-                  />
-                  <span className="dash-sidebar__title">{workflow.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="dash-sidebar__actions">
-          <button className="dash-sidebar__action-btn dash-sidebar__action-btn--primary" onClick={onDescribe}>
-            New model
-          </button>
-          <button className="dash-sidebar__action-btn" onClick={onNewWorkflow}>
-            Builder
-          </button>
-        </div>
-
-        <div className="dash-sidebar__bottom">
-          <div className="dash-sidebar__section">Operator lane</div>
-          <button className="dash-sidebar__ask" onClick={onChat}>
-            Ask...
-          </button>
-          <button type="button" className="dash-sidebar__upload" onClick={() => instanceFileRef.current?.click()}>
-            Add file
-          </button>
-          <input ref={instanceFileRef} type="file" hidden onChange={handleInstanceFileUpload} />
-        </div>
-      </aside>
-
       <main className="dash-main">
         <div className="dash-content">
+          <input ref={instanceFileRef} type="file" hidden onChange={handleInstanceFileUpload} />
+
           <section className="dash-hero">
-            <div className="dash-hero__copy">
-              <div className="dash-hero__eyebrow">Workflow command center</div>
-              <h1 className="dash-hero__title">{heroTitle}</h1>
-              <p className="dash-hero__desc">{heroCopy}</p>
-
-              <div className="dash-hero__actions">
-                <button type="button" className="dash-hero__primary" onClick={onDescribe}>
-                  Describe job
-                </button>
-                <button type="button" className="dash-hero__secondary" onClick={onNewWorkflow}>
-                  Blank builder
-                </button>
-                <button type="button" className="dash-hero__secondary" onClick={onChat}>
-                  Chat
-                </button>
-                <button type="button" className="dash-hero__secondary" onClick={() => instanceFileRef.current?.click()}>
-                  Add file
-                </button>
-              </div>
-
-              <div className="dash-hero__chips">
-                <span className="dash-chip">{summary.workflow_counts.total} workflows in scope</span>
-                <span className="dash-chip">{summary.workflow_counts.live} live lanes</span>
-                <span className="dash-chip">{instanceFiles.length} knowledge files</span>
-                <span className={`dash-pill dash-pill--${health.tone}`}>{health.label}</span>
-              </div>
-
-              {error && (
-                <div className="dash-inline-alert">
-                  Live metrics are unavailable right now. The workflow inventory still works, but health data is stale.
-                </div>
-              )}
-            </div>
-
-            <div className="dash-hero__rail">
-              <div className="dash-contract-preview">
-                <div className="dash-contract-preview__head">
-                  <span>workflow_contract · tec_workflow_lane</span>
-                  <span>{hasWorkflows ? 'scope · active' : 'scope · draft'}</span>
-                </div>
-                <div className="dash-contract-preview__body">
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">task</div>
-                    <div className="dash-contract-preview__val">
-                      {hasWorkflows ? 'resume or inspect workflow lanes' : 'define first workflow job'}
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">read scope</div>
-                    <div className="dash-contract-preview__val">
-                      <span className="dash-contract-pill dash-contract-pill--read">/workflows</span>
-                      <span className="dash-contract-pill dash-contract-pill--read">/runs</span>
-                      <span className="dash-contract-pill dash-contract-pill--read">/receipts</span>
-                      <span className="dash-contract-pill dash-contract-pill--read">/knowledge</span>
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">write scope</div>
-                    <div className="dash-contract-preview__val">
-                      <span className="dash-contract-pill dash-contract-pill--write">/draft</span>
-                      <span className="dash-contract-pill dash-contract-pill--write">/success_if</span>
-                      <span className="dash-contract-pill dash-contract-pill--write">/failure_if</span>
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row dash-contract-preview__row--locked">
-                    <div className="dash-contract-preview__key">locked</div>
-                    <div className="dash-contract-preview__val">
-                      <span className="dash-contract-pill dash-contract-pill--locked">/destructive.write</span>
-                      <span className="dash-contract-pill dash-contract-pill--locked">/unbounded.spend</span>
-                      <span className="dash-contract-pill dash-contract-pill--locked">/approval.required</span>
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">tools</div>
-                    <div className="dash-contract-preview__val">
-                      <span className="dash-contract-pill">workflow.builder</span>
-                      <span className="dash-contract-pill">verifier.run</span>
-                      <span className="dash-contract-pill">receipts.query</span>
-                    </div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">approval</div>
-                    <div className="dash-contract-preview__val">human · for any locked.* match</div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">verifier</div>
-                    <div className="dash-contract-preview__val">success_if true · failure_if false · receipts sealed</div>
-                  </div>
-                  <div className="dash-contract-preview__row">
-                    <div className="dash-contract-preview__key">retry</div>
-                    <div className="dash-contract-preview__val">
-                      requires <span className="dash-contract-code">previous_failure</span> + <span className="dash-contract-code">retry_delta</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="dash-contract-preview__foot">
-                  <span>materialized · {materializedDate}</span>
-                  <span>✓ environment ready</span>
-                </div>
-              </div>
-
+            <h1 className="dash-hero__title">{heroTitle}</h1>
+            <div className="dash-hero__actions prx-button-row">
+              <Button tone="primary" size="sm" onClick={onDescribe}>Describe job</Button>
+              <Button size="sm" onClick={onNewWorkflow}>Blank builder</Button>
+              <Button size="sm" onClick={onChat}>Chat</Button>
+              <Button size="sm" onClick={() => instanceFileRef.current?.click()}>Add file</Button>
             </div>
           </section>
 
-          <section className="dash-run-instrument">
-            <div className="dash-terminal">
-              <div className="dash-terminal__label">sandbox · overview · plan→execute→verify</div>
-              <span className="dash-terminal__line"><span>$</span> praxis workflow query overview</span>
-              <span className="dash-terminal__line dash-terminal__line--muted">
-                › materializing dashboard snapshot · {summary.workflow_counts.total} workflows in scope
-              </span>
-              <span className="dash-terminal__line">
-                agent · {hasWorkflows ? 'inspect lanes, receipts, and knowledge' : 'awaiting first contract'}
-              </span>
-              <span className="dash-terminal__line dash-terminal__line--ok">
-                ✓ {summary.workflow_counts.live} live · {summary.workflow_counts.saved} saved · {summary.workflow_counts.draft} drafts
-              </span>
-              <span className={`dash-terminal__line ${summary.queue.depth > 0 ? 'dash-terminal__line--warn' : 'dash-terminal__line--ok'}`}>
-                {summary.queue.depth > 0 ? '!' : '✓'} queue · {summary.queue.depth} waiting · {summary.active_runs} active
-              </span>
-              <span className="dash-terminal__line dash-terminal__line--muted">
-                › knowledge · {instanceFiles.length} file{instanceFiles.length === 1 ? '' : 's'} attached
-              </span>
-              <span className="dash-terminal__line"><span>$</span> _</span>
+          {error && (
+            <div className="dash-inline-alert">
+              Live metrics unavailable — health data may be stale.
             </div>
+          )}
 
-            <div className="dash-receipts">
-              <div className="dash-receipts__head">
-                <span>receipts</span>
-                <span>{sealedRunCount} sealed</span>
-              </div>
-
-              <ReceiptCard
-                className="dash-receipt-card dash-receipt-card--allow"
-                state="sealed"
-                title="workflow.inventory"
-                meta="hydrated"
-                fields={[
-                  { key: 'live', value: summary.workflow_counts.live },
-                  { key: 'saved', value: summary.workflow_counts.saved },
-                  { key: 'drafts', value: summary.workflow_counts.draft },
-                  { key: 'result', value: 'hydrated · visible' },
-                ]}
-                seal={`${sealedRunCount} sealed`}
-              />
-
-              <button
-                type="button"
-                className="dash-receipt-button"
-                onClick={onOpenCosts}
-                title="View token spend (stays under Overview)"
-              >
-                <ReceiptCard
-                  className="dash-receipt-card dash-receipt-card--verify"
-                  state={health.tone === 'danger' ? 'refused' : 'verify'}
-                  title="dashboard.health"
-                  meta="verifier"
-                  fields={[
-                    { key: 'pass', value: passRateLabel },
-                    { key: 'runs', value: summary.runs_24h },
-                    { key: 'spend', value: spendLabel },
-                    { key: 'state', value: health.label },
-                  ]}
-                  seal="view spend"
+          <div className="prx-tile-grid" aria-label="Dashboard metrics">
+            {overviewCards.map((card) => {
+              const tileTone = card.tone === 'danger' ? 'err' as const
+                : card.tone === 'warning' ? 'warn' as const
+                : card.tone === 'healthy' ? 'ok' as const
+                : 'default' as const;
+              return (
+                <MetricTile
+                  key={card.id}
+                  label={card.title}
+                  value={card.value}
+                  detail={card.detail}
+                  action={`${card.action} →`}
+                  onClick={card.onClick}
+                  tone={tileTone}
+                  aria-label={`${card.title}: ${card.value}`}
                 />
-              </button>
-            </div>
-          </section>
+              );
+            })}
+          </div>
+
 
 
           <div className="dash-board">
@@ -968,199 +781,132 @@ export function Dashboard({
                   />
                 ))
               ) : (
-                <section className="dash-section dash-start-panel">
-                  <div className="dash-section__header">
-                    <div>
-                      <h2 className="dash-section__title">Next step</h2>
-                      <p className="dash-section__copy">Pick the way you want to start. The contract and receipt surfaces stay attached.</p>
-                    </div>
-                  </div>
-                  <div className="dash-start-panel__grid">
-                    <button type="button" className="dash-start-panel__action" onClick={onDescribe}>
-                      <span>Describe job</span>
-                      <strong>Plain language into contract</strong>
-                    </button>
-                    <button type="button" className="dash-start-panel__action" onClick={onNewWorkflow}>
-                      <span>Blank builder</span>
-                      <strong>Wire the graph by hand</strong>
-                    </button>
-                    <button type="button" className="dash-start-panel__action" onClick={onChat}>
-                      <span>Chat</span>
-                      <strong>Shape the first lane beside the app</strong>
-                    </button>
-                    <button type="button" className="dash-start-panel__action" onClick={() => instanceFileRef.current?.click()}>
-                      <span>Add file</span>
-                      <strong>Attach context before the run</strong>
-                    </button>
-                  </div>
-                </section>
+                <EmptyStateExplainer
+                  title="No workflows yet"
+                  why="Use the buttons above to describe a job, open the builder, or start a chat."
+                  actionLabel="Describe a job"
+                  onAction={onDescribe}
+                />
               )}
             </div>
 
             <aside className="dash-board__rail">
-              <section className="dash-panel dash-toolbelt-panel">
-                <div className="dash-panel__header">
-                  <div>
-                    <div className="dash-panel__eyebrow">Materialize</div>
-                    <h2 className="dash-panel__title">Toolbelt Review</h2>
-                  </div>
-                  <span className="dash-review-count">{loading ? '...' : toolbeltReviewItems.length}</span>
-                </div>
+              <ListPanel
+                eyebrow="Materialize"
+                title="Toolbelt Review"
+                count={loading ? '…' : toolbeltReviewItems.length}
+              >
+                {toolbeltReviewItems.map((item) => (
+                  <StatusRow
+                    key={item.id}
+                    tone={rowToneFromTone(item.tone)}
+                    title={item.title}
+                    detail={item.detail}
+                    meta={item.meta}
+                    onClick={item.onClick}
+                  />
+                ))}
+              </ListPanel>
 
-                <div className="dash-review-list">
-                  {toolbeltReviewItems.map((item) => {
-                    const body = (
-                      <>
-                        <span className={`dash-review-item__dot dash-review-item__dot--${item.tone}`} />
-                        <span className="dash-review-item__body">
-                          <strong>{item.title}</strong>
-                          <span>{item.detail}</span>
-                        </span>
-                        <em>{item.meta}</em>
-                      </>
-                    );
-                    if (item.onClick) {
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="dash-review-item"
-                          onClick={item.onClick}
-                        >
-                          {body}
-                        </button>
-                      );
-                    }
-                    return (
-                      <div key={item.id} className="dash-review-item dash-review-item--static">
-                        {body}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section className="dash-panel">
-                <div className="dash-panel__header">
-                  <div>
-                    <div className="dash-panel__eyebrow">Recent execution</div>
-                    <h2 className="dash-panel__title">Recent Runs</h2>
-                  </div>
-                </div>
-
+              <ListPanel eyebrow="Recent execution" title="Recent Runs">
                 {visibleRuns.length > 0 ? (
-                  <div className="dash-run-list">
-                    {visibleRuns.slice(0, 8).map((run) => (
-                      <button
-                        key={run.run_id}
-                        type="button"
-                        className="dash-run"
-                        onClick={() => onViewRun(run.run_id)}
-                      >
-                        <div className={`dash-run__status dash-run__status--${run.status}`} />
-                        <div className="dash-run__body">
-                          <div className="dash-run__title">
-                            {runDisplayName(run)}
-                          </div>
-                          <div className="dash-run__meta">
-                            <span>{run.status}</span>
-                            <span>{run.total_jobs > 0 ? `${run.completed_jobs}/${run.total_jobs} jobs` : 'Awaiting jobs'}</span>
-                            <span>{run.created_at ? timeAgo(run.created_at) : 'Queued now'}</span>
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                  visibleRuns.slice(0, 8).map((run) => (
+                    <StatusRow
+                      key={run.run_id}
+                      tone={rowToneFromRunStatus(run.status)}
+                      title={runDisplayName(run)}
+                      detail={`${run.status} · ${run.total_jobs > 0 ? `${run.completed_jobs}/${run.total_jobs} jobs` : 'Awaiting jobs'}`}
+                      meta={run.created_at ? timeAgo(run.created_at) : 'Queued now'}
+                      onClick={() => onViewRun(run.run_id)}
+                    />
+                  ))
                 ) : (
-                  <div className="dash-empty dash-empty--compact">
-                    <div className="dash-empty__title">No recent runs</div>
-                    <div className="dash-empty__copy">
-                      Trigger a workflow and the latest executions will appear here with one-click inspection.
-                    </div>
-                  </div>
+                  <EmptyStateExplainer
+                    title="No recent runs"
+                    why="Trigger a workflow and the latest executions appear here with one-click inspection."
+                    actionLabel="Open Canvas"
+                    onAction={onNewWorkflow}
+                  />
                 )}
-              </section>
+              </ListPanel>
 
-              <section className="dash-panel">
-                <div className="dash-panel__header">
-                  <div>
-                    <div className="dash-panel__eyebrow">Attached context</div>
-                    <h2 className="dash-panel__title">Knowledge Base</h2>
-                  </div>
-                  <button type="button" className="dash-panel__action" onClick={() => instanceFileRef.current?.click()}>
+              <ListPanel
+                eyebrow="Attached context"
+                title="Knowledge Base"
+                action={
+                  <Button size="sm" tone="ghost" onClick={() => instanceFileRef.current?.click()}>
                     Add file
-                  </button>
-                </div>
-
+                  </Button>
+                }
+              >
                 {instanceFiles.length > 0 ? (
-                  <div className="dash-file-list">
-                    {instanceFiles.map((file) => (
-                      <div key={file.id} className="dash-file">
-                        <div className="dash-file__name">{file.filename}</div>
-                        <button type="button" className="dash-file__remove" onClick={() => deleteInstanceFile(file.id)}>
+                  instanceFiles.map((file) => (
+                    <StatusRow
+                      key={file.id}
+                      tone="idle"
+                      title={file.filename}
+                      meta={
+                        <Button size="sm" tone="danger" onClick={() => deleteInstanceFile(file.id)}>
                           Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                        </Button>
+                      }
+                    />
+                  ))
+                ) : instanceFilesError ? (
+                  <EmptyStateExplainer
+                    title="File inventory unavailable"
+                    why={instanceFilesError}
+                    actionLabel="Retry"
+                    onAction={() => instanceFileRef.current?.click()}
+                  />
                 ) : (
-                  <div className="dash-empty dash-empty--compact">
-                    <div className="dash-empty__title">No files attached</div>
-                    <div className="dash-empty__copy">
-                      Upload briefs, notes, or source files so the workspace can reason over them during execution.
-                    </div>
-                  </div>
+                  <EmptyStateExplainer
+                    title="No files attached"
+                    why="Upload briefs, notes, or source files so the workspace can reason over them during execution."
+                    actionLabel="Add file"
+                    onAction={() => instanceFileRef.current?.click()}
+                  />
                 )}
-              </section>
+              </ListPanel>
 
-              <section className="dash-panel">
-                <div className="dash-panel__header">
-                  <div>
-                    <div className="dash-panel__eyebrow">Repeated work</div>
-                    <h2 className="dash-panel__title">Tool Opportunities</h2>
-                  </div>
-                  <span className="dash-review-count">
-                    {loading ? '...' : (snapshot?.tool_opportunities?.length ?? 0)}
-                  </span>
-                </div>
-
+              <ListPanel
+                eyebrow="Repeated work"
+                title="Tool Opportunities"
+                count={loading ? '…' : (snapshot?.tool_opportunities?.length ?? 0)}
+              >
                 {(snapshot?.tool_opportunities?.length ?? 0) > 0 ? (
-                  <div className="dash-review-list">
-                    {(snapshot?.tool_opportunities ?? []).map((opp) => {
-                      const label = toolOpportunityLabel(opp);
-                      const detail = toolOpportunityDetail(opp);
-                      const tone = opp.distinct_surfaces > 1 ? 'healthy' : 'neutral';
-                      return (
-                        <div
-                          key={opp.shape_hash}
-                          className="dash-review-item dash-review-item--static"
-                          title={`${opp.shape_hash.slice(0, 12)} · ${opp.action_kinds.join(', ')}`}
-                        >
-                          <span className={`dash-review-item__dot dash-review-item__dot--${tone}`} />
-                          <span className="dash-review-item__body">
-                            <strong>{label}</strong>
-                            {detail ? (
-                              <span className="dash-review-item__detail--mono">{detail}</span>
-                            ) : null}
-                          </span>
-                          <em>
-                            {`${opp.occurrence_count}×`}
-                            {opp.distinct_surfaces > 1 ? ` · ${opp.distinct_surfaces} surfaces` : ''}
-                            {opp.last_seen ? ` · ${timeAgo(opp.last_seen)}` : ''}
-                          </em>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  (snapshot?.tool_opportunities ?? []).map((opp) => {
+                    const label = toolOpportunityLabel(opp);
+                    const detail = toolOpportunityDetail(opp);
+                    const tone: 'healthy' | 'neutral' = opp.distinct_surfaces > 1 ? 'healthy' : 'neutral';
+                    const meta = [
+                      `${opp.occurrence_count}×`,
+                      opp.distinct_surfaces > 1 ? `${opp.distinct_surfaces} surfaces` : null,
+                      opp.last_seen ? timeAgo(opp.last_seen) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
+                    return (
+                      <StatusRow
+                        key={opp.shape_hash}
+                        tone={rowToneFromTone(tone)}
+                        title={label}
+                        detail={detail}
+                        detailMono
+                        meta={meta}
+                        onClick={onDescribe}
+                      />
+                    );
+                  })
                 ) : (
-                  <div className="dash-empty dash-empty--compact">
-                    <div className="dash-empty__title">Nothing repeating yet</div>
-                    <div className="dash-empty__copy">
-                      Patterns appear here once the same action shape is captured 3+ times — a signal that it's worth folding into a tool.
-                    </div>
-                  </div>
+                  <EmptyStateExplainer
+                    title="Nothing repeating yet"
+                    why="Patterns appear here once the same action shape is captured 3+ times — a signal that it's worth folding into a tool."
+                    actionLabel="Open builder"
+                    onAction={onDescribe}
+                  />
                 )}
-              </section>
+              </ListPanel>
             </aside>
           </div>
         </div>

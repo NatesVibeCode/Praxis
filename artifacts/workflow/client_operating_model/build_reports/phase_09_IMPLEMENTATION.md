@@ -63,7 +63,7 @@ Read before implementation:
 Praxis discovery, recall, and federated search found nearby manifest and
 Object Truth concepts, but no existing portable-cartridge owner. The new code
 therefore creates a disjoint `runtime.cartridge` authority instead of extending
-integration manifests, Moon app manifests, or DB-backed Object Truth evidence.
+integration manifests, Canvas app manifests, or DB-backed Object Truth evidence.
 
 ## Validation
 

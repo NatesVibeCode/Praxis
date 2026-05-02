@@ -295,11 +295,11 @@ def test_mcp_task_route_request_uses_operation_catalog_gateway(monkeypatch) -> N
 
     result = operator.tool_praxis_task_route_request(
         {
-            "task_type": "compile",
+            "task_type": "materialize",
             "provider_slug": "OpenAI",
             "model_slug": "gpt-5.4",
             "transport_type": "api",
-            "request_contract_ref": "llm_request_contract.openai.gpt-5-4.api.compile",
+            "request_contract_ref": "llm_request_contract.openai.gpt-5-4.api.materialize",
             "reason_code": "request_contract_tuning",
             "rationale": "Shape request knobs from contract JSON.",
         }
@@ -307,12 +307,12 @@ def test_mcp_task_route_request_uses_operation_catalog_gateway(monkeypatch) -> N
 
     assert result["ok"] is True
     assert captured["operation_name"] == "operator.task_route_request"
-    assert captured["payload"]["task_type"] == "compile"
+    assert captured["payload"]["task_type"] == "materialize"
     assert captured["payload"]["provider_slug"] == "openai"
     assert captured["payload"]["model_slug"] == "gpt-5.4"
     assert captured["payload"]["transport_type"] == "API"
     assert captured["payload"]["request_contract_ref"] == (
-        "llm_request_contract.openai.gpt-5-4.api.compile"
+        "llm_request_contract.openai.gpt-5-4.api.materialize"
     )
     assert "temperature" not in captured["payload"]
 
@@ -704,6 +704,37 @@ def test_mcp_status_snapshot_uses_operation_catalog_gateway(monkeypatch) -> None
     assert result["operation_receipt"]["operation_name"] == "operator.status_snapshot"
     assert captured["operation_name"] == "operator.status_snapshot"
     assert captured["payload"] == {"since_hours": 24}
+
+
+def test_mcp_paid_model_access_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_paid_model_access(
+        {
+            "action": "preview",
+            "runtime_profile_ref": "praxis",
+            "job_type": "materialize",
+            "transport_type": "API",
+            "adapter_type": "llm_task",
+            "provider_slug": "Fireworks",
+            "model_slug": "accounts/fireworks/models/kimi-k2p6",
+            "limit": 1,
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.paid_model_access"
+    assert captured["operation_name"] == "operator.paid_model_access"
+    assert captured["payload"]["provider_slug"] == "Fireworks"
+    assert captured["payload"]["model_slug"] == "accounts/fireworks/models/kimi-k2p6"
 
 
 def test_mcp_execution_truth_uses_operation_catalog_gateway(monkeypatch) -> None:
