@@ -2357,8 +2357,7 @@ button.dash-hero-card__stat--link:focus-visible {
   line-height: 1.65;
 }
 
-.dash-terminal__label,
-.dash-receipts__head {
+.dash-terminal__label {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -2392,48 +2391,6 @@ button.dash-hero-card__stat--link:focus-visible {
   color: #ff8a6a;
 }
 
-.dash-receipts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 0;
-  background: transparent;
-}
-
-.dash-receipts__head {
-  margin-bottom: 10px;
-}
-
-.dash-receipt-card {
-  width: 100%;
-  border-radius: 8px;
-}
-
-.dash-receipt-button {
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.dash-receipt-button:hover .dash-receipt-card {
-  filter: brightness(1.08);
-}
-
-.dash-receipt-card--allow {
-  border-color: rgba(63, 185, 80, 0.3);
-}
-
-.dash-receipt-card--verify {
-  border-color: var(--dash-border-soft);
-}
-
-.dash-receipt-card .v {
-  overflow-wrap: anywhere;
-}
 
 .dash-board {
   margin-top: 0;
@@ -2546,8 +2503,7 @@ button.dash-hero-card__stat--link:focus-visible {
     padding-top: 0;
   }
 
-  .dash-terminal,
-  .dash-receipts {
+  .dash-terminal {
     padding: 18px;
   }
 
@@ -2707,14 +2663,6 @@ button.dash-hero-card__stat--link:focus-visible {
   grid-template-columns: 1fr;
 }
 
-.dash-receipts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.dash-receipts__head {
-  grid-column: 1 / -1;
-}
 
 .dash-empty--danger {
   border-color: rgba(248, 81, 73, 0.28);
@@ -2726,15 +2674,13 @@ button.dash-hero-card__stat--link:focus-visible {
 }
 
 @media (max-width: 980px) {
-  .dash-overview-grid,
-  .dash-receipts {
+  .dash-overview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 720px) {
-  .dash-overview-grid,
-  .dash-receipts {
+  .dash-overview-grid {
     grid-template-columns: 1fr;
   }
 }

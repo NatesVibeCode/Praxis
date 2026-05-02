@@ -7,7 +7,6 @@ import {
   ListPanel,
   MetricTile,
   PanelCard,
-  ReceiptCard,
   StatusRail,
   StatusRow,
   type StatusRowTone,
@@ -544,7 +543,6 @@ export function Dashboard({
   );
   const passRateLabel = formatPassRate(summary.pass_rate_24h);
   const spendLabel = formatCurrency(summary.total_cost_24h);
-  const sealedRunCount = visibleRuns.filter((run) => run.status === 'succeeded').length;
   const queueTone = summary.queue.status === 'critical'
     ? 'danger'
     : summary.queue.status === 'warning'
@@ -741,39 +739,6 @@ export function Dashboard({
             ))}
           </div>
 
-          <div className="dash-receipts">
-            <ReceiptCard
-              state="sealed"
-              title="workflow.inventory"
-              meta="hydrated"
-              fields={[
-                { key: 'live', value: summary.workflow_counts.live },
-                { key: 'saved', value: summary.workflow_counts.saved },
-                { key: 'drafts', value: summary.workflow_counts.draft },
-                { key: 'result', value: 'hydrated · visible' },
-              ]}
-              seal={`${sealedRunCount} sealed`}
-            />
-            <button
-              type="button"
-              className="dash-receipt-button"
-              onClick={onOpenCosts}
-              title="View token spend"
-            >
-              <ReceiptCard
-                state={health.tone === 'danger' ? 'refused' : 'verify'}
-                title="dashboard.health"
-                meta="verifier"
-                fields={[
-                  { key: 'pass', value: passRateLabel },
-                  { key: 'runs', value: summary.runs_24h },
-                  { key: 'spend', value: spendLabel },
-                  { key: 'state', value: health.label },
-                ]}
-                seal="view spend"
-              />
-            </button>
-          </div>
 
 
           <div className="dash-board">

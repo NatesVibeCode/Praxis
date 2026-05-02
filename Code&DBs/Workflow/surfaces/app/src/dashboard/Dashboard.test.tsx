@@ -152,8 +152,7 @@ describe('Dashboard', () => {
     await screen.findByText(/3 workflows/);
     expect(screen.getByText('1 live - 1 saved - 1 draft')).toBeInTheDocument();
     expect(screen.getAllByText('Healthy').length).toBeGreaterThan(0);
-    expect(screen.getByText('dashboard.health')).toBeInTheDocument();
-    expect(screen.getByText('$14.25')).toBeInTheDocument();
+    expect(screen.getByText(/\$14\.25/)).toBeInTheDocument();
     expect(screen.getByText('Toolbelt Review')).toBeInTheDocument();
     expect(screen.getByText('Execution queue')).toBeInTheDocument();
     expect(screen.queryByText('workflow_contract · tec_workflow_lane')).not.toBeInTheDocument();
