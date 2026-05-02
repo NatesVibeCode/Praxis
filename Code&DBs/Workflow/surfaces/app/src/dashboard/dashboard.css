@@ -831,15 +831,6 @@ button.dash-hero-card__stat--link:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.wf-card__desc {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
 
 .wf-card__badge {
   flex-shrink: 0;

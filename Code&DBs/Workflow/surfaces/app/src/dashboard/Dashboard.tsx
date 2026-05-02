@@ -322,10 +322,6 @@ function WorkflowCard({
         </div>
       }
     >
-      {wf.description && (
-        <p className="wf-card__desc">{wf.description}</p>
-      )}
-
       <StatusRail
         items={[
           { label: 'Latest run', value: latestRunCopy(wf), tone: 'dim' },
