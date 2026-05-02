@@ -645,7 +645,11 @@ button.dash-hero-card__stat--link:focus-visible {
   align-items: start;
 }
 
-.dash-board__main,
+.dash-board__main {
+  display: grid;
+  gap: 24px;
+}
+
 .dash-board__rail {
   display: grid;
   gap: 10px;
