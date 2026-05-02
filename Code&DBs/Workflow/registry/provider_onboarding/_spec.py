@@ -672,6 +672,7 @@ _PROVIDER_CLI_AUTH_MOUNTS: dict[str, dict[str, Any]] = {
         "auth_mounts": [
             {
                 "host_relative_path": ".codex/auth.json",
+                "container_relative_path": ".codex/auth.json",
                 "container_seed_filename": "openai-auth.json",
             }
         ],
@@ -682,6 +683,7 @@ _PROVIDER_CLI_AUTH_MOUNTS: dict[str, dict[str, Any]] = {
             {
                 "host_relative_path": ".gemini/oauth_creds.json",
                 "container_relative_path": ".gemini/oauth_creds.json",
+                "container_seed_filename": "google-gemini-oauth_creds.json",
             },
             {
                 "host_relative_path": ".gemini/google_accounts.json",
@@ -699,6 +701,7 @@ _PROVIDER_CLI_AUTH_MOUNTS: dict[str, dict[str, Any]] = {
             {
                 "host_relative_path": ".gemini/oauth_creds.json",
                 "container_relative_path": ".gemini/oauth_creds.json",
+                "container_seed_filename": "google-gemini-oauth_creds.json",
             },
             {
                 "host_relative_path": ".gemini/google_accounts.json",

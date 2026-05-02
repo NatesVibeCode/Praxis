@@ -196,7 +196,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_generate_plan` | `workflow` | `stable` | `workflow generate-plan` | `read`, `write` | - | Shared CQRS plan-generation front door. action='generate_plan' recognizes messy prose, matches spans to authority, returns suggestions and gaps, and does not mutate state. action='materialize_plan' creates or updates a draft workflow through the canonical workflow build mutation. |
 | `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | - | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
 | `praxis_model_eval` | `workflow` | `advanced` | `workflow model-eval` | `read`, `write` | - | Plan, run, inspect, compare, promote, export, or ingest public benchmark priors for model/job/prompt evaluation matrices. Imports canonical Workflow specs as fixed fixtures and varies model/provider/prompt/effort/tool/swarm configuration under strict privacy gates. |
-| `praxis_moon` | `workflow` | `advanced` | `workflow moon` | `launch`, `read`, `write` | - | Workflow graph-authoring co-pilot exposed through the legacy praxis_moon tool name. Five actions over the same workflow build authority, all CQRS-gateway dispatched (each call leaves a receipt + the command actions emit authority events). |
+| `praxis_canvas` | `workflow` | `advanced` | `workflow canvas` | `launch`, `read`, `write` | - | Workflow graph-authoring co-pilot exposed through the legacy praxis_canvas tool name. Five actions over the same workflow build authority, all CQRS-gateway dispatched (each call leaves a receipt + the command actions emit authority events). |
 | `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | - | Q-side of the planning stack: read every plan.* authority_event for one workflow_id in order. Pair with gateway-backed praxis_compose_plan / praxis_launch_plan on the C side. |
 | `praxis_promote_experiment_winner` | `workflow` | `advanced` | - | `write` | - | Promote one compose-experiment leg into the canonical task_type_routing row for that task type. The winning leg's temperature and max_tokens are applied; provider/model changes remain visible only in the returned diff. |
 | `praxis_solution` | `workflow` | `advanced` | `workflow solution` | `launch`, `read` | - | Coordinate durable Solutions: one Solution is a coordinated answer under proof, backed by one or more workflow executions. This is the replacement for legacy multi-workflow batch coordination. |
@@ -4652,17 +4652,17 @@ Example input:
 }
 ```
 
-#### `praxis_moon`
+#### `praxis_canvas`
 
 - Surface: `workflow`
 - Tier: `advanced`
-- Badges: `advanced`, `workflow`, `alias:moon`, `mutates-state`, `launches-work`
+- Badges: `advanced`, `workflow`, `alias:canvas`, `mutates-state`, `launches-work`
 - Risks: `launch`, `read`, `write`
-- CLI entrypoint: `workflow moon`
-- CLI schema help: `workflow tools describe praxis_moon`
-- When to use: Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_moon tool name and moon alias remain compatibility entrypoints.
+- CLI entrypoint: `workflow canvas`
+- CLI schema help: `workflow tools describe praxis_canvas`
+- When to use: Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_canvas tool name and canvas alias remain compatibility entrypoints.
 - When not to use: Do not use it for unrelated roadmap, bug, provider-routing, or direct database work. Read the graph before mutating fields.
-- Recommended alias: `workflow moon`
+- Recommended alias: `workflow canvas`
 - Selector: `action`; default `get_build`; values `get_build`, `compose`, `suggest_next`, `mutate_field`, `launch`
 - Required args: (none)
 

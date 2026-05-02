@@ -115,7 +115,7 @@ def build_execution_setup(
     # hardcoded 5-item list whenever prose contained any of {connector, api
     # docs, common objects, application, docs}. That template preempted the
     # prose-grounded capability nodes in definition_graph and rendered as 5
-    # fake "Resolve typed input gap" nodes in Moon build_graph. Retrieval is
+    # fake "Resolve typed input gap" nodes in Canvas build_graph. Retrieval is
     # the filter; these lists stay empty until retrieval-grounded projection
     # lands (roadmap_item.praxis.public.beta.ramp.llm.first.infrastructure.
     # wedge.delete.compile.template.fallback.project.build.graph.from.
@@ -560,7 +560,7 @@ def make_execution_phase(
         # Typed contract derived from agent_route + title + purpose so the
         # phase carries machine-readable consumes/produces alongside the
         # human-readable outputs list. Closes the typed-node gap that left
-        # Moon Composer nodes with prose-only contracts (BUG-C6EE740C and
+        # Canvas Composer nodes with prose-only contracts (BUG-C6EE740C and
         # the data-dictionary / gates / Provide-X chain it gates).
         "consumes": type_contract["consumes"],
         "consumes_any": type_contract["consumes_any"],
@@ -819,7 +819,7 @@ def infer_persistence_targets(*, title: str, summary: str) -> list[str]:
 # Persistence / Common object) whenever prose contained any of
 # {connector, api docs, common objects, application, docs}. The list was
 # written to execution_setup.constraints.blocking_inputs and turned into
-# the 5 "Resolve typed input gap" stubs Moon rendered as build_graph,
+# the 5 "Resolve typed input gap" stubs Canvas rendered as build_graph,
 # preempting the prose-grounded capability nodes definition_graph
 # already contained. Retrieval is the filter. No silent template
 # substitution. Projection from definition_graph with pill-typed edges is

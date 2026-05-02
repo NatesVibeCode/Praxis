@@ -516,31 +516,12 @@ def cmd_active(args: argparse.Namespace) -> int:
     """Show active workflow runs from Postgres authority."""
     del args
     try:
-        pg_conn = _get_pg_conn()
-        rows = pg_conn.execute(
-            """SELECT r.run_id,
-                      r.workflow_id,
-                      r.current_state,
-                      r.requested_at,
-                      r.started_at,
-                      COALESCE(job_counts.nonterminal_jobs, 0) AS nonterminal_jobs
-               FROM workflow_runs r
-               LEFT JOIN LATERAL (
-                   SELECT COUNT(*) FILTER (
-                              WHERE status IN ('pending', 'ready', 'claimed', 'running')
-                          ) AS nonterminal_jobs
-                   FROM workflow_jobs j
-                   WHERE j.run_id = r.run_id
-               ) job_counts ON TRUE
-               WHERE r.current_state IN ('queued', 'running')
-                 AND (
-                     COALESCE(job_counts.nonterminal_jobs, 0) > 0
-                     OR r.requested_at >= now() - interval '2 minutes'
-                 )
-               ORDER BY requested_at DESC
-               LIMIT 50"""
-        )
-        print(json.dumps([dict(row) for row in (rows or [])], default=str, indent=2))
+        exit_code, snapshot = run_cli_tool("praxis_status_snapshot", {"since_hours": 24})
+        if exit_code != 0:
+            print(json.dumps(snapshot, default=str, indent=2), file=sys.stderr)
+            return exit_code
+        runs = snapshot.get("in_flight_workflows")
+        print(json.dumps(runs if isinstance(runs, list) else [], default=str, indent=2))
         return 0
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

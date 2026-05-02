@@ -20,7 +20,7 @@ FOCUS_FILE = CACHE_DIR / "focused_suite.json"
 DEFAULT_SUITE = "workflow_first_slice"
 USAGE = (
     "usage: ./scripts/test.sh "
-    "suite list|suite focus|plan|check-affected|validate|selftest|moon-style-lint|python-dependency-audit|compile-delivery-probe"
+    "suite list|suite focus|plan|check-affected|validate|selftest|canvas-style-lint|python-dependency-audit|compile-delivery-probe"
 )
 
 SUITE_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -309,7 +309,7 @@ def _help_payload() -> dict[str, Any]:
                 "check-affected <queue-file>",
                 "validate <queue-file>",
                 "selftest",
-                "moon-style-lint",
+                "canvas-style-lint",
                 "python-dependency-audit",
                 "compile-delivery-probe",
             ],
@@ -503,15 +503,15 @@ def _selftest_payload() -> dict[str, Any]:
     }
 
 
-def _moon_style_lint_payload(args: list[str]) -> dict[str, Any]:
+def _canvas_style_lint_payload(args: list[str]) -> dict[str, Any]:
     if args:
         return {
             "ok": False,
             "results": {},
-            "errors": ["moon-style-lint does not accept positional arguments"],
+            "errors": ["canvas-style-lint does not accept positional arguments"],
             "warnings": [],
         }
-    command = [sys.executable, str(REPO_ROOT / "scripts" / "moon_style_lint.py")]
+    command = [sys.executable, str(REPO_ROOT / "scripts" / "canvas_style_lint.py")]
     run = _run_command(command)
     try:
         details = json.loads(run["stdout"] or "{}")
@@ -519,7 +519,7 @@ def _moon_style_lint_payload(args: list[str]) -> dict[str, Any]:
         return {
             "ok": False,
             "results": {"raw": run["stdout"]},
-            "errors": ["moon-style-lint output was not valid JSON"],
+            "errors": ["canvas-style-lint output was not valid JSON"],
             "warnings": [run["stderr"].strip()] if run["stderr"] else [],
         }
 
@@ -697,8 +697,8 @@ def _dispatch(argv: list[str]) -> dict[str, Any]:
                 "warnings": [],
             }
         return _selftest_payload()
-    if command == "moon-style-lint":
-        return _moon_style_lint_payload(tail)
+    if command == "canvas-style-lint":
+        return _canvas_style_lint_payload(tail)
     if command == "python-dependency-audit":
         return _python_dependency_audit_payload(tail)
     if command == "compile-delivery-probe":

@@ -54,7 +54,9 @@ class ProviderControlPlaneSnapshotRow:
     model_version: str
     cost_structure: str
     cost_metadata: Mapping[str, Any]
+    budget_window: Mapping[str, Any]
     route_temperature: float | None
+    route_rank: int | None
     route_max_tokens: int | None
     route_reasoning_control: Mapping[str, Any]
     route_request_contract_ref: str | None
@@ -189,7 +191,9 @@ class PostgresProviderControlPlaneRepository:
                     snapshot.model_version,
                     snapshot.cost_structure,
                     snapshot.cost_metadata,
+                    COALESCE(budget.budget_window, '{}'::jsonb) AS budget_window,
                     route.temperature AS route_temperature,
+                    route.rank AS route_rank,
                     route.max_tokens AS route_max_tokens,
                     route.reasoning_control AS route_reasoning_control,
                     route.request_contract_ref AS route_request_contract_ref,
@@ -252,6 +256,26 @@ class PostgresProviderControlPlaneRepository:
                      OR route.candidate_ref IS NOT DISTINCT FROM snapshot.candidate_ref
                  )
                  AND route.sub_task_type = '*'
+                LEFT JOIN LATERAL (
+                    SELECT jsonb_build_object(
+                        'provider_policy_id', provider_policy_id,
+                        'provider_ref', provider_ref,
+                        'budget_scope', budget_scope,
+                        'budget_status', budget_status,
+                        'request_limit', request_limit,
+                        'requests_used', requests_used,
+                        'token_limit', token_limit,
+                        'tokens_used', tokens_used,
+                        'spend_limit_usd', spend_limit_usd,
+                        'spend_used_usd', spend_used_usd,
+                        'window_started_at', window_started_at,
+                        'window_ended_at', window_ended_at
+                    ) AS budget_window
+                    FROM provider_budget_windows
+                    WHERE provider_ref = snapshot.provider_ref
+                    ORDER BY window_ended_at DESC NULLS LAST, created_at DESC NULLS LAST
+                    LIMIT 1
+                ) AS budget ON TRUE
                 WHERE snapshot.runtime_profile_ref = $1
                   AND ($2::text IS NULL OR snapshot.job_type = $2)
                   AND ($3::text IS NULL OR snapshot.transport_type = $3)
@@ -274,7 +298,9 @@ class PostgresProviderControlPlaneRepository:
                 snapshot.model_version,
                 snapshot.cost_structure,
                 snapshot.cost_metadata,
+                snapshot.budget_window,
                 snapshot.route_temperature,
+                snapshot.route_rank,
                 snapshot.route_max_tokens,
                 snapshot.route_reasoning_control,
                 snapshot.route_request_contract_ref,
@@ -524,9 +550,15 @@ def _provider_control_plane_snapshot_row(
         model_version=str(row.get("model_version") or ""),
         cost_structure=str(row["cost_structure"]),
         cost_metadata=dict(row.get("cost_metadata") or {}),
+        budget_window=dict(row.get("budget_window") or {}),
         route_temperature=(
             float(row["route_temperature"])
             if row.get("route_temperature") is not None
+            else None
+        ),
+        route_rank=(
+            int(row["route_rank"])
+            if row.get("route_rank") is not None
             else None
         ),
         route_max_tokens=(

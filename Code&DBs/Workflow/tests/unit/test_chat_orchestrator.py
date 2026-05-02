@@ -287,7 +287,7 @@ def test_send_message_fails_over_http_route_on_rate_limit(monkeypatch) -> None:
     assert [message["role"] for message in store.messages] == ["user", "assistant"]
 
 
-def test_send_message_leaves_output_budget_unclamped_for_moon_context(monkeypatch) -> None:
+def test_send_message_leaves_output_budget_unclamped_for_canvas_context(monkeypatch) -> None:
     store = _FakeChatStore()
     orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
     http_route = ResolvedChatRoute(
@@ -306,7 +306,7 @@ def test_send_message_leaves_output_budget_unclamped_for_moon_context(monkeypatc
     def _fake_call_llm(request):
         captured["max_tokens"] = request.max_tokens
         return SimpleNamespace(
-            content="Moon reviewed it",
+            content="Canvas reviewed it",
             provider_slug="openai",
             model="gpt-5.4",
             usage={"input_tokens": 1, "output_tokens": 1},
@@ -319,7 +319,7 @@ def test_send_message_leaves_output_budget_unclamped_for_moon_context(monkeypatc
     orchestrator.send_message(
         "conv-1",
         "Review this build",
-        selection_context=[{"kind": "moon_context", "workflow_id": "wf_123"}],
+        selection_context=[{"kind": "canvas_context", "workflow_id": "wf_123"}],
     )
 
     assert captured["max_tokens"] is None
@@ -330,7 +330,7 @@ def test_send_message_uses_route_max_tokens_when_route_declares_contract(monkeyp
     orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
     kimi_route = ResolvedChatRoute(
         provider_slug="openrouter",
-        model_slug="moonshotai/kimi-k2.6",
+        model_slug="canvasshotai/kimi-k2.6",
         adapter_type="llm_task",
         endpoint_uri="https://openrouter.ai/api/v1/chat/completions",
         api_key="openrouter-key",
@@ -351,7 +351,7 @@ def test_send_message_uses_route_max_tokens_when_route_declares_contract(monkeyp
         return SimpleNamespace(
             content="Kimi reviewed it",
             provider_slug="openrouter",
-            model="moonshotai/kimi-k2.6",
+            model="canvasshotai/kimi-k2.6",
             usage={"input_tokens": 1, "output_tokens": 1},
             latency_ms=12,
             tool_calls=(),
@@ -363,13 +363,13 @@ def test_send_message_uses_route_max_tokens_when_route_declares_contract(monkeyp
 
     assert captured == {
         "provider_slug": "openrouter",
-        "model_slug": "moonshotai/kimi-k2.6",
+        "model_slug": "canvasshotai/kimi-k2.6",
         "max_tokens": 32768,
         "temperature": 0.2,
     }
 
 
-def test_send_message_honors_explicit_max_tokens_over_moon_default(monkeypatch) -> None:
+def test_send_message_honors_explicit_max_tokens_over_canvas_default(monkeypatch) -> None:
     store = _FakeChatStore()
     orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
     http_route = ResolvedChatRoute(
@@ -401,7 +401,7 @@ def test_send_message_honors_explicit_max_tokens_over_moon_default(monkeypatch) 
     orchestrator.send_message(
         "conv-1",
         "Review this build",
-        selection_context=[{"kind": "moon_context", "workflow_id": "wf_123"}],
+        selection_context=[{"kind": "canvas_context", "workflow_id": "wf_123"}],
         max_tokens=12000,
     )
 

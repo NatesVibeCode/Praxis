@@ -2243,7 +2243,7 @@ def get_run_execution_proof(run_id: str, stale_after_seconds: int = 180) -> dict
     The response shape is the same as the MCP path —
     ``{verdict, confidence, evidence[], missing_evidence[], authority_sources[]}``.
 
-    Used by the Moon Run dock + RunDetailView "Evidence" tab. Lazy-fetched
+    Used by the Canvas Run dock + RunDetailView "Evidence" tab. Lazy-fetched
     on click rather than inlined into ``/api/runs/{id}`` because proof is
     heavier (5+ aggregation queries across workflow_jobs, receipts,
     workflow_outbox, authority_events, build_antipattern_hits, etc.) and
@@ -3419,9 +3419,9 @@ async def templates_get(request: Request) -> Response:
 async def search_get(request: Request) -> Response:
     return await _route_to_handler(request)
 
-# -- Moon pickers (read-only datalist-backed dropdowns) --
-@app.get("/api/moon/pickers/{rest_of_path:path}")
-async def moon_pickers_get(request: Request, rest_of_path: str) -> Response:
+# -- Canvas pickers (read-only datalist-backed dropdowns) --
+@app.get("/api/canvas/pickers/{rest_of_path:path}")
+async def canvas_pickers_get(request: Request, rest_of_path: str) -> Response:
     return await _route_to_handler(request)
 
 @app.get("/api/registries/search")

@@ -1,7 +1,7 @@
 """Phase 2.1.E regression: packet_map entries carry typed release gates.
 
 Before this change, the packet_map entry exposed ``expected_gates``
-(verify_ref list) but no typed gate contracts. Moon-generated workflows
+(verify_ref list) but no typed gate contracts. Canvas-generated workflows
 shipped without release gates that could auto-satisfy from typed state,
 forcing gate evaluation to fall back to human review (BUG-2729F8B7).
 

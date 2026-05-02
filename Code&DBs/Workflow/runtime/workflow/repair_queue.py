@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
+import hashlib
+import json
 from typing import Any
 
 from runtime._helpers import _json_compatible
@@ -69,6 +71,166 @@ def _row_to_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         elif key == "repair_id" and value is not None:
             payload[key] = str(value)
     return _json_compatible(payload)
+
+
+def _stable_json(value: object) -> str:
+    return json.dumps(_json_compatible(value), sort_keys=True, separators=(",", ":"))
+
+
+def enqueue_solution_preflight_repair(
+    conn: "SyncPostgresConnection",
+    *,
+    solution_id: str,
+    coordination_path: str,
+    repo_root: str,
+    command_id: str | None,
+    requested_by_kind: str,
+    requested_by_ref: str,
+    error_code: str,
+    error_detail: str,
+    missing_specs: list[str] | None = None,
+    validation_errors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Queue one deduped repair intent for Solution submit preflight failures."""
+
+    normalized_solution_id = _normalize_optional_text(solution_id, field_name="solution_id")
+    normalized_coordination_path = _normalize_optional_text(
+        coordination_path,
+        field_name="coordination_path",
+    )
+    normalized_repo_root = _normalize_optional_text(repo_root, field_name="repo_root")
+    normalized_error_code = _normalize_optional_text(error_code, field_name="error_code")
+    normalized_error_detail = _normalize_optional_text(error_detail, field_name="error_detail")
+    if normalized_solution_id is None:
+        raise ValueError("solution_id is required")
+    if normalized_coordination_path is None:
+        raise ValueError("coordination_path is required")
+    if normalized_repo_root is None:
+        raise ValueError("repo_root is required")
+    if normalized_error_code is None:
+        raise ValueError("error_code is required")
+    if normalized_error_detail is None:
+        raise ValueError("error_detail is required")
+
+    normalized_command_id = _normalize_optional_text(command_id, field_name="command_id")
+    normalized_missing_specs = [
+        text
+        for value in (missing_specs or [])
+        if (text := _normalize_optional_text(value, field_name="missing_specs")) is not None
+    ]
+    normalized_validation_errors = [
+        dict(item)
+        for item in (validation_errors or [])
+        if isinstance(item, Mapping)
+    ]
+    payload = {
+        "solution_status_source": "workflow_chain_submit_preflight",
+        "coordination_path": normalized_coordination_path,
+        "repo_root": normalized_repo_root,
+        "command_id": normalized_command_id,
+        "requested_by_kind": requested_by_kind,
+        "requested_by_ref": requested_by_ref,
+        "error_code": normalized_error_code,
+        "error_detail": normalized_error_detail,
+        "missing_specs": normalized_missing_specs,
+        "validation_errors": normalized_validation_errors,
+    }
+    dedupe_material = {
+        "coordination_path": normalized_coordination_path,
+        "repo_root": normalized_repo_root,
+        "error_code": normalized_error_code,
+        "missing_specs": normalized_missing_specs,
+        "validation_errors": normalized_validation_errors,
+    }
+    repair_dedupe_key = "solution_preflight:" + hashlib.md5(
+        _stable_json(dedupe_material).encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()
+    spec_path = normalized_missing_specs[0] if normalized_missing_specs else normalized_coordination_path
+    rows = conn.execute(
+        """INSERT INTO workflow_repair_queue (
+               repair_scope,
+               solution_id,
+               workflow_phase,
+               spec_path,
+               command_id,
+               reason_code,
+               failure_code,
+               failure_category,
+               failure_zone,
+               is_transient,
+               repair_strategy,
+               retry_delta_required,
+               source_kind,
+               source_ref,
+               evidence_kind,
+               evidence_ref,
+               repair_dedupe_key,
+               payload,
+               created_by_ref
+           ) VALUES (
+               'solution',
+               $1,
+               'solution_submit_preflight',
+               $2,
+               $3,
+               $4,
+               $4,
+               'validation',
+               'solution_submit',
+               FALSE,
+               'repair_solution_specs_then_resubmit',
+               TRUE,
+               'workflow_chain_submit_preflight',
+               COALESCE($3, $5),
+               'workflow_chain_coordination',
+               $5,
+               $6,
+               $7::jsonb,
+               'workflow_chain_submit_preflight'
+           )
+           ON CONFLICT (repair_dedupe_key)
+           WHERE queue_status IN ('queued', 'claimed', 'repairing')
+           DO UPDATE SET
+               solution_id = EXCLUDED.solution_id,
+               command_id = COALESCE(EXCLUDED.command_id, workflow_repair_queue.command_id),
+               reason_code = EXCLUDED.reason_code,
+               failure_code = EXCLUDED.failure_code,
+               spec_path = EXCLUDED.spec_path,
+               payload = EXCLUDED.payload,
+               updated_at = now()
+           RETURNING repair_id, repair_scope, queue_status, reason_code, repair_dedupe_key, payload""",
+        normalized_solution_id,
+        spec_path,
+        normalized_command_id,
+        normalized_error_code,
+        normalized_coordination_path,
+        repair_dedupe_key,
+        _stable_json(payload),
+    )
+    item = _row_to_payload(rows[0]) if rows else None
+    if item is not None:
+        from runtime.system_events import emit_system_event
+
+        emit_system_event(
+            conn,
+            event_type="workflow.repair.queued",
+            source_id=str(item["repair_id"]),
+            source_type="workflow_repair_queue",
+            payload={
+                "repair_id": str(item["repair_id"]),
+                "repair_scope": "solution",
+                "solution_id": normalized_solution_id,
+                "reason_code": normalized_error_code,
+                "payload": payload,
+            },
+        )
+    return {
+        "status": "queued" if item is not None else "not_queued",
+        "repair_id": item.get("repair_id") if item else None,
+        "repair_dedupe_key": repair_dedupe_key,
+        "item": item,
+    }
 
 
 def _where_clause(

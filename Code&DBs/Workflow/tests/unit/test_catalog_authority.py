@@ -116,7 +116,7 @@ def _surface_registry_rows() -> list[dict[str, Any]]:
             "truth_detail": "Stored in edge metadata now, but not enforced by the planner yet.",
             "surface_tier": "hidden",
             "surface_badge": "Removed",
-            "surface_detail": "Folded into Approval so Moon keeps one obvious human gate concept.",
+            "surface_detail": "Folded into Approval so Canvas keeps one obvious human gate concept.",
             "hard_choice": "Collapsed into Approval. Two human gate names for one future concept would be noise.",
         },
         {
@@ -203,7 +203,7 @@ def _source_policy_rows() -> list[dict[str, Any]]:
             "truth_detail": "Capability routes persist into the build graph and become planned runtime routes at release.",
             "surface_tier": "hidden",
             "surface_badge": "Hidden",
-            "surface_detail": "Capability catalog rows stay out of the main Moon builder until they are promoted into explicit surface primitives.",
+            "surface_detail": "Capability catalog rows stay out of the main Canvas builder until they are promoted into explicit surface primitives.",
             "hard_choice": None,
         },
         {
@@ -213,7 +213,7 @@ def _source_policy_rows() -> list[dict[str, Any]]:
             "truth_detail": "Integration actions persist into the build graph and become planned runtime routes at release.",
             "surface_tier": "hidden",
             "surface_badge": "Hidden",
-            "surface_detail": "Live integration catalog rows stay out of the main Moon builder until they are promoted into explicit surface primitives.",
+            "surface_detail": "Live integration catalog rows stay out of the main Canvas builder until they are promoted into explicit surface primitives.",
             "hard_choice": None,
         },
         {
@@ -223,7 +223,7 @@ def _source_policy_rows() -> list[dict[str, Any]]:
             "truth_detail": "Connector actions persist into the build graph and become planned runtime routes at release.",
             "surface_tier": "hidden",
             "surface_badge": "Hidden",
-            "surface_detail": "Connector catalog rows stay out of the main Moon builder until they are promoted into explicit surface primitives.",
+            "surface_detail": "Connector catalog rows stay out of the main Canvas builder until they are promoted into explicit surface primitives.",
             "hard_choice": None,
         },
     ]
@@ -443,7 +443,7 @@ def test_build_catalog_payload_applies_latest_catalog_item_review_overlay() -> N
             surface_review_rows=[
                 {
                     "review_decision_id": "scrd_001",
-                    "surface_name": "moon",
+                    "surface_name": "canvas",
                     "target_kind": "catalog_item",
                     "target_ref": "ctrl-retry",
                     "decision": "approve",
@@ -476,7 +476,7 @@ def test_build_catalog_payload_applies_latest_source_policy_review_overlay() -> 
             surface_review_rows=[
                 {
                     "review_decision_id": "scrd_002",
-                    "surface_name": "moon",
+                    "surface_name": "canvas",
                     "target_kind": "source_policy",
                     "target_ref": "capability",
                     "decision": "widen",
@@ -570,7 +570,7 @@ def test_catalog_review_decisions_get_lists_latest_surface_decisions() -> None:
         surface_review_rows=[
             {
                 "review_decision_id": "scrd_003",
-                "surface_name": "moon",
+                "surface_name": "canvas",
                 "target_kind": "catalog_item",
                 "target_ref": "ctrl-retry",
                 "decision": "approve",
@@ -581,14 +581,14 @@ def test_catalog_review_decisions_get_lists_latest_surface_decisions() -> None:
         ]
     )
     request = _RequestStub(pg)
-    request.path = "/api/catalog/review-decisions?surface=moon&target_kind=catalog_item"
+    request.path = "/api/catalog/review-decisions?surface=canvas&target_kind=catalog_item"
 
     workflow_query._handle_catalog_review_decisions_get(request, request.path)
 
     assert request.sent is not None
     status, payload = request.sent
     assert status == 200
-    assert payload["surface_name"] == "moon"
+    assert payload["surface_name"] == "canvas"
     assert payload["count"] == 1
     assert payload["filters"] == {"target_kind": "catalog_item"}
     assert payload["review_decisions"][0]["target_ref"] == "ctrl-retry"
@@ -600,7 +600,7 @@ def test_catalog_review_decisions_post_records_decision_and_event() -> None:
     request.path = "/api/catalog/review-decisions"
     request.headers = {}
     body = {
-        "surface_name": "moon",
+        "surface_name": "canvas",
         "target_kind": "source_policy",
         "target_ref": "capability",
         "decision": "widen",

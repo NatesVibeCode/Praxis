@@ -361,7 +361,7 @@ def test_propose_plan_returns_spec_preview_and_declarations_without_submit(monke
     assert proposed.spec_dict["jobs"][0]["label"] == "bug-authority"
     assert proposed.preview["jobs"][0]["resolved_agent"] == "openai/gpt-5.4-mini"
 
-    # packet_declarations expose what the caller declared so Moon / CLI
+    # packet_declarations expose what the caller declared so Canvas / CLI
     # can render declared-vs-derived side by side.
     declaration = proposed.packet_declarations[0]
     assert declaration["label"] == "bug-authority"
@@ -970,13 +970,13 @@ def test_coerce_plan_with_from_roadmap_items_materializes_packets() -> None:
             "roadmap_item.ship_ui_polish": {
                 "roadmap_item_id": "roadmap_item.ship_ui_polish",
                 "title": "Ship UI polish",
-                "summary": "Tidy up Moon dashboard spacing, labels, and hover states.",
+                "summary": "Tidy up Canvas dashboard spacing, labels, and hover states.",
                 "acceptance_criteria": {
                     "must_have": [
-                        "Moon dashboard hover states consistent",
+                        "Canvas dashboard hover states consistent",
                         "Spacing scale applied to every panel",
                     ],
-                    "outcome_gate": "Operator reports no remaining visual friction in Moon.",
+                    "outcome_gate": "Operator reports no remaining visual friction in Canvas.",
                 },
                 "priority": "p2",
                 "lifecycle": "planned",
@@ -1025,7 +1025,7 @@ def test_coerce_plan_with_from_roadmap_items_materializes_packets() -> None:
     assert "Roadmap item: Ship UI polish" in ui.description
     assert "Priority: p2" in ui.description
     assert "Must have:" in ui.description
-    assert "Moon dashboard hover states consistent" in ui.description
+    assert "Canvas dashboard hover states consistent" in ui.description
     assert "Outcome gate:" in ui.description
 
     assert legacy.stage == "fix"  # source_bug_id present
@@ -1079,13 +1079,13 @@ def test_coerce_plan_with_from_ideas_materializes_open_ideas_only() -> None:
                 "owner_ref": "nate@praxis",
                 "decision_ref": "decision.2026-04-15.data-ingest-scope",
             },
-            "operator_idea.moon_inbox_digest": {
-                "idea_id": "operator_idea.moon_inbox_digest",
-                "title": "Moon inbox digest",
-                "summary": "Daily digest of Moon notifications.",
+            "operator_idea.canvas_inbox_digest": {
+                "idea_id": "operator_idea.canvas_inbox_digest",
+                "title": "Canvas inbox digest",
+                "summary": "Daily digest of Canvas notifications.",
                 "status": "open",
                 "owner_ref": None,
-                "decision_ref": "decision.2026-04-20.moon-surfaces",
+                "decision_ref": "decision.2026-04-20.canvas-surfaces",
             },
             "operator_idea.old_promoted": {
                 "idea_id": "operator_idea.old_promoted",
@@ -1103,7 +1103,7 @@ def test_coerce_plan_with_from_ideas_materializes_open_ideas_only() -> None:
             "name": "idea_intake",
             "from_ideas": [
                 "operator_idea.ingest_shopify_orders",
-                "operator_idea.moon_inbox_digest",
+                "operator_idea.canvas_inbox_digest",
                 "operator_idea.old_promoted",
             ],
         },
@@ -1115,7 +1115,7 @@ def test_coerce_plan_with_from_ideas_materializes_open_ideas_only() -> None:
     assert plan.packets[0].label == "ingest_shopify_orders"
     assert "Operator idea: Ingest Shopify orders" in plan.packets[0].description
     assert "Owner: nate@praxis" in plan.packets[0].description
-    assert plan.packets[1].label == "moon_inbox_digest"
+    assert plan.packets[1].label == "canvas_inbox_digest"
 
 
 def test_coerce_plan_with_from_friction_materializes_fix_packets() -> None:

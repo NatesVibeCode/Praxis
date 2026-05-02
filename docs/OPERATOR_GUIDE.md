@@ -170,13 +170,13 @@ The onboarding tool probes transport, discovers models, writes onboarding author
 
 ## Auth refresh
 
-When a provider reports `auth_state: timeout` — after Docker Desktop / OrbStack / macOS restarts, or when the worker shows "Up" but failing auth probes:
+When control containers need fresh host-resolved integration/provider env — after Docker Desktop / OrbStack / macOS restarts, or after refreshing a Keychain-backed API credential:
 
 ```bash
 make refresh
 ```
 
-This exports macOS Keychain provider credentials, recreates the containers with fresh tokens, and verifies auth through `praxis_cli_auth_doctor` inside the worker. Do not run `docker compose up -d --force-recreate workflow-worker` directly — it skips the keychain re-export step.
+This exports macOS Keychain-backed env, recreates the containers, and verifies workflow-worker control-plane liveness. Provider CLI auth is route-specific now; use provider onboarding/control-plane tools for provider health instead of treating the worker container as the auth authority.
 
 ---
 
@@ -219,4 +219,4 @@ Returns the registration payload, the three CQRS table rows to create, and the m
 
 ---
 
-**See also:** [CONCEPTS.md](CONCEPTS.md) — core terms. [WORKFLOWS.md](WORKFLOWS.md) — authoring workflows. [MOON.md](MOON.md) — the Moon canvas. [docs/tools/forge.md](tools/forge.md) — Forge tools for platform builders.
+**See also:** [CONCEPTS.md](CONCEPTS.md) — core terms. [WORKFLOWS.md](WORKFLOWS.md) — authoring workflows. [CANVAS.md](CANVAS.md) — Canvas. [docs/tools/forge.md](tools/forge.md) — Forge tools for platform builders.

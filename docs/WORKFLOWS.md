@@ -4,7 +4,7 @@ A workflow in Praxis is a directed acyclic graph of jobs. This guide covers how 
 
 ## Two authoring paths
 
-**NL via Moon (compose pipeline)** — describe the outcome in plain English in Moon's "New workflow" panel. The compose pipeline runs synthesis (a frontier model decomposes your intent into ~20 packet seeds), then 20 parallel author calls expand the seeds, then pill triage and validation gate before anything renders. The Release tray shows pre-flight checks; it blocks dispatch until all pass. This path produces a complete `.queue.json` plan you can inspect and edit before committing.
+**NL via Canvas (compose pipeline)** — describe the outcome in plain English in Canvas's "New workflow" panel. The compose pipeline runs synthesis (a frontier model decomposes your intent into ~20 packet seeds), then 20 parallel author calls expand the seeds, then pill triage and validation gate before anything renders. The Release tray shows pre-flight checks; it blocks dispatch until all pass. This path produces a complete `.queue.json` plan you can inspect and edit before committing.
 
 **Direct `.queue.json`** — write the spec by hand or copy from `examples/`. Better when you know exactly what jobs you need, want to version the spec in git, or are scripting workflow generation. Run with `praxis workflow run path/to/spec.queue.json`.
 
@@ -174,7 +174,7 @@ This creates `review_r1`, `review_r2`, `review_r3` running in parallel. Useful f
 
 ## When is a workflow "done"?
 
-The Release tray in Moon shows four pre-flight checks. All must pass before dispatch:
+The Release tray in Canvas shows four pre-flight checks. All must pass before dispatch:
 
 1. **Jobs exist** — at least one job compiled into the plan.
 2. **Trigger configured** — a manual, webhook, or schedule trigger is attached.
@@ -185,4 +185,4 @@ From the CLI, `praxis workflow run` runs the same compile-and-validate pass befo
 
 ---
 
-**See also:** [WORKFLOW_SPEC.md](WORKFLOW_SPEC.md) — full field reference. [CONCEPTS.md](CONCEPTS.md) — trust compiler and core terms. [MOON.md](MOON.md) — using the Moon canvas to compose workflows.
+**See also:** [WORKFLOW_SPEC.md](WORKFLOW_SPEC.md) — full field reference. [CONCEPTS.md](CONCEPTS.md) — trust compiler and core terms. [CANVAS.md](CANVAS.md) — using Canvas to compose workflows.

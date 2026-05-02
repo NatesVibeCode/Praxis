@@ -2067,7 +2067,7 @@ def tool_praxis_plan_lifecycle(params: dict) -> dict:
 
     Q-side of the planning stack's CQRS pattern: gateway-dispatched plan
     commands emit plan.composed / plan.launched through receipt-backed
-    authority_events; this tool pulls the canonical stream back for Moon,
+    authority_events; this tool pulls the canonical stream back for Canvas,
     CLI, or ad-hoc inspection.
     """
     workflow_id = params.get("workflow_id")
@@ -3439,7 +3439,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "Q-side of the planning stack: read every plan.* authority_event for one "
                 "workflow_id in order. Pair with gateway-backed praxis_compose_plan / "
                 "praxis_launch_plan on the C side.\n\n"
-                "USE WHEN: an operator or Moon wants to inspect what happened to a plan "
+                "USE WHEN: an operator or Canvas wants to inspect what happened to a plan "
                 "— composed when, launched with which run_id, and the event payload "
                 "that was receipt-backed by the command gateway.\n\n"
                 "DO NOT USE TO: read workflow_run status. That's a separate Q on the "

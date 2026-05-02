@@ -1,4 +1,4 @@
-# Phase 11 Build Packet: Operator Inspection, Moon Surfaces, and Workflow Builder UX
+# Phase 11 Build Packet: Operator Inspection, Canvas Surfaces, and Workflow Builder UX
 
 ## Intent
 

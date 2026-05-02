@@ -31,6 +31,45 @@ def _write_spec(tmp_path: Path) -> str:
     return str(path)
 
 
+def test_cmd_active_uses_status_snapshot_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object]):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {
+            "in_flight_status_authority": "runtime.workflow.unified.get_run_status",
+            "in_flight_workflows": [
+                {
+                    "run_id": "workflow_live",
+                    "completed_jobs": 1,
+                    "status_authority": "runtime.workflow.unified.get_run_status",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(workflow_cli, "run_cli_tool", _fake_run_cli_tool)
+
+    result = workflow_cli.cmd_active(argparse.Namespace())
+
+    assert result == 0
+    assert captured == {
+        "tool_name": "praxis_status_snapshot",
+        "params": {"since_hours": 24},
+    }
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {
+            "run_id": "workflow_live",
+            "completed_jobs": 1,
+            "status_authority": "runtime.workflow.unified.get_run_status",
+        }
+    ]
+
+
 def test_cmd_run_writes_async_result_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

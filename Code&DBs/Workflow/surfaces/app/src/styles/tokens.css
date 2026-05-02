@@ -28,8 +28,8 @@
 
   /*
    * Status-scale tokens — platform-wide semantic run/job states. Platform
-   * surfaces (primitives, modules, the dashboard) use these; Moon surfaces
-   * use the monochrome --moon-status-* scale defined in moon-tokens.css.
+   * surfaces (primitives, modules, the dashboard) use these; Canvas surfaces
+   * use the monochrome --canvas-status-* scale defined in canvas-tokens.css.
    */
   --status-pending: #484f58;
   --status-idle: #8b949e;

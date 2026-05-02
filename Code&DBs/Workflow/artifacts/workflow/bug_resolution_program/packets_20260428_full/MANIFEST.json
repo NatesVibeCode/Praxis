@@ -926,8 +926,8 @@
       ]
     },
     {
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moon-generated-nodes",
-      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moon-generated-nodes.queue.json",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvas-generated-nodes",
+      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvas-generated-nodes.queue.json",
       "wave_id": "wave_0_authority_repair",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
@@ -937,7 +937,7 @@
         "BUG-5DD67C2A"
       ],
       "bug_titles": [
-        "Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty"
+        "Canvas generated nodes leave data dictionary, bindings, imports, and DB object contracts empty"
       ],
       "categories": [
         "WIRING"
@@ -1848,8 +1848,8 @@
       ]
     },
     {
-      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-moon-dev-api",
-      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-dev-api.queue.json",
+      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-canvas-dev-api",
+      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-dev-api.queue.json",
       "wave_id": "wave_1_evidence_normalization",
       "lane_id": "workflow_runtime",
       "lane_label": "Workflow / runtime",
@@ -1859,7 +1859,7 @@
         "BUG-3CC5D3AD"
       ],
       "bug_titles": [
-        "Moon dev API crash loop blocks compose engine handoff"
+        "Canvas dev API crash loop blocks compose engine handoff"
       ],
       "categories": [
         "RUNTIME"
@@ -1875,8 +1875,8 @@
       ]
     },
     {
-      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-moon-generated-workflow",
-      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-generated-workflow.queue.json",
+      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-canvas-generated-workflow",
+      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-generated-workflow.queue.json",
       "wave_id": "wave_1_evidence_normalization",
       "lane_id": "workflow_runtime",
       "lane_label": "Workflow / runtime",
@@ -1886,7 +1886,7 @@
         "BUG-2729F8B7"
       ],
       "bug_titles": [
-        "Moon generated workflow has no release gates or typed gate contracts"
+        "Canvas generated workflow has no release gates or typed gate contracts"
       ],
       "categories": [
         "WIRING"
@@ -3518,8 +3518,8 @@
       ]
     },
     {
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moon-node-state",
-      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moon-node-state.queue.json",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvas-node-state",
+      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvas-node-state.queue.json",
       "wave_id": "wave_0_authority_repair",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
@@ -3529,7 +3529,7 @@
         "BUG-6F69A6DF"
       ],
       "bug_titles": [
-        "Moon node state styling uses filled alarm circles as primary graph language"
+        "Canvas node state styling uses filled alarm circles as primary graph language"
       ],
       "categories": [
         "OTHER"
@@ -3543,8 +3543,8 @@
       ]
     },
     {
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority",
-      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority.queue.json",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority",
+      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority.queue.json",
       "wave_id": "wave_0_authority_repair",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
@@ -3554,7 +3554,7 @@
         "BUG-8742C732"
       ],
       "bug_titles": [
-        "MoonBuildPage dock authority tests fail because node-popout is absent"
+        "CanvasBuildPage dock authority tests fail because node-popout is absent"
       ],
       "categories": [
         "TEST"
@@ -3643,8 +3643,8 @@
       ]
     },
     {
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-moon",
-      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-moon.queue.json",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-canvas",
+      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-canvas.queue.json",
       "wave_id": "wave_0_authority_repair",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
@@ -3654,7 +3654,7 @@
         "BUG-B7A075E2"
       ],
       "bug_titles": [
-        "persona_profiles is empty \u2014 Moon compose path has no response_contract / system_prompt to teach the LLM the build shape"
+        "persona_profiles is empty \u2014 Canvas compose path has no response_contract / system_prompt to teach the LLM the build shape"
       ],
       "categories": [
         "OTHER"
@@ -5037,8 +5037,8 @@
       ]
     },
     {
-      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-moon-compose-creates",
-      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-compose-creates.queue.json",
+      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-canvas-compose-creates",
+      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-compose-creates.queue.json",
       "wave_id": "wave_1_evidence_normalization",
       "lane_id": "workflow_runtime",
       "lane_label": "Workflow / runtime",
@@ -5048,7 +5048,7 @@
         "BUG-8DADDD64"
       ],
       "bug_titles": [
-        "Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled"
+        "Canvas compose creates local drafts with no trigger or jobs, leaving release dispatch disabled"
       ],
       "categories": [
         "WIRING"
@@ -5064,8 +5064,8 @@
       ]
     },
     {
-      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-moon-trigger-picker",
-      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-trigger-picker.queue.json",
+      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-canvas-trigger-picker",
+      "spec_path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-trigger-picker.queue.json",
       "wave_id": "wave_1_evidence_normalization",
       "lane_id": "workflow_runtime",
       "lane_label": "Workflow / runtime",
@@ -5075,7 +5075,7 @@
         "BUG-5861F7F9"
       ],
       "bug_titles": [
-        "Moon trigger picker hangs while loading available triggers because catalog API does not return"
+        "Canvas trigger picker hangs while loading available triggers because catalog API does not return"
       ],
       "categories": [
         "RUNTIME"

@@ -8,7 +8,7 @@
   "jobs": [
     {
       "label": "phase1_dashboard_source_edit",
-      "agent": "openrouter/moonshotai/kimi-k2.6",
+      "agent": "openrouter/canvasshotai/kimi-k2.6",
       "task_type": "build",
       "depends_on": [],
       "description": "Delete fictional blocks from Dashboard.tsx, surface /api/files failure as visible degraded state, make Tool Opportunities rows clickable.",
@@ -32,7 +32,7 @@
     },
     {
       "label": "phase1_dashboard_test_update",
-      "agent": "openrouter/moonshotai/kimi-k2.6",
+      "agent": "openrouter/canvasshotai/kimi-k2.6",
       "task_type": "build",
       "depends_on": ["phase1_dashboard_source_edit"],
       "description": "Update Dashboard.test.tsx to lock in the contract enforced by the source edit.",

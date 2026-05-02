@@ -17,7 +17,7 @@
 #     3. Tied "the API got stuck" directly to "every CLI agent wedged".
 #   praxis-agentd is a separate, long-lived broker process whose only job is
 #   to be the local front door for CLI/MCP traffic. The api-server stays
-#   for human-facing surfaces (Moon, REST API).
+#   for human-facing surfaces (Canvas, REST API).
 #
 # Why not docker exec python3:
 #   An earlier implementation spawned `docker exec praxis-api-server-1

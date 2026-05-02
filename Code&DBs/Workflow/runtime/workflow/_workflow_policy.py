@@ -33,13 +33,40 @@ def apply_workflow_preflight(
 ) -> WorkflowResult | None:
     """Return an early workflow result for circuit-open or cache-hit preflight."""
 
-    if _workflow_caps.CIRCUIT_BREAKERS and not _workflow_caps.CIRCUIT_BREAKERS.allow_request(spec.provider_slug):
-        return context.failure_result(
-            run_id=run_id_factory(),
-            reason_code="circuit_breaker.open",
-            failure_code="rate_limited",
-            outputs={"error": f"Circuit breaker open for {spec.provider_slug}"},
-        )
+    provider_slug = str(spec.provider_slug or "").strip().lower()
+    if provider_slug and provider_slug != "integration":
+        if _workflow_caps.CIRCUIT_BREAKERS is None:
+            return context.failure_result(
+                run_id=run_id_factory(),
+                reason_code="circuit_breaker.unavailable",
+                failure_code="circuit_breaker.unavailable",
+                outputs={
+                    "error": (
+                        f"Circuit breaker authority unavailable for {provider_slug}"
+                    ),
+                },
+            )
+        try:
+            allowed = _workflow_caps.CIRCUIT_BREAKERS.allow_request(provider_slug)
+        except Exception as exc:
+            return context.failure_result(
+                run_id=run_id_factory(),
+                reason_code="circuit_breaker.unavailable",
+                failure_code="circuit_breaker.unavailable",
+                outputs={
+                    "error": (
+                        f"Circuit breaker authority unavailable for {provider_slug}: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                },
+            )
+        if not allowed:
+            return context.failure_result(
+                run_id=run_id_factory(),
+                reason_code="circuit_breaker.open",
+                failure_code="rate_limited",
+                outputs={"error": f"Circuit breaker open for {provider_slug}"},
+            )
 
     cached_result = _load_cached_workflow_result(spec)
     if cached_result is not None:

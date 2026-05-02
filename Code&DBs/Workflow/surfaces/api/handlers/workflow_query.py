@@ -956,20 +956,13 @@ def _fetch_run_packet_inspection(pg: Any, run_id: str) -> dict[str, Any] | None:
 
     row = dict(rows[0])
     try:
-        from runtime.execution_packet_authority import (
-            inspect_execution_packets,
-            packet_inspection_from_row,
+        from runtime.execution_packet_authority import resolve_packet_inspection
+
+        inspection, _source = resolve_packet_inspection(
+            run_row=row,
+            packets=row.get("packets"),
         )
-    except Exception:
-        return None
-    materialized = packet_inspection_from_row(row)
-    if materialized is not None:
-        return materialized
-    packets = _parse_json_field(row.get("packets"))
-    if not isinstance(packets, list) or not packets:
-        return None
-    try:
-        return inspect_execution_packets(packets, run_row=row)
+        return inspection
     except Exception:
         return None
 
@@ -1360,11 +1353,11 @@ def _validate_type_flow_on_commit(body: dict[str, Any]) -> list[str]:
     with empty contracts can no longer reach a persisted definition).
 
     Body shapes (graceful fallbacks):
-      - ``body['build_graph']`` — Moon authoring shape (preferred)
+      - ``body['build_graph']`` — Canvas authoring shape (preferred)
       - ``body['definition']`` — older workflow definition carrier
 
     Empty graphs or bodies without a graph shape pass through: trigger-only
-    updates, name-only updates, or non-Moon callers must not be blocked
+    updates, name-only updates, or non-Canvas callers must not be blocked
     by a validator that has nothing to check.
 
     Returns an empty list when the graph is satisfied (or absent); a list
@@ -1417,7 +1410,7 @@ def _handle_workflows_post(request: Any, path: str) -> None:
                     emit_typed_gaps_for_type_flow_errors(
                         request.subsystems.get_pg_conn(),
                         type_flow_errors,
-                        source_ref="moon_commit:new_workflow",
+                        source_ref="canvas_commit:new_workflow",
                     )
                 except Exception:
                     pass  # best-effort emission, never blocks the 400
@@ -1464,7 +1457,7 @@ def _handle_workflows_post(request: Any, path: str) -> None:
                 emit_typed_gaps_for_type_flow_errors(
                     request.subsystems.get_pg_conn(),
                     type_flow_errors,
-                    source_ref=f"moon_commit:update:{workflow_id}",
+                    source_ref=f"canvas_commit:update:{workflow_id}",
                 )
             except Exception:
                 pass  # best-effort
@@ -1599,7 +1592,7 @@ def _handle_workflow_build_get(request: Any, path: str) -> None:
         except _ClientError as missing:
             # Orchestrator-path workflows (workflow_id like ``workflow.run.X``)
             # never get a row in ``public.workflows`` — that table is for the
-            # Moon-composed build authoring flow. Without a fallback the UI
+            # Canvas-composed build authoring flow. Without a fallback the UI
             # at /app/run/{run_id} renders an empty graph (no lines) even
             # though the orchestrator's runtime authority HAS a graph
             # (nodes + edges) reachable via the run-detail path. Synthesize
@@ -1621,13 +1614,13 @@ def _handle_workflow_build_get(request: Any, path: str) -> None:
 
 
 def _synthesize_orchestrator_build_moment(pg: Any, workflow_id: str) -> dict[str, Any] | None:
-    """Build a minimal Moon build moment for a workflow that only exists in
+    """Build a minimal Canvas build moment for a workflow that only exists in
     the orchestrator runtime authority (no ``public.workflows`` row).
 
     Looks up the most recent run for this workflow_id, asks
     ``runtime.workflow.unified.get_run_status`` for jobs, derives the chain
     from the job order + adjacency, and returns a payload with a populated
-    ``build_graph`` so the UI's MoonBuildPage can render lines. Returns
+    ``build_graph`` so the UI's CanvasBuildPage can render lines. Returns
     None if no run exists yet (let the original 404 propagate).
     """
 
@@ -1697,7 +1690,7 @@ def _synthesize_orchestrator_build_moment(pg: Any, workflow_id: str) -> dict[str
         "id": workflow_id,
         "name": workflow_id,
         "description": (
-            f"Orchestrator-path workflow (no Moon spec). Graph synthesized "
+            f"Orchestrator-path workflow (no Canvas spec). Graph synthesized "
             f"from the most recent run ({run_id})."
         ),
         "version": 0,
@@ -2679,7 +2672,7 @@ def _handle_operation_catalog_get(request: Any, path: str) -> None:
 def _handle_catalog_review_decisions_get(request: Any, path: str) -> None:
     try:
         params = _query_params(request.path)
-        surface_name = (params.get("surface") or ["moon"])[0].strip() or "moon"
+        surface_name = (params.get("surface") or ["canvas"])[0].strip() or "canvas"
         target_kind = (params.get("target_kind") or [""])[0].strip() or None
         target_ref = (params.get("target_ref") or [""])[0].strip() or None
         pg = request.subsystems.get_pg_conn()
@@ -2727,7 +2720,7 @@ def _handle_catalog_review_decisions_post(request: Any, path: str) -> None:
 
     try:
         pg = request.subsystems.get_pg_conn()
-        surface_name = _text(body.get("surface_name") or body.get("surface") or "moon") or "moon"
+        surface_name = _text(body.get("surface_name") or body.get("surface") or "canvas") or "canvas"
         review_decision = record_surface_catalog_review(
             pg,
             surface_name=surface_name,

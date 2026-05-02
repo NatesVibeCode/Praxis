@@ -68,7 +68,7 @@ _API_HEALTHY = GateProbe(
     domain="runtime",
     title="REST API responds on /api/health",
     purpose=(
-        "Moon, MCP bridges, and the workflow runner all depend on the HTTP API. "
+        "Canvas, MCP bridges, and the workflow runner all depend on the HTTP API. "
         "If the API is down, those surfaces fail closed."
     ),
     depends_on=("runtime.api_port_free",),

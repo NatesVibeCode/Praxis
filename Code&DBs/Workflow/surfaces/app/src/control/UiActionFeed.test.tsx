@@ -13,8 +13,8 @@ describe('UiActionFeed', () => {
   test('stays stable when the feed transitions from empty to populated', async () => {
     render(
       <UiActionFeed
-        surface="moon"
-        scope="moon:wf_test"
+        surface="canvas"
+        scope="canvas:wf_test"
         variant="compact"
       />,
     );
@@ -25,8 +25,8 @@ describe('UiActionFeed', () => {
       world.set(UI_ACTION_LOG_PATH, [
         {
           id: 'action-1',
-          surface: 'moon',
-          undoScope: 'moon:wf_test',
+          surface: 'canvas',
+          undoScope: 'canvas:wf_test',
           category: 'graph',
           label: 'Append node',
           authority: 'build.build_graph',
@@ -39,8 +39,8 @@ describe('UiActionFeed', () => {
           recovery: 'undo_ready',
           occurredAt: Date.now(),
           undoDescriptor: {
-            kind: 'moon.payload.restore',
-            scope: 'moon:wf_test',
+            kind: 'canvas.payload.restore',
+            scope: 'canvas:wf_test',
             payload: { build_graph: { nodes: [], edges: [] } },
           },
         },

@@ -71,7 +71,7 @@ class _FakeConn:
                     "run_id": "",
                     "job_label": "",
                     "request_id": "req-123",
-                    "client_version": "moon-ui/1.2.3",
+                    "client_version": "canvas-ui/1.2.3",
                     "payload_size_bytes": 120,
                     "response_size_bytes": 240,
                     "prose_chars": 19,
@@ -164,7 +164,7 @@ def test_surface_usage_repository_records_event_and_daily_rollup() -> None:
         status_code=200,
         result_state="ok",
         request_id="req-123",
-        client_version="moon-ui/1.2.3",
+        client_version="canvas-ui/1.2.3",
         prose_chars=19,
         capability_count=2,
         reference_count=1,
@@ -184,7 +184,7 @@ def test_surface_usage_repository_records_event_and_daily_rollup() -> None:
     assert event_args[4] == "/api/compile"
     assert event_args[8] == "ok"
     assert event_args[14] == "req-123"
-    assert event_args[15] == "moon-ui/1.2.3"
+    assert event_args[15] == "canvas-ui/1.2.3"
     assert event_args[26] == "defhash"
     assert event_args[27] == "def_123"
     assert event_args[28] == "research"

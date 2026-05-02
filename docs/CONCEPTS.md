@@ -1,6 +1,6 @@
 # Praxis Concepts
 
-This document explains the core ideas behind Praxis Engine before you write your first workflow or open Moon. If something in the README, ARCHITECTURE, or tool docs uses an unfamiliar term, start here.
+This document explains the core ideas behind Praxis Engine before you write your first workflow or open Canvas. If something in the README, ARCHITECTURE, or tool docs uses an unfamiliar term, start here.
 
 ## The problem Praxis solves
 
@@ -20,7 +20,7 @@ The trust compiler is not a single module — it is what Praxis does at the mome
 
 The effect: **the right choice is the easiest choice**. The agent isn't picking from 177 tools on instinct; it's choosing from 4 tools that are already appropriate. Mistakes happen less because the environment forecloses them, not because the agent is smarter.
 
-The trust compiler is visible in Moon's Overview panel as the `WORKFLOW_CONTRACT` display: `TASK / READ / WRITE / LOCKED / TOOLS / APPROVAL / VERIFIER` — each field is what the compiler emitted before the job ran.
+The trust compiler is visible in Canvas's Overview panel as the `WORKFLOW_CONTRACT` display: `TASK / READ / WRITE / LOCKED / TOOLS / APPROVAL / VERIFIER` — each field is what the compiler emitted before the job ran.
 
 ## Core terms
 
@@ -44,11 +44,11 @@ The trust compiler is visible in Moon's Overview panel as the `WORKFLOW_CONTRACT
 
 ## One graph, many lenses
 
-All Praxis surfaces — Moon, the CLI, the MCP tools, the REST API — are lenses on the same underlying graph in Postgres. When you describe a workflow in Moon's "New workflow" entry and it materializes into a plan, that plan is rows in Praxis.db. When you run `praxis workflow run`, that's the CLI dispatching against the same rows. When an MCP tool returns a receipt, the receipt is in the same `authority_operation_receipts` table that Moon reads.
+All Praxis surfaces — Canvas, the CLI, the MCP tools, the REST API — are lenses on the same underlying graph in Postgres. When you describe a workflow in Canvas's "New workflow" entry and it materializes into a plan, that plan is rows in Praxis.db. When you run `praxis workflow run`, that's the CLI dispatching against the same rows. When an MCP tool returns a receipt, the receipt is in the same `authority_operation_receipts` table that Canvas reads.
 
-Nothing is translated between layers. No sync job, no mirror, no eventual consistency. **An edit in Moon and the next run's behavior are the same DB write.**
+Nothing is translated between layers. No sync job, no mirror, no eventual consistency. **An edit in Canvas and the next run's behavior are the same DB write.**
 
-This is why Moon is not a dashboard on top of Praxis — it is Praxis. The CLI and MCP surfaces are equally first-class; they access the same authority, produce the same receipts, and respect the same standing orders.
+This is why Canvas is not a dashboard on top of Praxis — it is Praxis. The CLI and MCP surfaces are equally first-class; they access the same authority, produce the same receipts, and respect the same standing orders.
 
 ## Why receipts matter
 
@@ -58,4 +58,4 @@ For agents this means: "what did I ask last time?" is always answerable. For ope
 
 ---
 
-**Next:** [WORKFLOWS.md](WORKFLOWS.md) — how to design and run a workflow. [MOON.md](MOON.md) — how to use the Moon canvas. [OPERATOR_GUIDE.md](OPERATOR_GUIDE.md) — day-2 operations. For full term reference see [ARCHITECTURE.md](ARCHITECTURE.md).
+**Next:** [WORKFLOWS.md](WORKFLOWS.md) — how to design and run a workflow. [CANVAS.md](CANVAS.md) — how to use Canvas. [OPERATOR_GUIDE.md](OPERATOR_GUIDE.md) — day-2 operations. For full term reference see [ARCHITECTURE.md](ARCHITECTURE.md).

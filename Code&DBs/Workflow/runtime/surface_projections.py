@@ -82,8 +82,8 @@ def _default_shell_state() -> dict[str, Any]:
         "buildWorkflowId": None,
         "buildIntent": None,
         "builderSeed": None,
-        "buildView": "moon",
-        "moonRunId": None,
+        "buildView": "canvas",
+        "canvasRunId": None,
         "dashboardDetail": None,
     }
 
@@ -165,13 +165,13 @@ def _fold_shell_event(state: dict[str, Any], event_type: str, payload: dict[str,
             next_state["activeTabId"] = "build"
             next_state["buildWorkflowId"] = workflow_id or None
             next_state["buildIntent"] = intent or None
-            next_state["buildView"] = "moon"
-            next_state["moonRunId"] = None
+            next_state["buildView"] = "canvas"
+            next_state["canvasRunId"] = None
             next_state["dashboardDetail"] = None
         elif initial_route == "route.app.run":
             run_id = str(slot_values.get("run_id") or "").strip()
             next_state["activeTabId"] = "build"
-            next_state["moonRunId"] = run_id or None
+            next_state["canvasRunId"] = run_id or None
             next_state["dashboardDetail"] = None
         return next_state
 

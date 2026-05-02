@@ -1263,7 +1263,7 @@ def test_compile_prose_connector_keyword_prose_does_not_emit_template_fallback(m
     Persistence / Common object) whenever prose contained any of
     (connector, api docs, common objects, application, docs). That template
     preempted definition_graph's prose-grounded capability nodes in the
-    Moon build_graph render.
+    Canvas build_graph render.
 
     This test pins the new contract: connector-keyword prose produces empty
     blocking_inputs AND empty briefing_fields, no 'fill_blocking_inputs' or

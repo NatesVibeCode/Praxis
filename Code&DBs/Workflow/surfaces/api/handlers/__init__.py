@@ -68,7 +68,7 @@ def _route_state() -> dict[str, object]:
         INTEGRATIONS_POST_ROUTES,
         INTEGRATIONS_PUT_ROUTES,
     )
-    from .moon_pickers import MOON_PICKERS_GET_ROUTES
+    from .canvas_pickers import CANVAS_PICKERS_GET_ROUTES
     from .shell_routes_handler import SHELL_ROUTES_GET_ROUTES
     from .workflow_admin import ADMIN_GET_ROUTES, ADMIN_POST_ROUTES, ADMIN_ROUTES
     from .workflow_mcp import MCP_POST_ROUTES
@@ -123,7 +123,7 @@ def _route_state() -> dict[str, object]:
         ],
         "get": [
             *SHELL_ROUTES_GET_ROUTES,
-            *MOON_PICKERS_GET_ROUTES,
+            *CANVAS_PICKERS_GET_ROUTES,
             *QUERY_GET_ROUTES,
             *DATA_DICTIONARY_LINEAGE_GET_ROUTES,
             *DATA_DICTIONARY_CLASSIFICATIONS_GET_ROUTES,

@@ -88,7 +88,7 @@ def test_session_bootstrapped_applies_workflow_deep_link_slot():
     assert state["activeRouteId"] == "route.app.workflow"
     assert state["activeTabId"] == "build"
     assert state["buildWorkflowId"] == "wf_42"
-    assert state["moonRunId"] is None
+    assert state["canvasRunId"] is None
 
 
 def test_surface_opened_applies_state_diff_after_bootstrap():
@@ -99,7 +99,7 @@ def test_surface_opened_applies_state_diff_after_bootstrap():
             {
                 "session_aggregate_ref": "s1",
                 "route_id": "route.app.workflow",
-                "shell_state_diff": {"buildWorkflowId": "wf_42", "buildView": "moon"},
+                "shell_state_diff": {"buildWorkflowId": "wf_42", "buildView": "canvas"},
             },
         ),
     ]
@@ -111,7 +111,7 @@ def test_surface_opened_applies_state_diff_after_bootstrap():
     assert state["activeRouteId"] == "route.app.workflow"
     assert state["activeTabId"] == "build"
     assert state["buildWorkflowId"] == "wf_42"
-    assert state["buildView"] == "moon"
+    assert state["buildView"] == "canvas"
 
 
 def test_tab_closed_removes_dynamic_tab_and_falls_back():

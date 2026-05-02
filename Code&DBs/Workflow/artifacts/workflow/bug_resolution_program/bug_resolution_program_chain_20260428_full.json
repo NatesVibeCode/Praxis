@@ -35,7 +35,7 @@
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-integration-credential-set-secret.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-integrations-admin-static-http.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-manual-circuit-breaker.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moon-generated-nodes.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvas-generated-nodes.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-native-cutover-can.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-native-service-lifecycle.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-operator-console-replays.queue.json",
@@ -112,12 +112,12 @@
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-launch-plan-inline-execution.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-launcher-command-missing.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-live-runtime-still.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moon-node-state.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvas-node-state.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-operator-console-misses.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-operator-decision-triggers-json-user-specific.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-operator-write-commit-succeeds.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-moon.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-canvas.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-policy-verification-scripts.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-praxis-cli-auth-doctor-hardcodes-tmp-codex-au.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-praxis-native-scheduler.queue.json",
@@ -175,8 +175,8 @@
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-circuit-breaker-authority.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-connector-auto-builder-aborts.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-cqrs-provider-capability.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-dev-api.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-generated-workflow.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-dev-api.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-generated-workflow.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-praxis-submit-code-change-marks-empty-works.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-provider-freshness-encoded.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-provider-transport-admission.queue.json",
@@ -196,8 +196,8 @@
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-launcher-app-returns.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-linter-rollback-can.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-manual-migration-promotion.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-compose-creates.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-trigger-picker.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-compose-creates.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-trigger-picker.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-praxis-ingest-accepts-conversation.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-praxis-query-routes.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-praxis-workflow-query.queue.json",
@@ -311,7 +311,7 @@
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-integration-credential-set-secret.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-integrations-admin-static-http.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-manual-circuit-breaker.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moon-generated-nodes.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvas-generated-nodes.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-native-cutover-can.queue.json"
       ],
       "wave_id": "wave_0_authority_repair_batch_007"
@@ -516,8 +516,8 @@
         "wave_0_authority_repair_batch_022"
       ],
       "specs": [
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moon-node-state.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvas-node-state.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-operator-console-misses.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-operator-decision-triggers-json-user-specific.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-operator-write-commit-succeeds.queue.json"
@@ -529,7 +529,7 @@
         "wave_0_authority_repair_batch_023"
       ],
       "specs": [
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-moon.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-canvas.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-policy-verification-scripts.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-praxis-cli-auth-doctor-hardcodes-tmp-codex-au.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-praxis-native-scheduler.queue.json",
@@ -683,8 +683,8 @@
       "specs": [
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-connector-auto-builder-aborts.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-cqrs-provider-capability.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-dev-api.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-generated-workflow.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-dev-api.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-generated-workflow.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-praxis-submit-code-change-marks-empty-works.queue.json"
       ],
       "wave_id": "wave_1_evidence_normalization_batch_002"
@@ -736,8 +736,8 @@
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-launcher-app-returns.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-linter-rollback-can.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-manual-migration-promotion.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-compose-creates.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-trigger-picker.queue.json"
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-compose-creates.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-trigger-picker.queue.json"
       ],
       "wave_id": "wave_1_evidence_normalization_batch_006"
     },

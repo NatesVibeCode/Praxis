@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from authority.transport_eligibility import load_transport_eligibility_authority
+from runtime.routing_economics import budget_spend_pressure
 from storage.postgres import (
     PostgresProviderControlPlaneRepository,
     PostgresTransportEligibilityRepository,
@@ -111,6 +112,7 @@ class ProviderControlPlaneFrontdoor:
         freshness = repository.get_projection_freshness(
             "projection.private_provider_control_plane_snapshot"
         )
+        row_payloads = [_provider_control_plane_row_payload(row) for row in rows]
         return {
             "control_plane": "operator.provider_control_plane",
             "runtime_profile_ref": runtime_profile_ref,
@@ -120,61 +122,13 @@ class ProviderControlPlaneFrontdoor:
                 "transport_type": transport_type,
                 "model_slug": model_slug,
             },
-            "rows": [
-                {
-                    "runtime_profile_ref": row.runtime_profile_ref,
-                    "job_type": row.job_type,
-                    "transport_type": row.transport_type,
-                    "adapter_type": row.adapter_type,
-                    "provider_slug": row.provider_slug,
-                    "model_slug": row.model_slug,
-                    "model_version": row.model_version,
-                    "cost_structure": row.cost_structure,
-                    "cost_metadata": dict(row.cost_metadata),
-                    "route_request": {
-                        "temperature": row.route_temperature,
-                        "max_tokens": row.route_max_tokens,
-                        "reasoning_control": dict(row.route_reasoning_control),
-                        "request_contract_ref": row.route_request_contract_ref,
-                        "cache_policy": dict(row.route_cache_policy),
-                        "structured_output_policy": dict(
-                            row.route_structured_output_policy
-                        ),
-                        "streaming_policy": dict(row.route_streaming_policy),
-                    },
-                    "control_enabled": row.control_enabled,
-                    "control_state": row.control_state,
-                    "control_scope": row.control_scope,
-                    "control_is_explicit": row.control_is_explicit,
-                    "control_reason_code": row.control_reason_code,
-                    "control_decision_ref": row.control_decision_ref,
-                    "control_operator_message": row.control_operator_message,
-                    "credential_availability_state": row.credential_availability_state,
-                    "credential_sources": list(row.credential_sources),
-                    "credential_observations": [
-                        dict(item) for item in row.credential_observations
-                    ],
-                    "mechanical_capability_state": row.mechanical_capability_state,
-                    "mechanical_is_runnable": row.mechanical_is_runnable,
-                    "capability_state": row.capability_state,
-                    "is_runnable": row.is_runnable,
-                    "effective_dispatch_state": row.effective_dispatch_state,
-                    "breaker_state": row.breaker_state,
-                    "manual_override_state": row.manual_override_state,
-                    "primary_removal_reason_code": row.primary_removal_reason_code,
-                    "removal_reasons": [dict(item) for item in row.removal_reasons],
-                    "candidate_ref": row.candidate_ref,
-                    "provider_ref": row.provider_ref,
-                    "source_refs": list(row.source_refs),
-                    "projected_at": (
-                        row.projected_at.isoformat()
-                        if hasattr(row.projected_at, "isoformat")
-                        else row.projected_at
-                    ),
-                    "projection_ref": row.projection_ref,
-                }
-                for row in rows
-            ],
+            "rows": row_payloads,
+            "capability_matrix": _provider_control_plane_capability_matrix(
+                row_payloads
+            ),
+            "route_explanation": _provider_control_plane_route_explanation(
+                row_payloads
+            ),
             "projection_freshness": {
                 "projection_ref": freshness.projection_ref,
                 "freshness_status": freshness.freshness_status,
@@ -265,6 +219,222 @@ class ProviderControlPlaneFrontdoor:
                 "error_detail": freshness.error_detail,
             },
         }
+
+
+def _iso_or_raw(value: object) -> object:
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _provider_control_plane_row_payload(row: Any) -> dict[str, Any]:
+    cost_posture = _provider_cost_posture_payload(row)
+    return {
+        "runtime_profile_ref": row.runtime_profile_ref,
+        "job_type": row.job_type,
+        "transport_type": row.transport_type,
+        "adapter_type": row.adapter_type,
+        "provider_slug": row.provider_slug,
+        "model_slug": row.model_slug,
+        "model_version": row.model_version,
+        "cost_structure": row.cost_structure,
+        "cost_metadata": dict(row.cost_metadata),
+        "cost_posture": cost_posture,
+        "route_rank": row.route_rank,
+        "route_request": {
+            "rank": row.route_rank,
+            "temperature": row.route_temperature,
+            "max_tokens": row.route_max_tokens,
+            "reasoning_control": dict(row.route_reasoning_control),
+            "request_contract_ref": row.route_request_contract_ref,
+            "cache_policy": dict(row.route_cache_policy),
+            "structured_output_policy": dict(row.route_structured_output_policy),
+            "streaming_policy": dict(row.route_streaming_policy),
+        },
+        "control_enabled": row.control_enabled,
+        "control_state": row.control_state,
+        "control_scope": row.control_scope,
+        "control_is_explicit": row.control_is_explicit,
+        "control_reason_code": row.control_reason_code,
+        "control_decision_ref": row.control_decision_ref,
+        "control_operator_message": row.control_operator_message,
+        "credential_availability_state": row.credential_availability_state,
+        "credential_sources": list(row.credential_sources),
+        "credential_observations": [
+            dict(item) for item in row.credential_observations
+        ],
+        "mechanical_capability_state": row.mechanical_capability_state,
+        "mechanical_is_runnable": row.mechanical_is_runnable,
+        "capability_state": row.capability_state,
+        "is_runnable": row.is_runnable,
+        "effective_dispatch_state": row.effective_dispatch_state,
+        "breaker_state": row.breaker_state,
+        "manual_override_state": row.manual_override_state,
+        "primary_removal_reason_code": row.primary_removal_reason_code,
+        "removal_reasons": [dict(item) for item in row.removal_reasons],
+        "candidate_ref": row.candidate_ref,
+        "provider_ref": row.provider_ref,
+        "source_refs": list(row.source_refs),
+        "projected_at": _iso_or_raw(row.projected_at),
+        "projection_ref": row.projection_ref,
+    }
+
+
+def _provider_cost_posture_payload(row: Any) -> dict[str, Any]:
+    metadata = dict(getattr(row, "cost_metadata", {}) or {})
+    budget_window = dict(getattr(row, "budget_window", {}) or {})
+    return {
+        "billing_mode": str(metadata.get("billing_mode") or getattr(row, "cost_structure", "") or ""),
+        "budget_bucket": str(metadata.get("budget_bucket") or ""),
+        "pricing_model": str(metadata.get("pricing_model") or ""),
+        "effective_marginal_cost": metadata.get("effective_marginal_cost"),
+        "prefer_prepaid": metadata.get("prefer_prepaid"),
+        "allow_payg_fallback": metadata.get("allow_payg_fallback"),
+        "budget_status": str(budget_window.get("budget_status") or metadata.get("budget_status") or ""),
+        "spend_pressure": budget_spend_pressure(budget_window),
+        "budget_window": budget_window,
+    }
+
+
+def _blocked_reason_codes(row: Mapping[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    for item in row.get("removal_reasons") or ():
+        if not isinstance(item, Mapping):
+            continue
+        reason_code = str(item.get("reason_code") or "").strip()
+        if reason_code:
+            reasons.append(reason_code)
+    primary = str(row.get("primary_removal_reason_code") or "").strip()
+    if primary and primary not in reasons:
+        reasons.insert(0, primary)
+    credential_state = str(row.get("credential_availability_state") or "").strip()
+    if credential_state == "missing" and "credential.missing" not in reasons:
+        reasons.append("credential.missing")
+    if not reasons and not bool(row.get("is_runnable")):
+        state = str(row.get("effective_dispatch_state") or "provider_route.blocked")
+        reasons.append(state)
+    return reasons
+
+
+def _credential_observations(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return [
+        dict(item)
+        for item in row.get("credential_observations") or []
+        if isinstance(item, Mapping)
+    ]
+
+
+def _provider_control_plane_capability_matrix(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    matrix: list[dict[str, Any]] = []
+    for row in rows:
+        is_runnable = bool(row.get("is_runnable"))
+        matrix.append(
+            {
+                "job_type": row.get("job_type"),
+                "type": row.get("transport_type"),
+                "transport_type": row.get("transport_type"),
+                "adapter_type": row.get("adapter_type"),
+                "provider": row.get("provider_slug"),
+                "provider_slug": row.get("provider_slug"),
+                "model": row.get("model_slug"),
+                "model_slug": row.get("model_slug"),
+                "model_version": row.get("model_version"),
+                "cost_structure": row.get("cost_structure"),
+                "cost_metadata": dict(row.get("cost_metadata") or {}),
+                "cost_posture": dict(row.get("cost_posture") or {}),
+                "route_rank": row.get("route_rank"),
+                "effective_availability_state": (
+                    "available" if is_runnable else "blocked"
+                ),
+                "blocked_reasons": [] if is_runnable else _blocked_reason_codes(row),
+                "control_state": row.get("control_state"),
+                "credential_availability_state": row.get(
+                    "credential_availability_state"
+                ),
+                "credential_sources": list(row.get("credential_sources") or []),
+                "credential_observations": _credential_observations(row),
+                "breaker_state": row.get("breaker_state"),
+                "manual_override_state": row.get("manual_override_state"),
+                "candidate_ref": row.get("candidate_ref"),
+                "provider_ref": row.get("provider_ref"),
+                "source_refs": list(row.get("source_refs") or []),
+                "projection_ref": row.get("projection_ref"),
+                "projected_at": row.get("projected_at"),
+            }
+        )
+    return matrix
+
+
+def _provider_route_sort_key(row: Mapping[str, Any]) -> tuple[str, int, str, str, str]:
+    raw_rank = row.get("route_rank")
+    try:
+        rank = int(raw_rank) if raw_rank is not None else 999
+    except (TypeError, ValueError):
+        rank = 999
+    return (
+        str(row.get("job_type") or ""),
+        rank,
+        str(row.get("transport_type") or ""),
+        str(row.get("provider_slug") or ""),
+        str(row.get("model_slug") or ""),
+    )
+
+
+def _provider_control_plane_route_explanation(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    selected_by_job_type: set[str] = set()
+    candidates: list[dict[str, Any]] = []
+    for row in sorted(rows, key=_provider_route_sort_key):
+        job_type = str(row.get("job_type") or "")
+        is_runnable = bool(row.get("is_runnable"))
+        selected = is_runnable and job_type not in selected_by_job_type
+        if selected:
+            selected_by_job_type.add(job_type)
+        candidate = {
+            "job_type": row.get("job_type"),
+            "provider_slug": row.get("provider_slug"),
+            "model_slug": row.get("model_slug"),
+            "model_version": row.get("model_version"),
+            "transport_type": row.get("transport_type"),
+            "adapter_type": row.get("adapter_type"),
+            "cost_structure": row.get("cost_structure"),
+            "cost_metadata": dict(row.get("cost_metadata") or {}),
+            "cost_posture": dict(row.get("cost_posture") or {}),
+            "route_rank": row.get("route_rank"),
+            "availability": "runnable" if is_runnable else "blocked",
+            "available": is_runnable,
+            "selected": selected,
+            "removed_reasons": [] if is_runnable else _blocked_reason_codes(row),
+            "removal_reasons": [
+                dict(item)
+                for item in row.get("removal_reasons") or []
+                if isinstance(item, Mapping)
+            ],
+            "primary_removal_reason_code": row.get("primary_removal_reason_code"),
+            "circuit_state": row.get("breaker_state"),
+            "manual_override_state": row.get("manual_override_state"),
+            "control_state": row.get("control_state"),
+            "credential_availability_state": row.get(
+                "credential_availability_state"
+            ),
+            "credential_sources": list(row.get("credential_sources") or []),
+            "credential_observations": _credential_observations(row),
+            "candidate_ref": row.get("candidate_ref"),
+            "provider_ref": row.get("provider_ref"),
+            "projection_ref": row.get("projection_ref"),
+        }
+        candidates.append(candidate)
+    reason_counts: dict[str, int] = {}
+    for candidate in candidates:
+        for reason in candidate["removed_reasons"]:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    selected_routes = [candidate for candidate in candidates if candidate["selected"]]
+    return {
+        "candidates": candidates,
+        "selected_routes": selected_routes,
+        "blocked_reason_counts": dict(sorted(reason_counts.items())),
+    }
 
 
 _DEFAULT_PROVIDER_CONTROL_PLANE_FRONTDOOR = ProviderControlPlaneFrontdoor()

@@ -1,4 +1,4 @@
-# praxis-worker — sandboxed execution environment for Praxis Engine workflow jobs.
+# praxis-worker — workflow control-plane worker for Praxis Engine jobs.
 #
 # Built automatically by docker_image_authority.py when the image is missing.
 # Manual build:
@@ -35,16 +35,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── python symlink ──────────────────────────────────────────────────
 RUN ln -sf /usr/bin/python3 /usr/local/bin/python
 
-# ── AI CLI tools (agent execution) ──────────────────────────────────
-RUN npm install -g \
-        @anthropic-ai/claude-code@latest \
-        @openai/codex@latest \
-        @google/gemini-cli@latest \
-    && npm cache clean --force
-
-RUN curl https://cursor.com/install -fsS | bash
-RUN ln -sf /root/.local/bin/agent /usr/local/bin/agent \
-    && ln -sf /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent
+# Model/provider CLIs do not live in the worker image. The worker schedules,
+# snapshots, records, and spawns provider-family thin images through
+# docker_image_authority. Keeping provider CLIs out of this control image
+# prevents disabled providers from remaining mechanically callable.
 
 # Trust the configured container workspace regardless of inode ownership — on Windows/SMB-mounted
 # bind mounts the file owner often differs from the container's uid, which
@@ -63,8 +57,7 @@ COPY scripts/export_dependency_scope.py /opt/praxis/workflow/scripts/export_depe
 
 # ── uniform sandbox tool surface ────────────────────────────────────
 # `praxis` is the single shell-callable binary that replaces per-provider
-# MCP client configuration. Every CLI (claude/codex/gemini) can invoke
-# `praxis <subcommand>` via its native Bash tool. See
+# MCP client configuration inside thin model images. See
 # architecture-policy::sandbox::uniform-shell-tool-surface.
 COPY bin/praxis_sandbox_client.py /usr/local/bin/praxis
 RUN chmod 0755 /usr/local/bin/praxis
@@ -84,12 +77,11 @@ RUN set -eux; \
 WORKDIR ${PRAXIS_CONTAINER_WORKSPACE_ROOT}
 
 # ── non-root agent user ─────────────────────────────────────────────
-# Claude's --permission-mode bypassPermissions (and --dangerously-skip-permissions)
-# refuse to run as root for security. Agent subprocesses spawned by the cli_llm
-# adapter run as this user inside the ephemeral CLI container.
+# Thin provider images also use uid=1100 for sandbox execution. The control
+# worker keeps the same user available for file ownership symmetry, but does
+# not execute provider CLIs directly.
 RUN useradd -m -d "${PRAXIS_CONTAINER_HOME}" -u 1100 -s /bin/bash praxis-agent \
-    && mkdir -p "${PRAXIS_CONTAINER_HOME}/.claude" \
     && chown -R 1100:1100 "${PRAXIS_CONTAINER_HOME}"
 
 # Smoke test — verify tools are reachable from login shell
-RUN bash -lc "node --version && python3 --version && git --version && which claude && which codex && which gemini && which cursor-agent && which praxis && id praxis-agent"
+RUN bash -lc "node --version && python3 --version && git --version && which praxis && id praxis-agent"

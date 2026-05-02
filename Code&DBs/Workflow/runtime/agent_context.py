@@ -220,6 +220,54 @@ def _format_recent_chat(turns: Sequence[Mapping[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def build_agent_prompt_envelope(
+    *,
+    agent: Mapping[str, Any],
+    base_instruction: str | None = None,
+    standing_orders: Sequence[Mapping[str, Any]] = (),
+    recent_wakes: Sequence[Mapping[str, Any]] = (),
+    recent_chat: Sequence[Mapping[str, Any]] = (),
+) -> str:
+    write_envelope = _normalise_jsonb_list(agent.get("write_envelope"))
+    integration_refs = _normalise_jsonb_list(agent.get("integration_refs"))
+    capability_refs = _normalise_jsonb_list(agent.get("capability_refs"))
+    allowed_tools = _normalise_jsonb_list(agent.get("allowed_tools"))
+    network_policy = str(agent.get("network_policy") or "praxis_only")
+
+    parts = []
+    
+    if base_instruction:
+        parts.append(base_instruction.strip())
+    else:
+        parts.append(
+            f"You are {agent['agent_principal_ref']} ({agent.get('title') or agent['agent_principal_ref']}).\n"
+            f"You are a durable LLM principal in Praxis Engine."
+        )
+
+    parts.append(
+        f"\n# Scope cage (enforced by sandbox + gateway)\n"
+        f"write_envelope: {list(write_envelope) or '(empty — read-only)'}\n"
+        f"network_policy: {network_policy}  "
+        f"# praxis_only = MCP bridge + admitted provider routes only, no open web\n"
+        f"integration_refs: {list(integration_refs) or '(none — Praxis-internal only)'}\n"
+        f"capability_refs: {list(capability_refs) or '(none)'}\n"
+        f"allowed_tools: {list(allowed_tools) or '(unrestricted within capability_refs)'}"
+    )
+
+    if standing_orders:
+        parts.append(f"\n# Standing orders bound to this principal\n{_format_standing_orders(standing_orders)}")
+    else:
+        parts.append(f"\n# Standing orders bound to this principal\n(no standing orders bound to this principal)")
+        
+    if recent_wakes:
+        parts.append(f"\n# Recent wakes (your short-term memory)\n{_format_recent_wakes(recent_wakes)}")
+        
+    if recent_chat:
+        parts.append(f"\n# Recent chat on the pinned conversation\n{_format_recent_chat(recent_chat)}")
+        
+    return "\n".join(parts)
+
+
 def _build_system_prompt(
     *,
     agent: Mapping[str, Any],
@@ -230,17 +278,11 @@ def _build_system_prompt(
     recent_wakes: Sequence[Mapping[str, Any]],
     recent_chat: Sequence[Mapping[str, Any]],
 ) -> str:
-    write_envelope = _normalise_jsonb_list(agent.get("write_envelope"))
-    integration_refs = _normalise_jsonb_list(agent.get("integration_refs"))
-    capability_refs = _normalise_jsonb_list(agent.get("capability_refs"))
-    allowed_tools = _normalise_jsonb_list(agent.get("allowed_tools"))
-    network_policy = str(agent.get("network_policy") or "praxis_only")
-
     payload_excerpt = json.dumps(payload, default=str, sort_keys=True)
     if len(payload_excerpt) > 1500:
         payload_excerpt = payload_excerpt[:1500] + "…"
 
-    return (
+    base_instruction = (
         f"You are {agent['agent_principal_ref']} ({agent.get('title') or agent['agent_principal_ref']}).\n"
         f"You are a durable LLM principal in Praxis Engine. This is one bounded wake — "
         f"do the work the trigger asks for, write a closeout summary, and stop.\n"
@@ -250,23 +292,6 @@ def _build_system_prompt(
         f"source_ref: {trigger_source_ref or '(none)'}\n"
         f"payload (truncated):\n{payload_excerpt}\n"
         f"\n"
-        f"# Scope cage (enforced by sandbox + gateway)\n"
-        f"write_envelope: {list(write_envelope) or '(empty — read-only)'}\n"
-        f"network_policy: {network_policy}  "
-        f"# praxis_only = MCP bridge + admitted provider routes only, no open web\n"
-        f"integration_refs: {list(integration_refs) or '(none — Praxis-internal only)'}\n"
-        f"capability_refs: {list(capability_refs) or '(none)'}\n"
-        f"allowed_tools: {list(allowed_tools) or '(unrestricted within capability_refs)'}\n"
-        f"\n"
-        f"# Standing orders bound to this principal\n"
-        f"{_format_standing_orders(standing_orders)}\n"
-        f"\n"
-        f"# Recent wakes (your short-term memory)\n"
-        f"{_format_recent_wakes(recent_wakes)}\n"
-        f"\n"
-        f"# Recent chat on the pinned conversation\n"
-        f"{_format_recent_chat(recent_chat)}\n"
-        f"\n"
         f"# How to close out\n"
         f"When the bounded action is complete, post one short summary turn back into "
         f"the pinned conversation (or, if no conversation is pinned, write a summary "
@@ -275,7 +300,15 @@ def _build_system_prompt(
         f"\n"
         f"# If you need a tool that doesn't exist\n"
         f"File an agent_tool_gap via the agent_tool_gap.file command. Do not improvise "
-        f"around a missing capability — gaps are roadmap fuel.\n"
+        f"around a missing capability — gaps are roadmap fuel."
+    )
+    
+    return build_agent_prompt_envelope(
+        agent=agent,
+        base_instruction=base_instruction,
+        standing_orders=standing_orders,
+        recent_wakes=recent_wakes,
+        recent_chat=recent_chat,
     )
 
 
@@ -397,6 +430,7 @@ def compile_agent_context(
 
 __all__ = [
     "AgentContextEnvelope",
+    "build_agent_prompt_envelope",
     "compile_agent_context",
     "in_flight_wake_count",
     "load_agent_principal",

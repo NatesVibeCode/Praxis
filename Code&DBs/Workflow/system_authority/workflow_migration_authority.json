@@ -430,7 +430,11 @@
     "414_register_verifier_register_command_operation.sql",
     "415_register_healer_register_command_operation.sql",
     "416_candidate_ref_routing_authority.sql",
-    "417_candidate_ref_orphan_repair.sql"
+    "417_candidate_ref_orphan_repair.sql",
+    "418_rename_moon_to_canvas.sql",
+    "419_provider_cli_auth_seed_catalog.sql",
+    "420_provider_reasoning_effort_candidate_projection.sql",
+    "421_agent_builder_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -11852,6 +11856,42 @@
         "object_type": "view",
         "object_name": "task_type_routing_admission_audit"
       }
+    ],
+    "418_rename_moon_to_canvas.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.418_rename_moon_to_canvas.sql"
+      }
+    ],
+    "419_provider_cli_auth_seed_catalog.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.419_provider_cli_auth_seed_catalog.sql"
+      }
+    ],
+    "420_provider_reasoning_effort_candidate_projection.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.420_provider_reasoning_effort_candidate_projection.sql"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_provider_reasoning_effort_matrix_for_candidate"
+      },
+      {
+        "object_type": "function",
+        "object_name": "fill_provider_reasoning_effort_matrix_from_candidate"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "provider_model_candidates.provider_model_candidates_reasoning_effort_matrix_fill"
+      }
+    ],
+    "421_agent_builder_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.421_agent_builder_authority.sql"
+      }
     ]
   },
   "policy_buckets": {
@@ -12286,7 +12326,11 @@
       "414_register_verifier_register_command_operation.sql",
       "415_register_healer_register_command_operation.sql",
       "416_candidate_ref_routing_authority.sql",
-      "417_candidate_ref_orphan_repair.sql"
+      "417_candidate_ref_orphan_repair.sql",
+      "418_rename_moon_to_canvas.sql",
+      "419_provider_cli_auth_seed_catalog.sql",
+      "420_provider_reasoning_effort_candidate_projection.sql",
+      "421_agent_builder_authority.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

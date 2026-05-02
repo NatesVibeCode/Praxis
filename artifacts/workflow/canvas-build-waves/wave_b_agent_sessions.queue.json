@@ -1,0 +1,48 @@
+{
+  "name": "canvas_build_wave_b_agent_sessions",
+  "queue_id": "canvas_wave_b_001",
+  "phase": "build",
+  "outcome_goal": "Add persistent agent sessions and event subscription capability to the MCP bridge. Agents can checkpoint state, subscribe to build events, and resume context across retries.",
+  "output_dir": "artifacts/workflow/canvas-build-waves/wave_b_output",
+  "jobs": [
+    {
+      "label": "agent_session_table",
+      "agent": "auto/build",
+      "prompt": "TASK: Create a persistent agent sessions table and extend the MCP session token to persist session rows.\n\nCONTEXT:\n- Session tokens are minted in `Code&DBs/Workflow/runtime/workflow/mcp_session.py` (lines 53-74). Function `mint_workflow_mcp_session_token(run_id, workflow_id, job_label, allowed_tools)` creates signed JWT-style tokens.\n- Tokens are verified in the same file (lines 77-100).\n- Migrations: `Code&DBs/Databases/migrations/workflow/`. Use number 083.\n\nWHAT TO DO:\n\n1. Create migration `Code&DBs/Databases/migrations/workflow/083_agent_sessions.sql`:\n```sql\nCREATE TABLE IF NOT EXISTS agent_sessions (\n    session_id TEXT PRIMARY KEY,\n    run_id TEXT NOT NULL,\n    workflow_id TEXT DEFAULT '',\n    job_label TEXT NOT NULL,\n    agent_slug TEXT DEFAULT '',\n    status TEXT NOT NULL DEFAULT 'active',\n    context_json JSONB DEFAULT '{}',\n    event_cursor INTEGER DEFAULT 0,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX IF NOT EXISTS idx_agent_sessions_run ON agent_sessions(run_id);\nCREATE INDEX IF NOT EXISTS idx_agent_sessions_active ON agent_sessions(status) WHERE status = 'active';\n```\n\n2. Modify `mcp_session.py`:\n   - In `mint_workflow_mcp_session_token()`: after creating the token, persist a row to `agent_sessions` with session_id=token[:32] (truncated for readability), run_id, workflow_id, job_label, status='active'.\n   - Add a new function `get_agent_session(conn, session_token)` that looks up the session row by session_id=token[:32].\n   - Add `update_session_context(conn, session_token, context_json)` that updates context_json and heartbeat_at.\n   - Add `advance_event_cursor(conn, session_token, cursor_value)` that updates event_cursor.\n   - The conn parameter needs to be added to mint_workflow_mcp_session_token. Check callers and thread it through.\n\nRULES:\n- Don't break existing token minting. Session persistence is additive — if conn is None, skip the DB write.\n- session_id is derived from the token, not a separate UUID. This lets you look up sessions from tokens without a separate mapping.\n- Keep functions simple. No ORM, just raw SQL.\n\nOUTPUT: New: migration. Modified: mcp_session.py.",
+      "scope": {
+        "write": ["Code&DBs/Databases/migrations/workflow/083_agent_sessions.sql", "Code&DBs/Workflow/runtime/workflow/mcp_session.py"],
+        "read": ["Code&DBs/Workflow/runtime/workflow/mcp_session.py"]
+      }
+    },
+    {
+      "label": "agent_event_subscription",
+      "agent": "auto/build",
+      "depends_on": ["agent_session_table"],
+      "prompt": "TASK: Add an MCP tool that lets agents subscribe to build state events for their run.\n\nCONTEXT:\n- MCP tools are defined in `Code&DBs/Workflow/surfaces/mcp/tools/`. Each file has a TOOLS dict at module level.\n- Tool registration is AST-based — the catalog loader reads TOOLS dicts from each file.\n- `BuildStateNotificationConsumer` exists in `Code&DBs/Workflow/runtime/build_notifications.py` with methods: poll(), iter_build(), write_event().\n- Agent sessions now have an `event_cursor` field (from the agent_session_table job).\n- The session token is available via the MCP bridge's workflow_token query parameter.\n\nWHAT TO DO:\n\n1. Create `Code&DBs/Workflow/surfaces/mcp/tools/agent_events.py` with a TOOLS dict containing:\n\n   `dag_subscribe_events` tool:\n   - Parameters: none required (uses session context to determine run_id)\n   - Behavior:\n     a. Extract session_token from the MCP request context\n     b. Look up agent_session to get run_id and current event_cursor\n     c. Query build_notifications WHERE workflow_id matches any workflow in the run AND id > event_cursor, ORDER BY id, LIMIT 50\n     d. Return the events as a list\n     e. Update event_cursor to the max id returned\n   - This is a pull-based subscription — agents call it repeatedly to get new events since their last cursor.\n\n2. Register the new tool file in the catalog. Look at how existing tool files in `surfaces/mcp/tools/` are discovered (likely auto-discovered by the AST loader scanning the directory).\n\nRULES:\n- Follow the exact TOOLS dict pattern from `surfaces/mcp/tools/workflow.py`.\n- The tool must work within the existing MCP bridge request/response model — no long-polling or streaming.\n- If no new events, return an empty list (not an error).\n- Keep it simple. One tool, one file.\n\nOUTPUT: New: agent_events.py.",
+      "scope": {
+        "write": ["Code&DBs/Workflow/surfaces/mcp/tools/agent_events.py"],
+        "read": ["Code&DBs/Workflow/surfaces/mcp/tools/workflow.py", "Code&DBs/Workflow/runtime/build_notifications.py", "Code&DBs/Workflow/runtime/workflow/mcp_session.py"]
+      }
+    },
+    {
+      "label": "agent_session_context",
+      "agent": "auto/build",
+      "depends_on": ["agent_session_table"],
+      "prompt": "TASK: Add an MCP tool that lets agents read/write persistent context on their session.\n\nCONTEXT:\n- Agent sessions table has `context_json JSONB` field.\n- `update_session_context(conn, session_token, context_json)` exists in mcp_session.py.\n- `get_agent_session(conn, session_token)` exists in mcp_session.py.\n\nWHAT TO DO:\n\n1. Add to the TOOLS dict in `Code&DBs/Workflow/surfaces/mcp/tools/agent_events.py` (created by parallel job):\n\n   `dag_session_context` tool:\n   - Parameters: action ('read' or 'write'), context (dict, required for write)\n   - Read: returns the current context_json from the agent's session\n   - Write: merges the provided context into existing context_json (shallow merge), updates heartbeat_at\n   - Uses session_token from MCP request context to identify the session\n\nRULES:\n- Shallow merge for writes (new keys override, existing keys preserved unless overridden).\n- Read always returns the full context_json, even if empty.\n- If session not found, return error with clear message.\n\nOUTPUT: Modified: agent_events.py (add second tool to TOOLS dict).",
+      "scope": {
+        "write": ["Code&DBs/Workflow/surfaces/mcp/tools/agent_events.py"],
+        "read": ["Code&DBs/Workflow/runtime/workflow/mcp_session.py"]
+      }
+    },
+    {
+      "label": "agent_session_tests",
+      "agent": "auto/test",
+      "depends_on": ["agent_event_subscription", "agent_session_context"],
+      "prompt": "TASK: Write tests for agent session persistence and event subscription.\n\nCONTEXT:\n- Agent sessions table: agent_sessions with session_id, run_id, context_json, event_cursor.\n- Functions in mcp_session.py: mint_workflow_mcp_session_token (now persists session), get_agent_session, update_session_context, advance_event_cursor.\n- Build notifications table: build_notifications.\n- Test runner: PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q <test_file>\n- Database: $WORKFLOW_DATABASE_URL\n\nWHAT TO DO:\n\nCreate `Code&DBs/Workflow/tests/test_agent_sessions.py` with:\n\n1. `test_mint_token_creates_session` — mint a token with conn, verify row in agent_sessions.\n2. `test_get_session_returns_data` — mint token, get session, verify fields match.\n3. `test_update_context_merges` — write {a:1}, write {b:2}, read back, verify {a:1, b:2}.\n4. `test_event_cursor_advances` — write 3 build events, advance cursor to 2, verify cursor value.\n5. `test_mint_without_conn_still_works` — mint with conn=None, verify token returned (no DB write).\n\nRULES:\n- Real Postgres, not mocks.\n- Clean up: DELETE FROM agent_sessions WHERE run_id LIKE 'test-%'\n- Clean up: DELETE FROM build_notifications WHERE workflow_id LIKE 'test-%'\n\nOUTPUT: New: tests/test_agent_sessions.py",
+      "scope": {
+        "write": ["Code&DBs/Workflow/tests/test_agent_sessions.py"],
+        "read": ["Code&DBs/Workflow/runtime/workflow/mcp_session.py", "Code&DBs/Workflow/runtime/build_notifications.py"]
+      }
+    }
+  ]
+}

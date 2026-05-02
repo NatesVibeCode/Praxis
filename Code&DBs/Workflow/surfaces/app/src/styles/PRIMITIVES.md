@@ -35,12 +35,12 @@ This is the fixed inventory. Every visible element on every Praxis surface MUST 
 
 ## Pages-as-data-adapters mandate
 
-Page components (`Dashboard.tsx`, `MoonBuildPage.tsx`, `WorkspaceComposeSurface.tsx`, `ManifestBundleView.tsx`, `AtlasPage.tsx`) MUST NOT:
+Page components (`Dashboard.tsx`, `CanvasBuildPage.tsx`, `WorkspaceComposeSurface.tsx`, `ManifestBundleView.tsx`, `AtlasPage.tsx`) MUST NOT:
 - Define their own bordered cards / panels / tiles / chips.
-- Define their own per-page color tokens (`--dash-*`, `--moon-*` variants of palette tokens).
+- Define their own per-page color tokens (`--dash-*`, `--canvas-*` variants of palette tokens).
 - Use inline `style={{...}}` for color / spacing / typography (positioning math only).
 - Compose decorative gradients (the page-level `dash-page` glow is the only one).
-- Invent local class names that mimic the primitive vocabulary (`.dash-card`, `.moon-tile`, `.workspace-panel`).
+- Invent local class names that mimic the primitive vocabulary (`.dash-card`, `.canvas-tile`, `.workspace-panel`).
 
 Page components SHOULD:
 - Fetch data, hold state, and dispatch operations.
@@ -57,19 +57,19 @@ The following per-page class names are banned. Any remaining matches in the name
 
 | Banned class | Replacement primitive |
 |---|---|
-| `.dash-tile`, `.wf-stat`, `.moon-tile` | `<MetricTile>` |
+| `.dash-tile`, `.wf-stat`, `.canvas-tile` | `<MetricTile>` |
 | `.dash-review-item`, `.dash-run`, `.dash-file` | `<StatusRow>` |
 | `.dash-panel`, `.dash-section` (as a card) | `<ListPanel>` |
-| `.wf-card`, `.moon-card`, `.workspace-card` | `<PanelCard>` |
-| `.dash-empty`, `.moon-empty`, `.workspace-empty` | `<EmptyStateExplainer>` |
+| `.wf-card`, `.canvas-card`, `.workspace-card` | `<PanelCard>` |
+| `.dash-empty`, `.canvas-empty`, `.workspace-empty` | `<EmptyStateExplainer>` |
 | `.dash-receipts`, `.dash-run-instrument` (outer rim wrappers) | bare grid (no border) |
 | `.dash-overview-grid`, `.dash-board__rail` (outer rim wrappers) | bare grid (no border) |
 | `.workspace-compose__primary`, `.workspace-compose__ghost` | `<Button>` |
 | `.workspace-compose__primary--dispatch` | `<DispatchButton>` |
 | `.workspace-receipts__filter`, `.workspace-receipts__row` | `<RadioPillGroup>` / `<StatusRow>` |
 | `.app-shell__surface-chip` (with inline color hex) | `<SourceChip>` |
-| `.moon-compose__btn`, `.moon-compose__secondary-link` | `<Button>` |
-| `.moon-center__dock-btn` | `<Button data-active>` |
+| `.canvas-compose__btn`, `.canvas-compose__secondary-link` | `<Button>` |
+| `.canvas-center__dock-btn` | `<Button data-active>` |
 
 Removing the class definition AND the consuming JSX — both — is the standard for "deleted lookalike."
 
@@ -89,7 +89,7 @@ The canonical Praxis brand bible lives at `Skills/praxis-design/README.md` (and 
 
 **Accent.** `var(--accent)` `#f3eee4` (pale sand). The primary brand tint. Used sparingly: active tab underlines, button fills (inverted), focus rings, the halo inside the logomark's central aperture.
 
-**Amber authority** (`var(--warning)` `#d29922`). Reserved for warnings, gate states, and the Moon build canvas's active node glow. Never decorative.
+**Amber authority** (`var(--warning)` `#d29922`). Reserved for warnings, gate states, and the Canvas build canvas's active node glow. Never decorative.
 
 **Semantic status.** `--success` `#3fb950`, `--warning` `#d29922`, `--danger` `#f85149`. Canvas softens danger to `#ff8a6a` ("tint-of-concern, not alarm").
 
@@ -235,7 +235,7 @@ These are not style suggestions — they are forbidden patterns. Each one has a 
 
 1. **No nested cards.** A `prx-card` inside a `prx-card` (or `prx-receipt` inside a `prx-card`) is always wrong. The outer container exists for nothing — the inner card already has its own border.
 2. **No outer rim around grids.** A grid of metric tiles, receipts, source pills, or tabs MUST NOT have a wrapping rim. The grid is layout, not a container.
-3. **No local lookalike cards.** `.dash-card`, `.moon-card`, `.wf-card`, `.workspace-card`, `.surface-card` — every per-surface card class that mimics what `prx-card` / `prx-receipt` already does is banned. Use the primitive or use bare composition.
+3. **No local lookalike cards.** `.dash-card`, `.canvas-card`, `.wf-card`, `.workspace-card`, `.surface-card` — every per-surface card class that mimics what `prx-card` / `prx-receipt` already does is banned. Use the primitive or use bare composition.
 4. **No inline hex outside `tokens.css`.** Every color must route through a CSS variable. The token vocabulary: `--bg`, `--bg-card`, `--bg-alt`, `--text`, `--text-muted`, `--text-inverse`, `--accent`, `--success`, `--warning`, `--danger`, `--border`. Anything else is a regression.
 5. **No fifth semantic color.** White (inert / sealed / static) · Amber (in-process / pending / draft) · Green (success / ok) · Red (error / refused). No blue tints, no purple accents, no sage / ochre / rust.
 6. **No `<PanelCard>` around headings, metric rows, or list sections.** `PanelCard` is for actionable units. A section title with a list below it is bare type — kicker label + body, no rim.
@@ -251,28 +251,28 @@ These are not style suggestions — they are forbidden patterns. Each one has a 
 Run from `Code&DBs/Workflow/surfaces/app/`. Each command should print no matches in the named directories. CI should run these and fail the build on regression.
 
 ```bash
-# 1. No inline styles outside Moon's canvas-transform exceptions
+# 1. No inline styles outside Canvas's canvas-transform exceptions
 grep -rE 'style=\{\{' src/dashboard/ src/praxis/ src/grid/ src/atlas/
 
 # 2. No hardcoded hex outside tokens.css / primitives*.css
-grep -rE '#[0-9a-fA-F]{3,6}\b' src/dashboard/ src/moon/ src/praxis/ src/grid/ src/atlas/
+grep -rE '#[0-9a-fA-F]{3,6}\b' src/dashboard/ src/canvas/ src/praxis/ src/grid/ src/atlas/
 
 # 3. No nested prx-card (containment violation)
 grep -rzoE 'prx-card[^"]*"[^<]*<[^>]*prx-card' src/
 
 # 4. No local lookalike card classes (banned naming)
-grep -rE '\.(dash|moon|wf|workspace|surface)-[a-z_]+(card|panel|frame|tile|chip)' src/dashboard/*.css src/moon/*.css src/praxis/*.css
+grep -rE '\.(dash|canvas|wf|workspace|surface)-[a-z_]+(card|panel|frame|tile|chip)' src/dashboard/*.css src/canvas/*.css src/praxis/*.css
 
 # 5. No `clamp(` on font-size
-grep -rE 'font-size:\s*clamp' src/dashboard/ src/moon/ src/praxis/ src/atlas/ src/grid/
+grep -rE 'font-size:\s*clamp' src/dashboard/ src/canvas/ src/praxis/ src/atlas/ src/grid/
 
 # 6. No PanelCard / FrameCard wrapping a metric-row grid (rim around grid is banned)
 # Manual audit: search for `<PanelCard` and confirm each contains a discrete actionable record, not a grid of tiles.
 
 # 7. No decorative gradients (only the page-level glow is allowed)
-grep -rE 'linear-gradient|radial-gradient' src/dashboard/ src/moon/ src/praxis/ src/grid/ src/atlas/ \
+grep -rE 'linear-gradient|radial-gradient' src/dashboard/ src/canvas/ src/praxis/ src/grid/ src/atlas/ \
   | grep -v 'dash-page' \
-  | grep -v 'moon-bg-glow'   # add other allowed glow rules here
+  | grep -v 'canvas-bg-glow'   # add other allowed glow rules here
 ```
 
 ---

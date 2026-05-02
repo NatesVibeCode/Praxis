@@ -143,7 +143,7 @@ Roadmap state after closeout:
   is `completed` / `completed`.
 - Root remains `active` / `claimed`.
 - Phase 11 remains the active unfinished slice:
-  `roadmap_item.object.truth.trust.toolbelt.authority.operator.inspection.moon.workflow.surfaces`.
+  `roadmap_item.object.truth.trust.toolbelt.authority.operator.inspection.canvas.workflow.surfaces`.
 
 ## Remaining Authority Work
 

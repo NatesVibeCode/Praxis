@@ -1,7 +1,7 @@
 /* =============================================================
  * Praxis Engine — Colors & Type
  * Single source of truth for color tokens + type scale.
- * Lifted from source/tokens.css + source/moon-tokens.css and
+ * Lifted from source/tokens.css + source/canvas-tokens.css and
  * simplified into a flat, portable interface.
  * ============================================================= */
 
@@ -28,7 +28,7 @@
   /* ---------- Brand / accent ---------- */
   --accent:        #f3eee4;           /* pale sand — primary accent */
   --accent-strong: #ffffff;           /* true white — only for emphasis */
-  --accent-warm:   #d29922;           /* amber — "authority" tint (Moon) */
+  --accent-warm:   #d29922;           /* amber — "authority" tint (Canvas) */
   --brand-2:       #8b929d;           /* cool slate, rarely used */
   --brand-legacy:  #6cb6ff;           /* legacy blue, archival */
 
@@ -90,9 +90,9 @@
   /* ---------- Radii ---------- */
   --radius-sm:  4px;   /* inputs on landing page   */
   --radius:    8px;    /* default tokens radius    */
-  --radius-md: 10px;   /* buttons (Moon)           */
-  --radius-lg: 14px;   /* cards, panels (Moon)     */
-  --radius-xl: 18px;   /* dock items (Moon)        */
+  --radius-md: 10px;   /* buttons (Canvas)           */
+  --radius-lg: 14px;   /* cards, panels (Canvas)     */
+  --radius-xl: 18px;   /* dock items (Canvas)        */
   --radius-2xl:20px;   /* dock rails               */
   --radius-pill: 999px;
 
@@ -113,7 +113,7 @@
 
   /* ---------- Type families ----------
    * Two products, two stacks.
-   *   - Moon dashboard & tokens: Space Grotesk (geometric grotesk) + IBM Plex Mono.
+   *   - Canvas dashboard & tokens: Space Grotesk (geometric grotesk) + IBM Plex Mono.
    *   - praxisengine.io landing: Inter + JetBrains Mono.
    * Treat Space Grotesk / IBM Plex as the canonical system;
    * Inter / JetBrains remain in the landing file until it's re-skinned.
@@ -127,7 +127,7 @@
   --fs-xxs: 11px;   /* eyebrow / badge           */
   --fs-xs:  12px;   /* metadata, tags            */
   --fs-sm:  13px;   /* dense UI copy             */
-  --fs-md:  14px;   /* body (Moon default)       */
+  --fs-md:  14px;   /* body (Canvas default)       */
   --fs-lg:  16px;   /* body (landing default)    */
   --fs-xl:  18px;   /* lede                      */
   --fs-2xl: 20px;   /* section titles            */

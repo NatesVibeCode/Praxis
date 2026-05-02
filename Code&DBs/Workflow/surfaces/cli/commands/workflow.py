@@ -864,8 +864,8 @@ def _submit_coordination_chain(
     except Exception:
         # Fall back to direct storage bootstrap when running outside the
         # MCP server process (e.g. headless terminal launches).
-        from storage.postgres.connection import get_sync_postgres_connection
-        pg_conn = get_sync_postgres_connection()
+        from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+        pg_conn = SyncPostgresConnection(get_workflow_pool())
 
     try:
         from runtime.workflow_chain import WorkflowChainError
@@ -3057,6 +3057,7 @@ def _active_command(*, stdout: TextIO) -> int:
             "pass_rate": snapshot.get("pass_rate"),
             "adjusted_pass_rate": snapshot.get("adjusted_pass_rate"),
             "observability_state": snapshot.get("observability_state"),
+            "in_flight_status_authority": snapshot.get("in_flight_status_authority"),
         },
         "source": "praxis_status_snapshot",
     }

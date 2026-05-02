@@ -307,7 +307,7 @@ export function buildPathForSurface(
 
 /**
  * Lazy-import resolver for component_ref strings like
- * "dashboard/Dashboard.Dashboard" or "moon/MoonBuildPage.MoonBuildPage".
+ * "dashboard/Dashboard.Dashboard" or "canvas/CanvasBuildPage.CanvasBuildPage".
  * Format is "<relative-path-from-app-src>.<NamedExport>".
  */
 const _componentCache = new Map<string, LazyExoticComponent<ComponentType<unknown>>>();
@@ -319,8 +319,8 @@ const COMPONENT_LOADERS: Record<string, () => Promise<{ default: ComponentType<u
     import('../dashboard/CostsPanel').then((m) => ({ default: m.CostsPanel as ComponentType<unknown> })),
   'dashboard/RunDetailView.RunDetailView': () =>
     import('../dashboard/RunDetailView').then((m) => ({ default: m.RunDetailView as ComponentType<unknown> })),
-  'moon/MoonBuildPage.MoonBuildPage': () =>
-    import('../moon/MoonBuildPage').then((m) => ({ default: m.MoonBuildPage as ComponentType<unknown> })),
+  'canvas/CanvasBuildPage.CanvasBuildPage': () =>
+    import('../canvas/CanvasBuildPage').then((m) => ({ default: m.CanvasBuildPage as ComponentType<unknown> })),
   'praxis/ManifestCatalogPage.ManifestCatalogPage': () =>
     import('../praxis/ManifestCatalogPage').then((m) => ({ default: m.ManifestCatalogPage as ComponentType<unknown> })),
   'praxis/ManifestBundleView.ManifestBundleView': () =>

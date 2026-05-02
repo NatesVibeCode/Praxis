@@ -96,7 +96,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow runtime-truth` | `praxis_runtime_truth_snapshot` | `operations` | `read` | Inspect observed workflow runtime truth across DB authority, queue state, worker heartbeats, provider slots, host-resource leases, Docker, manifest hydration audit, and recent typed failures. |
 | `praxis workflow query` | `praxis_query` | `query` | `read` | Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use. |
 | `praxis workflow model-eval` | `praxis_model_eval` | `workflow` | `read`, `write` | Use for consistent model selection: same Workflow spec, same fixtures, same verifier, varied model/prompt/provider configuration. |
-| `praxis workflow moon` | `praxis_moon` | `workflow` | `launch`, `read`, `write` | Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_moon tool name and moon alias remain compatibility entrypoints. |
+| `praxis workflow canvas` | `praxis_canvas` | `workflow` | `launch`, `read`, `write` | Read, compose, suggest, mutate, or launch Workflow graphs through the same CQRS-backed build authority used by the in-app Workflow surface. The praxis_canvas tool name and canvas alias remain compatibility entrypoints. |
 | `praxis workflow repair` | `praxis_workflow_repair_queue` | `workflow` | `write` | Use after a Solution, Workflow, or Job fails and you need a durable repair item instead of rediscovering lost run state. |
 | `praxis workflow solution` | `praxis_solution` | `workflow` | `launch`, `read` | Submit, list, or inspect durable multi-workflow Solutions. |
 | `praxis workflow synthetic-data-generate` | `praxis_synthetic_data_generate` | `workflow` | `write` | Use when a workflow, Virtual Lab run, demo, test fixture, or model-eval fixture needs generated data with durable records and a quality-checked naming plan. |
@@ -366,7 +366,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
 | `praxis workflow model-eval` | `praxis_model_eval` | `advanced` | action: plan, run, inspect, compare, promote, export, benchmark_ingest | `read`, `write` | - |
-| `praxis workflow moon` | `praxis_moon` | `advanced` | action: get_build, compose, suggest_next, mutate_field, launch | `launch`, `read`, `write` | - |
+| `praxis workflow canvas` | `praxis_canvas` | `advanced` | action: get_build, compose, suggest_next, mutate_field, launch | `launch`, `read`, `write` | - |
 | `praxis workflow repair` | `praxis_workflow_repair_queue` | `advanced` | action: list, queue, status, summary, claim, release, complete | `write` | - |
 | `praxis workflow solution` | `praxis_solution` | `advanced` | action: submit, start, status, show, list, observe | `launch`, `read` | - |
 | `praxis workflow synthetic-data-generate` | `praxis_synthetic_data_generate` | `advanced` | - | `write` | - |

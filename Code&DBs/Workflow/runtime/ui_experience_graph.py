@@ -17,7 +17,7 @@ APP_SURFACE_BLUEPRINTS: tuple[dict[str, Any], ...] = (
         "role": "control-plane overview and launch pad",
         "authority_source": "ui_shell_route_registry + ui_surface_action_registry",
         "main_actions": [
-            "open Moon builder",
+            "open Canvas builder",
             "open chat",
             "upload knowledge-base file",
             "open/edit/run/delete workflow",
@@ -26,7 +26,7 @@ APP_SURFACE_BLUEPRINTS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "build",
-        "label": "Moon Build",
+        "label": "Canvas Build",
         "kind": "build",
         "role": "primary workflow design, inspection, and release surface",
         "authority_source": "surface_catalog_registry + workflow build authority",
@@ -93,11 +93,11 @@ APP_SURFACE_BLUEPRINTS: tuple[dict[str, Any], ...] = (
 )
 
 SURFACE_ALIASES: dict[str, str] = {
-    "moon": "build",
+    "canvas": "build",
 }
 
 CONTROL_SURFACE_ALIASES: dict[str, str] = {
-    "build": "moon",
+    "build": "canvas",
 }
 
 SHELL_RELATIONSHIPS: tuple[dict[str, str], ...] = (
@@ -117,7 +117,7 @@ KNOWN_WEAKNESSES: tuple[dict[str, str], ...] = (
     {
         "scope": "dashboard actions",
         "problem": "dashboard button contracts are mostly source-code and audit-doc derived",
-        "recommended_change": "register dashboard action contracts beside Moon surface_catalog rows",
+        "recommended_change": "register dashboard action contracts beside Canvas surface_catalog rows",
     },
     {
         "scope": "visual quality",
@@ -323,8 +323,8 @@ def build_ui_experience_graph(
             if not focus_text or _matches_payload(item, focus_text)
         ],
         "agent_guidance": [
-            "Start with build/Moon for primary workflow UX; Atlas is only a secondary map.",
-            "For Moon controls and gates, trust surface_catalog_registry over React constants.",
+            "Start with build/Canvas for primary workflow UX; Atlas is only a secondary map.",
+            "For Canvas controls and gates, trust surface_catalog_registry over React constants.",
             "For source-file anchors, trust ui_surface_file_anchor_registry over Python or React constants.",
             "When changing visual layout, keep authority reads separate from renderer polish so future agents can reason without launching Vite.",
         ],

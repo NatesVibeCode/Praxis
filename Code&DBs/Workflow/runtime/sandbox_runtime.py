@@ -75,8 +75,6 @@ _EMPTY_WORKSPACE_MATERIALIZATION = "none"
 _CLI_AGENT_USER = "praxis-agent"
 _CLI_AGENT_UID = 1100
 _CLI_AGENT_GID = 1100
-_OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
-_GOOGLE_AUTH_SEED_PATH = str(container_auth_seed_dir() / "google-gemini-oauth_creds.json")
 _DOCKER_ENV_FILE_PREFIX = "praxis-sandbox-env-"
 _DOCKER_ENV_SPILL_PREFIX = "praxis-sandbox-env-spill-"
 _DOCKER_ENV_FILE_MAX_LINE_BYTES = 32_000
@@ -168,6 +166,7 @@ class _CliAuthMountSpec:
     provider_slug: str
     host_relative_path: str
     container_path: str
+    container_seed_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,14 +545,33 @@ def _jsonb_array(value: object) -> tuple[object, ...]:
     return tuple(parsed)
 
 
-def _container_auth_mount_path(payload: Mapping[str, object]) -> str | None:
+def _container_auth_seed_path(seed_name: str) -> str:
+    return str(
+        container_auth_seed_dir()
+        / _normalize_relative_path(seed_name, field_name="container_seed_filename")
+    )
+
+
+def _container_auth_mount_paths(
+    payload: Mapping[str, object],
+    *,
+    host_relative_path: str,
+) -> tuple[str, str | None]:
     seed_name = str(payload.get("container_seed_filename") or "").strip()
+    seed_path = _container_auth_seed_path(seed_name) if seed_name else None
     if seed_name:
-        return str(container_auth_seed_dir() / _normalize_relative_path(seed_name, field_name="container_seed_filename"))
-    relative_path = str(payload.get("container_relative_path") or "").strip()
-    if relative_path:
-        return str(_SANDBOX_HOME / _normalize_relative_path(relative_path, field_name="container_relative_path"))
-    return None
+        relative_path = str(payload.get("container_relative_path") or "").strip()
+        if not relative_path:
+            relative_path = host_relative_path
+    else:
+        relative_path = str(payload.get("container_relative_path") or "").strip()
+    if not relative_path:
+        relative_path = host_relative_path
+    target_path = str(
+        _SANDBOX_HOME
+        / _normalize_relative_path(relative_path, field_name="container_relative_path")
+    )
+    return target_path, seed_path
 
 
 def _auth_catalog_from_rows(rows: Sequence[Mapping[str, object]]) -> _CliAuthCatalog:
@@ -573,21 +591,25 @@ def _auth_catalog_from_rows(rows: Sequence[Mapping[str, object]]) -> _CliAuthCat
         for raw_mount in _jsonb_array(row.get("auth_mounts")):
             if not isinstance(raw_mount, Mapping):
                 continue
+            if raw_mount.get("enabled") is False:
+                continue
             try:
                 host_relative_path = _normalize_relative_path(
                     raw_mount.get("host_relative_path"),
                     field_name="auth_mounts.host_relative_path",
                 )
-                container_path = _container_auth_mount_path(raw_mount)
+                container_path, seed_path = _container_auth_mount_paths(
+                    raw_mount,
+                    host_relative_path=host_relative_path,
+                )
             except RuntimeError:
-                continue
-            if not container_path:
                 continue
             mount_specs.append(
                 _CliAuthMountSpec(
                     provider_slug=provider_slug,
                     host_relative_path=host_relative_path,
                     container_path=container_path,
+                    container_seed_path=seed_path,
                 )
             )
     return _CliAuthCatalog(
@@ -642,20 +664,8 @@ def _cli_auth_volume_flags(*, provider_slug: str | None = None) -> list[str]:
     for spec in _load_cli_auth_catalog().mount_specs:
         if normalized_provider and normalized_provider != spec.provider_slug:
             continue
-        # Claude Code still rewrites ~/.claude.json at runtime even on builds
-        # where docs describe it as deprecated. Mounting the host file :ro makes
-        # the CLI back it up, lose the live path, and hang before auth
-        # completes. Treat OAuth env/token or Linux-only credentials.json as the
-        # Anthropic auth authority instead of the legacy config file.
-        if spec.provider_slug == "anthropic" and spec.host_relative_path == ".claude.json":
-            continue
         host_path = os.path.join(home, spec.host_relative_path)
-        container_path = spec.container_path
-        # Gemini rewrites oauth_creds.json during normal CLI startup. Mount the
-        # host file as a read-only seed, then copy it into writable tmpfs during
-        # bootstrap instead of overlaying the live target with a read-only file.
-        if spec.provider_slug == "google" and spec.host_relative_path == ".gemini/oauth_creds.json":
-            container_path = _GOOGLE_AUTH_SEED_PATH
+        container_path = spec.container_seed_path or spec.container_path
         if any(os.path.isfile(os.path.join(probe_home, spec.host_relative_path)) for probe_home in probe_homes):
             flags.extend(["-v", f"{host_path}:{container_path}:ro"])
     return flags
@@ -677,42 +687,50 @@ def _cli_home_tmpfs_flags(*, uid: int = _CLI_AGENT_UID, gid: int = _CLI_AGENT_GI
 def _cli_requires_root_auth_bootstrap(
     *, provider_slug: str | None, auth_mount_policy: str, requested_user: str | None
 ) -> bool:
-    """Some CLIs need root only long enough to copy host auth seeds."""
+    """Some CLI auth catalog entries need root only long enough to copy host auth seeds."""
     normalized_provider = str(provider_slug or "").strip().lower()
     normalized_policy = str(auth_mount_policy or "").strip().lower()
     return (
-        normalized_provider in {"openai", "google"}
+        any(
+            spec.provider_slug == normalized_provider and spec.container_seed_path
+            for spec in _load_cli_auth_catalog().mount_specs
+        )
         and normalized_policy != "none"
         and bool(requested_user)
     )
 
 
 def _cli_auth_bootstrap_command(command: str, *, provider_slug: str | None) -> str:
-    """Copy root-readable provider auth into the agent home, then drop privileges."""
+    """Copy root-readable catalog auth seeds into the agent home, then drop privileges."""
     normalized_provider = str(provider_slug or "").strip().lower()
-    if normalized_provider == "openai":
-        seed_path = _OPENAI_AUTH_SEED_PATH
-        auth_dir = str(_SANDBOX_HOME / ".codex")
-        auth_target = str(_SANDBOX_HOME / ".codex" / "auth.json")
-    elif normalized_provider == "google":
-        seed_path = _GOOGLE_AUTH_SEED_PATH
-        auth_dir = str(_SANDBOX_HOME / ".gemini")
-        auth_target = str(_SANDBOX_HOME / ".gemini" / "oauth_creds.json")
-    else:
+    seed_specs = tuple(
+        spec
+        for spec in _load_cli_auth_catalog().mount_specs
+        if spec.provider_slug == normalized_provider and spec.container_seed_path
+    )
+    if not seed_specs:
         return command
 
     quoted_command = shlex.quote(command)
     fallback_command = shlex.quote(f"HOME={shlex.quote(str(_SANDBOX_HOME))} bash -lc {quoted_command}")
+    seed_copy_fragments: list[str] = []
+    for spec in seed_specs:
+        seed_path = str(spec.container_seed_path)
+        auth_target = spec.container_path
+        auth_dir = str(PurePosixPath(auth_target).parent)
+        seed_copy_fragments.append(
+            f"if [ -f {shlex.quote(seed_path)} ]; then "
+            f"mkdir -p {shlex.quote(auth_dir)}; "
+            f"cp {shlex.quote(seed_path)} {shlex.quote(auth_target)}; "
+            f"chown {_CLI_AGENT_UID}:{_CLI_AGENT_GID} "
+            f"{shlex.quote(auth_dir)} {shlex.quote(auth_target)}; "
+            f"chmod 600 {shlex.quote(auth_target)}; "
+            "fi; "
+        )
     return (
         "set -e; "
-        f"if [ -f {shlex.quote(seed_path)} ]; then "
-        f"mkdir -p {shlex.quote(auth_dir)}; "
-        f"cp {shlex.quote(seed_path)} {shlex.quote(auth_target)}; "
-        f"chown {_CLI_AGENT_UID}:{_CLI_AGENT_GID} "
-        f"{shlex.quote(auth_dir)} {shlex.quote(auth_target)}; "
-        f"chmod 600 {shlex.quote(auth_target)}; "
-        "fi; "
-        "if command -v setpriv >/dev/null 2>&1; then "
+        + "".join(seed_copy_fragments)
+        + "if command -v setpriv >/dev/null 2>&1; then "
         f"exec setpriv --reuid={_CLI_AGENT_UID} --regid={_CLI_AGENT_GID} "
         f"--init-groups env HOME={shlex.quote(str(_SANDBOX_HOME))} bash -lc {quoted_command}; "
         "fi; "
@@ -1712,9 +1730,9 @@ class DockerLocalSandboxProvider:
         # request.env so upstream defaults (e.g. HOME=/root inherited from the
         # worker container) do not override it.
         env_items = {**dict(request.env), "HOME": str(_SANDBOX_HOME)}
-        # Forward host-shell auth env vars (CLAUDE_CODE_OAUTH_TOKEN etc.) that
-        # the worker inherited — the ephemeral CLI container needs them for
-        # non-file auth paths (Keychain-backed OAuth).
+        # Resolve provider-scoped auth env vars from credential authority. Do
+        # not fall back to host-shell env, which belongs to the launcher, not
+        # this sandbox session.
         from adapters.docker_runner import _cli_auth_env_forward
         for key, value in sorted(_cli_auth_env_forward(session_provider_slug).items()):
             if key in env_items:

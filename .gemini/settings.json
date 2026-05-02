@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "bash -c 'exec \"${GEMINI_PROJECT_DIR:-${CLAUDE_PROJECT_DIR:-$PWD}}/.gemini/hooks/preact-orient-friction.sh\"'",
-            "timeout": 6
+            "timeout": 6000
           }
         ]
       }

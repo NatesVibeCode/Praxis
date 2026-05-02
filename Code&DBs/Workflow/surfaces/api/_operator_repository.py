@@ -13,6 +13,10 @@ from typing import Any, Protocol
 
 import asyncpg
 
+from runtime.execution_packet_authority import (
+    PacketInspectionUnavailable,
+    resolve_packet_inspection,
+)
 from runtime.instance import (
     NativeWorkflowInstance,
     resolve_native_instance,
@@ -2447,57 +2451,21 @@ class NativeOperatorQueryFrontdoor:
                     error=exc,
                 ) from exc
 
-        def _packet_inspection_from_row_value(
-            row: Mapping[str, Any],
-        ) -> dict[str, Any] | None:
-            inspection = row.get("packet_inspection")
-            if not isinstance(inspection, Mapping):
-                return None
-            return dict(inspection)
-
-        inspect_execution_packets: Callable[..., Any] | None = None
-        inspect_execution_packets_imported = False
-
         packet_inspections: list[OperatorWorkflowRunPacketInspectionRecord] = []
         for row in rows:
-            packet_inspection_source = "missing"
-            packet_inspection = _packet_inspection_from_row_value(row)
             operator_frames = _normalize_operator_frame_payloads(row.get("operator_frames"))
-            if packet_inspection is not None:
-                packet_inspection_source = "materialized"
-            if packet_inspection is None:
-                packets = row.get("packets")
-                if isinstance(packets, str):
-                    try:
-                        packets = json.loads(packets)
-                    except (json.JSONDecodeError, ValueError, TypeError):
-                        packets = []
-                if not isinstance(packets, Sequence) or isinstance(packets, (str, bytes, bytearray)):
-                    packets = []
-                if packets:
-                    if not inspect_execution_packets_imported:
-                        inspect_execution_packets_imported = True
-                        try:
-                            from runtime.execution_packet_authority import inspect_execution_packets
-                        except Exception as import_exc:
-                            raise _packet_inspection_unavailable(
-                                "import",
-                                "workflow run manifest inspection helpers are unavailable",
-                                error=import_exc,
-                                workflow_run_id=str(row.get("run_id") or "").strip() or None,
-                            ) from import_exc
-                    assert inspect_execution_packets is not None
-                    try:
-                        packet_inspection = inspect_execution_packets(packets, run_row=dict(row))
-                    except Exception as derive_exc:
-                        raise _packet_inspection_unavailable(
-                            "derive",
-                            "workflow run manifest inspection derivation failed",
-                            error=derive_exc,
-                            workflow_run_id=str(row.get("run_id") or "").strip() or None,
-                        ) from derive_exc
-                    if packet_inspection is not None:
-                        packet_inspection_source = "derived"
+            try:
+                packet_inspection, packet_inspection_source = resolve_packet_inspection(
+                    run_row=dict(row),
+                    packets=row.get("packets"),
+                )
+            except PacketInspectionUnavailable as exc:
+                raise _packet_inspection_unavailable(
+                    exc.stage,
+                    str(exc),
+                    error=exc.error if isinstance(exc.error, Exception) else exc,
+                    workflow_run_id=str(row.get("run_id") or "").strip() or None,
+                ) from exc
             packet_inspections.append(
                 _workflow_run_packet_inspection_record_from_row(
                     row,

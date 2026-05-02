@@ -42,7 +42,7 @@ class _RouteKnobConn:
 @dataclass(frozen=True)
 class _Agent:
     max_output_tokens: int
-    model: str = "moonshotai/kimi-k2.6"
+    model: str = "canvasshotai/kimi-k2.6"
 
 
 def test_route_execution_knobs_read_task_route_max_tokens_and_reasoning() -> None:
@@ -50,7 +50,7 @@ def test_route_execution_knobs_read_task_route_max_tokens_and_reasoning() -> Non
         _RouteKnobConn(),
         route_task_type="build",
         provider_slug="openrouter",
-        model_slug="moonshotai/kimi-k2.6",
+        model_slug="canvasshotai/kimi-k2.6",
     )
 
     assert knobs == {
@@ -66,7 +66,7 @@ def test_agent_config_with_max_output_tokens_replaces_api_budget() -> None:
     )
 
     assert adjusted.max_output_tokens == 32768
-    assert adjusted.model == "moonshotai/kimi-k2.6"
+    assert adjusted.model == "canvasshotai/kimi-k2.6"
 
 
 def test_unresolved_auto_job_without_runtime_profile_fails_closed(monkeypatch) -> None:

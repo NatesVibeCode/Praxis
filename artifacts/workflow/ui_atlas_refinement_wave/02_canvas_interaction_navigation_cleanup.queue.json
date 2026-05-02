@@ -1,0 +1,101 @@
+{
+  "name": "Canvas Interaction And Navigation Cleanup",
+  "workflow_id": "ui_atlas_refinement_canvas_interaction_navigation_cleanup",
+  "phase": "execute",
+  "outcome_goal": "Canvas interaction model matches the agreed UX: single-click drawer, double-click full detail, standard zoom/pan, no chooser overlays on established nodes, native deletion, and Cost Summary removed from primary nav.",
+  "anti_requirements": [
+    "Do not remove the Cost Summary route if deep links still depend on it; only remove it from primary shell navigation.",
+    "Do not make single-click open the full node popout.",
+    "Do not add broad shell/navigation refactors outside Canvas and shell registry."
+  ],
+  "jobs": [
+    {
+      "label": "discover_canvas_interactions",
+      "agent": "auto/review",
+      "prompt": "Inspect CanvasBuildPage, reducer tests, dock authority tests, node chooser behavior, canvas event handlers, and shell surface registry. Classify dirty changes as keep, revert, or repair.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas",
+        "Code&DBs/Workflow/surfaces/app/src/shell"
+      ],
+      "write_scope": []
+    },
+    {
+      "label": "repair_click_and_detail_model",
+      "agent": "auto/build",
+      "depends_on": ["discover_canvas_interactions"],
+      "prompt": "Implement the interaction contract. SELECT_NODE selects only. Single-click opens context/action drawer. Double-click dispatches OPEN_POPOUT. Established/designated nodes must not auto-open chooser overlays.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildReducer.ts"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildReducer.ts"
+      ],
+      "verify_refs": [
+        "canvas-single-click-drawer",
+        "canvas-double-click-popout",
+        "canvas-established-node-no-chooser-overlay"
+      ]
+    },
+    {
+      "label": "repair_canvas_controls_and_deletion",
+      "agent": "auto/build",
+      "depends_on": ["repair_click_and_detail_model"],
+      "prompt": "Implement standard canvas controls and native deletion. Wheel/trackpad scroll zooms around pointer; drag empty canvas pans; selected node/edge can be removed from active workflow state through existing mutation authority.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildReducer.ts",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildPresenter.ts"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildReducer.ts",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildPresenter.ts"
+      ],
+      "verify_refs": [
+        "canvas-scroll-to-zoom",
+        "canvas-pan-to-move",
+        "canvas-delete-node-edge"
+      ]
+    },
+    {
+      "label": "remove_cost_summary_primary_nav",
+      "agent": "auto/build",
+      "depends_on": ["discover_canvas_interactions"],
+      "prompt": "Remove Cost Summary from primary shell tabs and global navigation. Keep secondary/deep-link route only if existing registry behavior requires it.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/shell/surfaceRegistry.tsx"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/shell/surfaceRegistry.tsx"
+      ],
+      "verify_refs": [
+        "shell-cost-summary-not-primary-nav"
+      ]
+    },
+    {
+      "label": "test_canvas_interaction_navigation_cleanup",
+      "agent": "auto/test",
+      "depends_on": [
+        "repair_canvas_controls_and_deletion",
+        "remove_cost_summary_primary_nav"
+      ],
+      "prompt": "Restore and expand interaction/navigation tests. Prove single-click drawer, double-click popout, no chooser overlay for established nodes, canvas zoom/pan, deletion mutation intent, and Cost Summary absence from primary nav.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas",
+        "Code&DBs/Workflow/surfaces/app/src/shell"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.dockAuthority.test.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildReducer.runView.test.ts",
+        "Code&DBs/Workflow/surfaces/app/src/shell/surfaceRegistry.test.tsx"
+      ],
+      "verify_refs": [
+        "npm-test-canvas-build-page",
+        "npm-test-canvas-reducer",
+        "npm-test-surface-registry"
+      ]
+    }
+  ]
+}

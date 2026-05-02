@@ -2,7 +2,7 @@
 
 Two code paths were flagged for bypassing registry-backed authority:
 
-1. ``surfaces/app/src/moon/MoonRunPanel.tsx`` hardcoded REST URL strings
+1. ``surfaces/app/src/canvas/CanvasRunPanel.tsx`` hardcoded REST URL strings
    (``/api/runs/recent``, ``/api/workflow-runs/{runId}/stream``,
    ``/api/runs/{runId}/jobs/{id}``) inline instead of citing a single
    path authority. That locked the UI to string literals that could
@@ -17,7 +17,7 @@ Two code paths were flagged for bypassing registry-backed authority:
 The fix collapses each concern onto one authority:
 
 * Run-API paths live in ``surfaces/app/src/dashboard/runApi.ts`` as
-  exported helper functions. ``MoonRunPanel.tsx`` only uses those
+  exported helper functions. ``CanvasRunPanel.tsx`` only uses those
   helpers; it does not reconstruct REST paths inline. The helpers file
   is the single authority and any future endpoint rename happens in
   exactly one place.
@@ -31,10 +31,10 @@ The fix collapses each concern onto one authority:
 
 Pins:
 
-1. MoonRunPanel.tsx contains no inline ``/api/runs`` or
+1. CanvasRunPanel.tsx contains no inline ``/api/runs`` or
    ``/api/workflow-runs`` literals — all path construction routes
    through ``runApi.ts``.
-2. runApi.ts exports the three path helpers MoonRunPanel depends on
+2. runApi.ts exports the three path helpers CanvasRunPanel depends on
    (``runsRecentPath``, ``workflowRunStreamPath``, ``runJobsPath``).
 3. integration_registry_sync.py does not inline integration ids —
    it delegates to the three authority sources.
@@ -55,30 +55,30 @@ def _read(rel: str) -> str:
     return (_REPO_ROOT / rel).read_text(encoding="utf-8")
 
 
-# -- 1. MoonRunPanel.tsx has no inline run-API path literals ------------
+# -- 1. CanvasRunPanel.tsx has no inline run-API path literals ------------
 
 
-def test_moon_run_panel_has_no_inline_run_api_path_literals() -> None:
+def test_canvas_run_panel_has_no_inline_run_api_path_literals() -> None:
     """The core BUG-05D46110 UI pin.
 
-    Before the fix, ``MoonRunPanel.tsx`` lines 77–163 embedded raw REST
+    Before the fix, ``CanvasRunPanel.tsx`` lines 77–163 embedded raw REST
     paths for the workflow-runs surface. Post-fix, those paths live in
-    ``runApi.ts`` and MoonRunPanel calls the helpers. This test greps
+    ``runApi.ts`` and CanvasRunPanel calls the helpers. This test greps
     for the offending-shape literal inside the panel and fails if it
     returns — the only acceptable run-API call in the panel file is via
     the helper functions.
     """
-    text = _read("surfaces/app/src/moon/MoonRunPanel.tsx")
+    text = _read("surfaces/app/src/canvas/CanvasRunPanel.tsx")
     forbidden = ["/api/runs/", "/api/workflow-runs/"]
     for needle in forbidden:
         assert needle not in text, (
-            f"MoonRunPanel.tsx reintroduced inline REST literal {needle!r}. "
+            f"CanvasRunPanel.tsx reintroduced inline REST literal {needle!r}. "
             f"Route it through surfaces/app/src/dashboard/runApi.ts helpers "
             f"(BUG-05D46110)."
         )
 
 
-# -- 2. runApi.ts exports the three helpers MoonRunPanel depends on ----
+# -- 2. runApi.ts exports the three helpers CanvasRunPanel depends on ----
 
 
 @pytest.mark.parametrize(
@@ -91,7 +91,7 @@ def test_moon_run_panel_has_no_inline_run_api_path_literals() -> None:
 )
 def test_run_api_exports_helper(helper_name: str) -> None:
     """The run-API authority module must export the helpers that
-    MoonRunPanel (and any future run-panel view) calls. If this fails,
+    CanvasRunPanel (and any future run-panel view) calls. If this fails,
     the single-source-of-truth contract for run-API paths is broken."""
     text = _read("surfaces/app/src/dashboard/runApi.ts")
     assert f"export function {helper_name}(" in text, (

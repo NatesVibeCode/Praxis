@@ -178,15 +178,6 @@ def _missing_packet_inspection_column_error(exc: Exception) -> bool:
     return "does not exist" in message or "undefined column" in message
 
 
-def _packet_inspection_from_row_value(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    if row is None:
-        return None
-    inspection = row.get("packet_inspection")
-    if not isinstance(inspection, Mapping):
-        return None
-    return dict(inspection)
-
-
 async def _fetch_run_row(
     conn: _Connection,
     *,
@@ -266,7 +257,7 @@ def _authority_binding_summary(raw: object) -> dict[str, Any] | None:
     """Compact projection of workflow_jobs.authority_binding for list views.
 
     Returns a small {bound, canonical_count, predecessor_count, blocked_compat_count,
-    redirected_count} dict for compact-idle Moon rendering. Full binding payload
+    redirected_count} dict for compact-idle Canvas rendering. Full binding payload
     is loadable via runtime.workflow.job_runtime_context.load_workflow_job_authority_binding
     when a caller (detail panel, agent context preview) needs the obligation
     summaries themselves.

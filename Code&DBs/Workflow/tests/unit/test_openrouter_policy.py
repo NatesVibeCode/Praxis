@@ -15,7 +15,7 @@ OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
 def _request(
     *,
-    model_slug: str = "moonshotai/kimi-k2.6",
+    model_slug: str = "canvasshotai/kimi-k2.6",
     extra_body: dict | None = None,
 ) -> LLMRequest:
     return LLMRequest(
@@ -79,13 +79,13 @@ def test_openrouter_runtime_requests_are_pinned_to_approved_endpoint(
     assert provider["require_parameters"] is True
     assert provider["data_collection"] == "deny"
     assert provider["zdr"] is True
-    assert "moonshotai" in provider["ignore"]
+    assert "canvasshotai" in provider["ignore"]
     assert "siliconflow" in provider["ignore"]
 
 
 def test_openrouter_runtime_rejects_blocked_endpoint_override() -> None:
     with pytest.raises(LLMClientError) as exc_info:
-        call_llm(_request(extra_body={"provider": {"order": ["moonshotai"]}}))
+        call_llm(_request(extra_body={"provider": {"order": ["canvasshotai"]}}))
 
     assert exc_info.value.reason_code == "openrouter_policy.blocked_provider_endpoint"
 
@@ -139,7 +139,7 @@ def test_http_transport_preserves_openrouter_provider_slug_for_policy(
     call_transport(
         "openai_chat_completions",
         "Reply with exactly: ok",
-        model="moonshotai/kimi-k2.6",
+        model="canvasshotai/kimi-k2.6",
         max_tokens=16,
         timeout=30,
         api_endpoint=OPENROUTER_ENDPOINT,

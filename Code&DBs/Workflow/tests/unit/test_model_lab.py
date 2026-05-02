@@ -159,7 +159,7 @@ def test_model_eval_openrouter_request_is_privacy_locked() -> None:
     assert provider["zdr"] is True
     assert provider["allow_fallbacks"] is False
     assert provider["require_parameters"] is True
-    assert "moonshot" in BLOCKED_PROVIDER_SLUGS
+    assert "canvasshot" in BLOCKED_PROVIDER_SLUGS
     assert "deepseek" in BLOCKED_PROVIDER_SLUGS
     assert body["max_completion_tokens"] == 200
     assert body["reasoning"] == {"effort": "low"}
@@ -404,8 +404,8 @@ def test_runner_uses_deterministic_seed() -> None:
 def test_runner_fails_closed_on_served_provider_mismatch(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     def fake_chat_completion(_request, *, timeout_seconds: int) -> dict:
         return {
-            "provider": "moonshot",
-            "model": "moonshotai/kimi-k2.6",
+            "provider": "canvasshot",
+            "model": "canvasshotai/kimi-k2.6",
             "choices": [{"message": {"content": json.dumps({"task_id": "x", "answer": "ok", "artifacts": []})}}],
             "usage": {"cost": 0},
         }
@@ -422,8 +422,8 @@ def test_runner_fails_closed_on_served_provider_mismatch(monkeypatch: pytest.Mon
         },
         model_config={
             "config_id": "kimi",
-            "model_slug": "moonshotai/kimi-k2.6",
-            "agent": "openrouter/moonshotai/kimi-k2.6",
+            "model_slug": "canvasshotai/kimi-k2.6",
+            "agent": "openrouter/canvasshotai/kimi-k2.6",
             "provider_order": ["parasail"],
         },
         prompt_variant={"prompt_variant_id": "contract_first"},

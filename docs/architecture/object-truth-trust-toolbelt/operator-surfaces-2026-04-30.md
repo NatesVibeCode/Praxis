@@ -38,7 +38,7 @@ The envelope deliberately distinguishes:
 - `empty`
 - `partial`
 
-This gives API, MCP, and Moon surfaces one consistent inspection shape without forcing each caller to compose raw records differently.
+This gives API, MCP, and Canvas surfaces one consistent inspection shape without forcing each caller to compose raw records differently.
 
 ## Implemented Views
 

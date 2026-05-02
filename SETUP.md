@@ -1,12 +1,12 @@
 # Praxis Engine Setup Guide
 
-Complete installation and configuration reference. What you're standing up: Postgres + pgvector as Praxis.db, the CQRS gateway and workflow runtime, the Moon dashboard, and the catalog-backed CLI / MCP / REST surfaces — all one repo package, one bootstrap. The platform-specific paths below are for debugging or intentional divergence from `./scripts/bootstrap`.
+Complete installation and configuration reference. What you're standing up: Postgres + pgvector as Praxis.db, the CQRS gateway and workflow runtime, the Canvas dashboard, and the catalog-backed CLI / MCP / REST surfaces — all one repo package, one bootstrap. The platform-specific paths below are for debugging or intentional divergence from `./scripts/bootstrap`.
 
 ## Prerequisites
 
 - **Python 3.14** — the native operator wrappers are pinned to 3.14. Earlier versions are not supported.
 - PostgreSQL 16+ with [pgvector](https://github.com/pgvector/pgvector) extension
-- Node.js 18+ (Moon dashboard UI)
+- Node.js 18+ (Canvas dashboard UI)
 - At least one LLM provider API key (Anthropic, OpenAI, Google, or DeepSeek)
 
 ## One-command bootstrap (recommended)

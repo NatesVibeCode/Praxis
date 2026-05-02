@@ -15,8 +15,8 @@
     "allow_fallbacks": false,
     "data_collection": "deny",
     "ignore": [
-      "moonshot",
-      "moonshotai",
+      "canvasshot",
+      "canvasshotai",
       "kimi",
       "deepseek",
       "deepseek-ai",

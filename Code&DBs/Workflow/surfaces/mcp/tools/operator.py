@@ -2459,11 +2459,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "focus": {
                         "type": "string",
-                        "description": "Optional text filter such as moon, dashboard, run, chat, gate, release, or navigation.",
+                        "description": "Optional text filter such as canvas, dashboard, run, chat, gate, release, or navigation.",
                     },
                     "surface_name": {
                         "type": "string",
-                        "description": "Optional exact surface id/name such as build, dashboard, chat, manifests, atlas, or moon.",
+                        "description": "Optional exact surface id/name such as build, dashboard, chat, manifests, atlas, or canvas.",
                     },
                     "limit": {
                         "type": "integer",
@@ -2478,7 +2478,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "when_not_to_use": "Do not use it for run-scoped execution topology or raw knowledge-graph traversal.",
                 "risks": {"default": "read"},
                 "examples": [
-                    {"title": "Read Moon UI graph", "input": {"surface_name": "build"}},
+                    {"title": "Read Canvas UI graph", "input": {"surface_name": "build"}},
                     {"title": "Find release controls", "input": {"focus": "release", "limit": 40}},
                 ],
             },

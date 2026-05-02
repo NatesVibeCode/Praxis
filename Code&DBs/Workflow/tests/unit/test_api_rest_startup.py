@@ -497,7 +497,7 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
                     "run_id": "",
                     "job_label": "",
                     "request_id": "req-123",
-                    "client_version": "moon-ui/1.2.3",
+                    "client_version": "canvas-ui/1.2.3",
                     "payload_size_bytes": 120,
                     "response_size_bytes": 240,
                     "prose_chars": 19,

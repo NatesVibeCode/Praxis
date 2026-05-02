@@ -175,7 +175,7 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "407_rename_agent_principals_to_agent_registry.sql" in filenames
     assert "408_register_workflow_solution_operations.sql" in filenames
     assert "409_agent_wake_dedup_event_id.sql" in filenames
-    assert filenames[-1] == "409_agent_wake_dedup_event_id.sql"
+    assert filenames[-1] == "421_agent_builder_authority.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:

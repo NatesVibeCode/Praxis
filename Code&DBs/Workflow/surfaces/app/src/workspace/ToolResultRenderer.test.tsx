@@ -2,7 +2,7 @@
  * Tests for diff_A_ToolResultRenderer.tsx
  *
  * Run from the surfaces/app project root:
- *   npx jest artifacts/moon_ui_phase1_2026041./ToolResultRenderer.test.tsx
+ *   npx jest artifacts/canvas_ui_phase1_2026041./ToolResultRenderer.test.tsx
  *
  * Dependencies assumed: @testing-library/react, @testing-library/jest-dom, jest
  */

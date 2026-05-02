@@ -1321,7 +1321,7 @@ def _catalog_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(_catalog_help_text() + "\n")
         return 2
     action = args[0]
-    surface_name = "moon"
+    surface_name = "canvas"
     include_disabled = False
     limit = 100
     as_json = False

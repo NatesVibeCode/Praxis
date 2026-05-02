@@ -1,23 +1,20 @@
 #!/usr/bin/env bash
-# praxis-up — single command to rehydrate Praxis containers with fresh
-# host-resolved provider auth and verify the worker's live CLI state.
+# praxis-up — single command to recreate Praxis containers with host-resolved
+# integration/provider env and verify control-plane liveness.
 #
 # Why this exists:
-#   Provider auth (CLAUDE_CODE_OAUTH_TOKEN, OPENROUTER_API_KEY, etc.) is
-#   resolved on the host, then bridged into long-lived containers at recreate
-#   time. For Claude on macOS specifically, the token lives in the
-#   "Claude Code-credentials" Keychain item as JSON and is exported by
-#   bin/praxis-compose-env as the bare CLAUDE_CODE_OAUTH_TOKEN string.
-#   docker-compose resolves env vars at recreate time from the calling shell,
-#   so the chain has always been:
+#   Integration/API env (OPENROUTER_API_KEY, FIREWORKS_API_KEY, etc.) is
+#   resolved on the host, then bridged into long-lived control containers at
+#   recreate time. docker-compose resolves env vars at recreate time from the
+#   calling shell, so the chain is:
 #
 #       eval "$(bin/praxis-compose-env)"   # keychain → shell exports
 #       docker compose up -d --force-recreate <services>
 #
-#   Operators kept forgetting one half or the other, leaving workers with
-#   stale empty tokens or legacy file mounts that no longer match the host
-#   platform. This script bundles both into one invocation and verifies the
-#   result via praxis_cli_auth_doctor inside the worker.
+#   Operators kept forgetting one half or the other, leaving containers with
+#   stale env. This script bundles both into one invocation. Provider CLI auth
+#   is no longer a worker-container health gate: provider-specific execution
+#   uses thin sandbox images plus DB-backed credential/catalog authority.
 #
 # Standing-order references:
 #   architecture-policy::auth::via-docker-creds-not-shell
@@ -26,11 +23,11 @@
 # Usage:
 #   scripts/praxis-up               # recreate agent-broker + api-server + worker + scheduler
 #   scripts/praxis-up <service>...  # recreate only the named services
-#   scripts/praxis-up --verify-only # skip recreate, just run auth_doctor
+#   scripts/praxis-up --verify-only # skip recreate, just check worker liveness
 #
 # Exit codes:
-#   0 — recreate succeeded AND auth_doctor reports all CLIs healthy
-#   1 — recreate succeeded but auth_doctor reports at least one unhealthy CLI
+#   0 — recreate succeeded AND liveness check passed
+#   1 — recreate succeeded but liveness verification failed
 #   2 — usage error
 #   3 — recreate or compose-env failed
 
@@ -56,7 +53,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       cat <<'USAGE'
-praxis-up — Keychain-rehydrate + compose recreate (one command).
+praxis-up — Keychain env hydrate + compose recreate (one command).
 
 Usage:
   scripts/praxis-up
@@ -66,13 +63,13 @@ Usage:
 Examples:
   scripts/praxis-up                           # default broker/API/worker/scheduler
   scripts/praxis-up workflow-worker           # just the worker
-  scripts/praxis-up --verify-only             # skip recreate, run auth_doctor
+  scripts/praxis-up --verify-only             # skip recreate, check worker liveness
 
 This is the right path after:
   - Docker Desktop / OrbStack restart
   - macOS reboot
-  - "claude login" or any host-side credential refresh
-  - Worker container appearing healthy in `docker ps` but failing auth probes
+  - Keychain-backed integration/provider env refresh
+  - Worker container appearing healthy in `docker ps` but failing liveness
 USAGE
       exit 0
       ;;
@@ -99,8 +96,10 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
     exit 3
   fi
 
-  # Pre-create the Claude credentials file path so docker-compose's bind-mount
-  # has a real file to mount. Otherwise (host file missing) Docker silently
+  # Pre-create the Claude credentials file path for control-plane services that
+  # still expose direct interactive agent sessions. The workflow worker does
+  # not mount provider CLI auth homes. Otherwise (host file missing) Docker
+  # silently
   # creates the path as a *directory* on host, the container then mounts a
   # directory at /root/.claude/.credentials.json, and the claude CLI's file-
   # auth fallback fails open with "loggedIn: false". Operator fix path is
@@ -156,72 +155,22 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
   fi
 fi
 
-# Run the auth doctor inside the worker — that's the container that
-# actually executes LLM jobs, so its auth state is the real authority.
+# The worker is control-plane only. Provider CLI auth lives in provider-family
+# thin images and credential authority, so worker health must not depend on
+# Claude/Codex/Gemini auth state.
 if [[ $VERIFY_ONLY -eq 0 ]] && ! service_selected workflow-worker; then
-  echo "→ skipping workflow-worker auth doctor (workflow-worker was not requested)"
+  echo "→ skipping workflow-worker liveness check (workflow-worker was not requested)"
   exit 0
 fi
 
-echo "→ running praxis_cli_auth_doctor inside the workflow-worker service"
-DOCTOR_OUT="$(
-  docker compose exec -T workflow-worker python3 - <<'PY'
-import json
-from surfaces.mcp.tools.provider_onboard import run_cli_auth_doctor
-result = run_cli_auth_doctor({})
-print(json.dumps({
-    "ok": result.get("ok"),
-    "summary": result.get("summary"),
-    "unhealthy_count": result.get("unhealthy_count", 0),
-    "reports": [
-        {
-            "provider": r["provider_slug"],
-            "auth_state": r["auth_state"],
-            "healthy": r["healthy"],
-            "summary": r.get("summary"),
-        }
-        for r in result.get("reports", [])
-    ],
-}, indent=2))
+echo "→ checking workflow-worker control-plane liveness"
+if ! docker compose exec -T workflow-worker python3 - <<'PY'
+from runtime.workflow import _worker_loop
+print("worker-control-plane-ok")
 PY
-)"
-
-echo "$DOCTOR_OUT"
-
-UNHEALTHY="$(echo "$DOCTOR_OUT" | python3 -c "
-import json, sys
-d = json.loads(sys.stdin.read())
-print(d.get('unhealthy_count', 1))
-")"
-
-OK="$(echo "$DOCTOR_OUT" | python3 -c "
-import json, sys
-d = json.loads(sys.stdin.read())
-print('1' if d.get('ok') is True else '0')
-")"
-
-if [[ "$OK" != "1" || "$UNHEALTHY" != "0" ]]; then
-  echo
-  echo "praxis-up: auth probe failed (ok=$OK unhealthy_count=$UNHEALTHY)."
-  echo "Inspect the reports above. A 'timeout' state usually means the worker"
-  echo "has stale auth hydration or an invalid legacy mount, while"
-  echo "'unauthenticated' means the host login or token source itself is bad."
+then
+  echo "praxis-up: workflow-worker liveness check failed." >&2
   exit 1
 fi
 
-# Auth probe passed — clear any open zero-token-silent-failure hits so the
-# anti-pattern detector reverses route demotions cleanly. Migration 334
-# installed the detector + hits log; the recurring scenario this closes is:
-# operator runs praxis-up to fix auth → routes that were auto-demoted while
-# auth was broken stay demoted forever unless something explicitly clears.
-# This is the explicit clear, gated on actually-passing the auth probe.
-echo "→ clearing any open zero-token silent-failure hits (auth probe passed)"
-docker compose exec -T workflow-worker python3 - <<'PY' || true
-from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
-from runtime.observability.zero_token_detector import clear_resolved_after_auth
-conn = SyncPostgresConnection(get_workflow_pool())
-cleared = clear_resolved_after_auth(conn)
-print(f"  cleared {cleared} open zero-token hit(s)")
-PY
-
-echo "✓ all CLI providers healthy."
+echo "✓ workflow-worker control plane healthy."

@@ -81,6 +81,15 @@ def _patch_task_profile_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(task_profiles, "_DB_TASK_TYPE_KEYWORDS", keywords)
 
 
+@pytest.fixture(autouse=True)
+def _patch_repo_policy_contract_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        _ctx_mod,
+        "get_repo_policy_contract",
+        lambda _conn, *, repo_root: None,
+    )
+
+
 class _FakeConn:
     def __init__(
         self,
@@ -106,11 +115,15 @@ class _FakeConn:
 
     def execute(self, query: str, *args):
         self.queries.append((query, args))
-        if "FROM compile_artifacts" in query:
+        if "FROM compile_artifacts" in query or "FROM materialize_artifacts" in query:
             artifact_kind = args[0]
             input_fingerprint = args[1]
             return [
-                row
+                {
+                    **row,
+                    "materialize_artifact_id": row.get("materialize_artifact_id")
+                    or row.get("compile_artifact_id"),
+                }
                 for row in self.compile_artifact_rows
                 if row["artifact_kind"] == artifact_kind and row["input_fingerprint"] == input_fingerprint
             ]
@@ -224,6 +237,12 @@ class _FakeConn:
         if "SELECT pg_notify" in query:
             return []
         return []
+
+    def fetchrow(self, query: str, *args):
+        self.queries.append((query, args))
+        if "FROM operator_repo_policy_contracts" in query:
+            return None
+        raise AssertionError(f"Unexpected fetchrow: {' '.join(query.split())}")
 
 
 def test_definition_version_for_hash_is_positive_int32_and_deterministic():
@@ -2998,7 +3017,7 @@ def test_submit_workflow_insert_keeps_integration_action_and_args(monkeypatch):
         if "INSERT INTO workflow_jobs" in query
     )
     assert "$18::jsonb, $19::jsonb" in insert_query
-    assert len(insert_args) == 21
+    assert len(insert_args) == 22
     assert insert_args[15] == "integration.example"
     assert insert_args[16] == "run"
     assert insert_args[17] == '{"mode": "fast"}'

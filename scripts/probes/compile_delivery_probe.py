@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic compile -> Moon delivery probe.
+"""Deterministic compile -> Canvas delivery probe.
 
 The default probe does not call a live LLM. It mounts the catalog-owned
 compile HTTP routes in-process, spoofs the inner compose output into a small
-workflow graph, then proves Moon chat can read and mutate that same durable
+workflow graph, then proves Canvas chat can read and mutate that same durable
 workflow through the shared workflow build authority.
 """
 from __future__ import annotations
@@ -550,7 +550,7 @@ def run_probe(*, mode: str = "deterministic") -> dict[str, Any]:
                 "handoff_context",
                 lambda: [
                     {
-                        "kind": "moon_context",
+                        "kind": "canvas_context",
                         "workflow_id": workflow_id,
                         "workflow_title": build.get("workflow", {}).get("name"),
                         "materialize_status": "ready",
@@ -559,7 +559,7 @@ def run_probe(*, mode: str = "deterministic") -> dict[str, Any]:
                         "graph_summary": graph_summary,
                     },
                     {
-                        "kind": "moon_materialize_handoff",
+                        "kind": "canvas_materialize_handoff",
                         "workflow_id": workflow_id,
                         "status": "ready",
                         "operation_receipt_id": materialize_receipt["receipt_id"],
@@ -580,36 +580,36 @@ def run_probe(*, mode: str = "deterministic") -> dict[str, Any]:
 
             def _chat_loop() -> dict[str, Any]:
                 get_result = chat_tools.execute_tool(
-                    "moon_get_build",
+                    "canvas_get_build",
                     {},
                     pg_conn=conn,
                     repo_root=str(REPO_ROOT),
                     selection_context=handoff_context,
                 )
                 if get_result.get("type") != "status":
-                    raise AssertionError(f"moon_get_build failed: {get_result}")
+                    raise AssertionError(f"canvas_get_build failed: {get_result}")
                 loaded = get_result["data"]
                 assistant_response = (
                     f"Loaded {loaded.get('node_count')} nodes for "
                     f"{loaded.get('name') or workflow_id}; I can edit the graph now."
                 )
                 mutate_result = chat_tools.execute_tool(
-                    "moon_mutate_field",
+                    "canvas_mutate_field",
                     {"subpath": "nodes/n1", "body": {"title": "Probe-modified"}},
                     pg_conn=conn,
                     repo_root=str(REPO_ROOT),
                     selection_context=handoff_context,
                 )
                 if mutate_result.get("type") != "status":
-                    raise AssertionError(f"moon_mutate_field failed: {mutate_result}")
+                    raise AssertionError(f"canvas_mutate_field failed: {mutate_result}")
                 return {
-                    "tools_called": ["moon_get_build", "moon_mutate_field"],
+                    "tools_called": ["canvas_get_build", "canvas_mutate_field"],
                     "assistant_response": assistant_response,
                     "receipt_ids": [
                         get_result["data"]["full_payload"]["operation_receipt"]["receipt_id"],
                         mutate_result["data"]["full_payload"]["operation_receipt"]["receipt_id"],
                     ],
-                    "moon_chat_response_summary": assistant_response,
+                    "canvas_chat_response_summary": assistant_response,
                 }
 
             chat_loop = _stage(stages, "chat_tool_loop", _chat_loop)
@@ -651,7 +651,7 @@ def run_probe(*, mode: str = "deterministic") -> dict[str, Any]:
                     },
                     "event_ids": event_ids,
                     "stages": stages,
-                    "moon_chat_response_summary": chat_loop["moon_chat_response_summary"],
+                    "canvas_chat_response_summary": chat_loop["canvas_chat_response_summary"],
                 },
                 "errors": [],
                 "warnings": warnings,

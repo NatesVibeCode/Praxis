@@ -208,8 +208,8 @@ _PUBLIC_FUNCTIONAL_AREAS: tuple[dict[str, str], ...] = (
         "summary": "Owns debate frames, debate metrics, and structured adversarial review workflows.",
     },
     {
-        "area_slug": "moon",
-        "title": "Moon UI and Visual DAG",
+        "area_slug": "canvas",
+        "title": "Canvas UI and Visual DAG",
         "summary": "Owns the React control plane, visual DAG authoring, and operator-facing workflow surfaces.",
     },
     {

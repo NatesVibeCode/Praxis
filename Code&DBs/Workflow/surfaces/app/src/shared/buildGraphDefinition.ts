@@ -215,7 +215,7 @@ export function resolveReleasePlanSource(payload: BuildPayload | null): ReleaseP
   const buildGraph = payload.build_graph ?? null;
   const compiledSpecProjection = payload.materialized_spec_projection?.materialized_spec ?? null;
   if (!definition && !buildGraph) return null;
-  const title = String(payload.workflow?.name || (definition as { title?: unknown })?.title || 'moon-workflow');
+  const title = String(payload.workflow?.name || (definition as { title?: unknown })?.title || 'canvas-workflow');
   return {
     ...(definition ? { definition } : {}),
     ...(buildGraph ? { buildGraph } : {}),

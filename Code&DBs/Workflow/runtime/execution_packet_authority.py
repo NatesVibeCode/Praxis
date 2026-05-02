@@ -307,27 +307,43 @@ def load_workflow_run_packet_inspection(
             return None, "missing"
         effective_run_row = dict(run_rows[0])
 
-    packet_rows = conn.execute(
-        """
-        SELECT payload
-          FROM execution_packets
-         WHERE run_id = $1
-         ORDER BY created_at ASC, execution_packet_id ASC
-        """,
-        run_id,
-    )
-    packets = [dict(row) for row in packet_rows or [] if isinstance(row, Mapping)]
+    try:
+        packet_rows = conn.execute(
+            """
+            SELECT COALESCE(
+                       jsonb_agg(payload ORDER BY created_at, execution_packet_id),
+                       '[]'::jsonb
+                   ) AS packets
+              FROM execution_packets
+             WHERE run_id = $1
+            """,
+            run_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - status surfaces report this as data quality.
+        raise PacketInspectionUnavailable(
+            "query",
+            "workflow run packet inspection query failed",
+            error=exc,
+        ) from exc
+    packet_rows = [dict(row) for row in packet_rows or [] if isinstance(row, Mapping)]
+    if len(packet_rows) == 1 and "packets" in packet_rows[0]:
+        packets: object = packet_rows[0].get("packets")
+    else:
+        packets = packet_rows
     inspection, source = resolve_packet_inspection(
         run_row=effective_run_row,
         packets=packets,
     )
     if persist_if_derived and source == "derived":
-        conn.execute(
-            "UPDATE workflow_runs SET packet_inspection = $2::jsonb WHERE run_id = $1",
-            run_id,
-            json.dumps(inspection, sort_keys=True, default=str),
-        )
-        source = "materialized_after_repair"
+        try:
+            conn.execute(
+                "UPDATE workflow_runs SET packet_inspection = $2::jsonb WHERE run_id = $1",
+                run_id,
+                json.dumps(inspection, sort_keys=True, default=str),
+            )
+            source = "materialized_after_repair"
+        except Exception:
+            source = "derived_persist_failed"
     return inspection, source
 
 

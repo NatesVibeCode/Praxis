@@ -311,6 +311,7 @@ def _compile_prose_inner(
     )
     provisional_jobs = _generate_jobs(
         materialized_prose, resolved_references,
+        conn=conn,
         route_hints=route_hints,
         route_hints_cache=_COMPILER_ROUTE_HINTS_CACHE,
     )
@@ -491,7 +492,7 @@ def _propagate_agent_bindings_to_phases(definition: dict[str, Any]) -> None:
     Bindings of kind='agent' carry their resolved target_ref (e.g.
     'task_type_routing:auto/review'); the consuming step's phase needs
     `agent_route` populated for the build to harden. This is normally
-    done by hand in the Moon UI; for the autonomous compile_finalize
+    done by hand in the Canvas UI; for the autonomous compile_finalize
     path we propagate explicitly.
     """
     ledger = definition.get("binding_ledger")

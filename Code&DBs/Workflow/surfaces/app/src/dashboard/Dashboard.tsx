@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { MoonWorkflowSilhouette } from './MoonWorkflowSilhouette';
+import { CanvasWorkflowSilhouette } from './CanvasWorkflowSilhouette';
 import { isAbortError } from '../shared/request';
 import {
   Button,
@@ -297,7 +297,7 @@ function WorkflowCard({
     <PanelCard
       eyebrow={
         <span className="wf-card__eyebrow-row">
-          <MoonWorkflowSilhouette
+          <CanvasWorkflowSilhouette
             nodeCount={silhouetteNodeCount}
             hasTrigger={hasTrigger}
             isCron={isCron}
@@ -334,9 +334,13 @@ function WorkflowCard({
   );
 }
 
+const SECTION_CAP = 4;
+
 function WorkflowSectionBlock({
   section,
   loading,
+  expanded = false,
+  onToggleExpand = () => {},
   onPrimaryAction,
   onEditWorkflow,
   onEditModel,
@@ -347,6 +351,8 @@ function WorkflowSectionBlock({
 }: {
   section: WorkflowSection;
   loading: boolean;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
   onPrimaryAction: () => void;
   onEditWorkflow: (id: string) => void;
   onEditModel: (id: string) => void;
@@ -355,6 +361,11 @@ function WorkflowSectionBlock({
   onDelete: (workflowId: string) => void;
   primaryActionLabel: string;
 }) {
+  const hasOverflow = section.count > SECTION_CAP;
+  const visible = hasOverflow && !expanded
+    ? section.workflows.slice(0, SECTION_CAP)
+    : section.workflows;
+
   return (
     <section className={`dash-section dash-section--${section.tone}`}>
       <header className="dash-section__bar">
@@ -365,18 +376,25 @@ function WorkflowSectionBlock({
       {loading && section.count === 0 ? (
         <div className="dash-section__loading">Refreshing…</div>
       ) : section.count > 0 ? (
-        <div className="dash-section__grid">
-          {section.workflows.map((workflow) => (
-            <WorkflowCard
-              key={workflow.id}
-              wf={workflow}
-              onEdit={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
-              onViewRun={() => workflow.latest_run?.run_id && onViewRun(workflow.latest_run.run_id)}
-              onRunNow={() => onRunNow(workflow.id)}
-              onDelete={() => onDelete(workflow.id)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="dash-section__grid">
+            {visible.map((workflow) => (
+              <WorkflowCard
+                key={workflow.id}
+                wf={workflow}
+                onEdit={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
+                onViewRun={() => workflow.latest_run?.run_id && onViewRun(workflow.latest_run.run_id)}
+                onRunNow={() => onRunNow(workflow.id)}
+                onDelete={() => onDelete(workflow.id)}
+              />
+            ))}
+          </div>
+          {hasOverflow && (
+            <button className="dash-section__toggle" onClick={onToggleExpand}>
+              {expanded ? 'Show fewer' : `Show all ${section.count}`}
+            </button>
+          )}
+        </>
       ) : (
         <EmptyStateExplainer
           title={section.emptyTitle}
@@ -402,6 +420,7 @@ export function Dashboard({
   const [instanceFiles, setInstanceFiles] = useState<Array<{ id: string; filename: string }>>([]);
   const [instanceFilesError, setInstanceFilesError] = useState<string | null>(null);
   const instanceFileRef = useRef<HTMLInputElement>(null);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const workflows = snapshot?.workflows ?? [];
   const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow] as const));
   const summary = snapshot?.summary ?? {
@@ -805,7 +824,7 @@ export function Dashboard({
                   <EmptyStateExplainer
                     title="No recent runs"
                     why="Trigger a workflow and the latest executions appear here with one-click inspection."
-                    actionLabel="Open Moon"
+                    actionLabel="Open Canvas"
                     onAction={onNewWorkflow}
                   />
                 )}

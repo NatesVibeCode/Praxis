@@ -76,14 +76,12 @@ def _circuit_breakers():
     try:
         return get_circuit_breakers()
     except OSError as exc:
-        logger.warning("circuit breaker gate unavailable: %s", exc)
-        return None
+        raise RuntimeError(f"circuit breaker gate unavailable: {exc}") from exc
     except RuntimeError as exc:
         message = str(exc)
         if "requires explicit WORKFLOW_DATABASE_URL Postgres authority" not in message:
             raise
-        logger.warning("circuit breaker gate unavailable: %s", message)
-        return None
+        raise RuntimeError(f"circuit breaker gate unavailable: {message}") from exc
 
 
 def _default_native_workspace_ref(

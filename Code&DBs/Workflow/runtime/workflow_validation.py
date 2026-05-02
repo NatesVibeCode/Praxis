@@ -504,12 +504,12 @@ def _preflight_provider_availability(
             if circuit_breakers is None:
                 warnings.append({
                     "kind": "provider_circuit_query_unavailable",
-                    "severity": "warning",
+                    "severity": "error",
                     "label": None,
                     "message": (
                         "could not load process-local circuit-breaker state; "
-                        "continued provider availability preflight using durable "
-                        "provider_usage and circuit-breaker authority only"
+                        "provider availability preflight fails closed because "
+                        "selected providers cannot be proven runnable"
                     ),
                 })
         except Exception as exc:

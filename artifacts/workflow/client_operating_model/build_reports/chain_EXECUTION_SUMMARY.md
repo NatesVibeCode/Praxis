@@ -46,7 +46,7 @@ Runtime blockers recorded:
   references, run receipts, heartbeat-derived pool health, audit events, and
   customer-safe observability promoted into DB-backed CQRS authority, MCP
   tools, migration registration, generated docs, and live gateway proof.
-- Phase 11: operator read-model substrate for census, object truth, identity/source authority, timelines, verifier results, drift, cartridge status, managed runtime, next safe actions, and Moon workflow-builder validation wired to the CQRS Client Operating Model authority.
+- Phase 11: operator read-model substrate for census, object truth, identity/source authority, timelines, verifier results, drift, cartridge status, managed runtime, next safe actions, and Canvas workflow-builder validation wired to the CQRS Client Operating Model authority.
 - Phase 12: read-only CQRS/MCP operator-view surface, live authority-domain registration, live operation registration, gateway execution readback, CLI metadata, migration registration, generated docs, and migration-authority refresh. Closed as the completed CQRS/MCP registration slice.
 - Phase 13: DB-backed operator-view snapshot storage, store/read CQRS operations, MCP tools, migration replay repair, and live HTTP GET/POST route proof.
 - Phase 1 CQRS follow-up: registered `client_system_discovery_census_record`,
@@ -282,7 +282,7 @@ Latest focused validation passed:
   and dispatch allowed.
 - Phase 11 backend Client Operating Model authority gate:
   `20 passed in 0.43s`
-- Phase 11 Moon workflow-builder authority gate: `3` files, `22` tests passed.
+- Phase 11 Canvas workflow-builder authority gate: `3` files, `22` tests passed.
 - Phase 11 frontend typecheck: passed.
 - Phase 11 live CQRS proof: `workflow_builder_validation.92bc255c06ef72fe4545`
   returned state `healthy`, validation `ok`, `0` errors, `0` warnings, `2`
@@ -327,7 +327,7 @@ Latest roadmap readback receipt: `ecf102b4-6ec9-4979-8d02-aff0633a6851`
 - Phase 10 is completed:
   `roadmap_item.object.truth.trust.toolbelt.authority.managed.runtime.compute.observability`
 - Phase 11 is completed:
-  `roadmap_item.object.truth.trust.toolbelt.authority.operator.inspection.moon.workflow.surfaces`
+  `roadmap_item.object.truth.trust.toolbelt.authority.operator.inspection.canvas.workflow.surfaces`
 - Phase 12 is completed: `roadmap_item.object.truth.trust.toolbelt.authority.object.truth.trust.toolbelt.authority.cqrs.persistence.operator.surface.wiring`
 - Phase 13 is completed: `roadmap_item.object.truth.trust.toolbelt.authority.phase.13.client.operating.model.projection.storage.and.http.route.verification`
 

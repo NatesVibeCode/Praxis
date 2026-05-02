@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Conversation } from '../workspace/useChat';
 import {
-  clearMoonChatHandoff,
-  getMoonChatHandoff,
-  moonChatSelectionContext,
-  subscribeMoonChatHandoff,
-  type MoonChatHandoff,
-} from '../moon/moonChatContext';
+  clearCanvasChatHandoff,
+  getCanvasChatHandoff,
+  canvasChatSelectionContext,
+  subscribeCanvasChatHandoff,
+  type CanvasChatHandoff,
+} from '../canvas/canvasChatContext';
 import { MarkdownRenderer } from '../workspace/MarkdownRenderer';
 import { ToolResultRenderer } from '../workspace/ToolResultRenderer';
 import './strategy-console.css';
@@ -177,7 +177,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const [conversationQuery, setConversationQuery] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<PendingChatFile[]>([]);
   const [dropActive, setDropActive] = useState(false);
-  const [moonHandoff, setMoonHandoff] = useState<MoonChatHandoff | null>(null);
+  const [canvasHandoff, setCanvasHandoff] = useState<CanvasChatHandoff | null>(null);
   const [routeCandidates, setRouteCandidates] = useState<ChatRouteCandidate[]>([]);
   const [candidateSetHash, setCandidateSetHash] = useState<string | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<ChatRouteCandidate | null>(null);
@@ -238,13 +238,13 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
 
   useEffect(() => {
     if (stage === 'icon') return;
-    const applyHandoff = (event: MoonChatHandoff | null) => {
+    const applyHandoff = (event: CanvasChatHandoff | null) => {
       if (!event) return;
       setThreadsOpen(false);
-      setMoonHandoff(event);
+      setCanvasHandoff(event);
     };
-    applyHandoff(getMoonChatHandoff());
-    return subscribeMoonChatHandoff(applyHandoff);
+    applyHandoff(getCanvasChatHandoff());
+    return subscribeCanvasChatHandoff(applyHandoff);
   }, [stage]);
 
   useEffect(() => {
@@ -326,13 +326,13 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     setInput('');
     setAttachedFiles([]);
     setThreadsOpen(false);
-    // Splice the active Moon workflow + selection state into selection_context
+    // Splice the active Canvas workflow + selection state into selection_context
     // when the user has the canvas open. Tools default-target it, so the user
     // can ask "what's in this workflow" or "add a Slack node here" without
     // naming the workflow id explicitly.
-    const moonCtx = moonChatSelectionContext();
-    const mergedSelection = moonCtx.length || attachmentContext.length
-      ? [...moonCtx, ...attachmentContext]
+    const canvasCtx = canvasChatSelectionContext();
+    const mergedSelection = canvasCtx.length || attachmentContext.length
+      ? [...canvasCtx, ...attachmentContext]
       : undefined;
     const dispatchRoute = selectedRoute ?? defaultRoute;
     const explicitRouteSelected = Boolean(selectedRoute);
@@ -367,41 +367,41 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
 
   useEffect(() => {
     if (stage === 'icon' || loading) return;
-    if (!moonHandoff || moonHandoff.phase !== 'chat_fallback' || !moonHandoff.prompt) return;
-    if (processedHandoffIdsRef.current.has(moonHandoff.handoff_id)) return;
-    processedHandoffIdsRef.current.add(moonHandoff.handoff_id);
+    if (!canvasHandoff || canvasHandoff.phase !== 'chat_fallback' || !canvasHandoff.prompt) return;
+    if (processedHandoffIdsRef.current.has(canvasHandoff.handoff_id)) return;
+    processedHandoffIdsRef.current.add(canvasHandoff.handoff_id);
 
     let cancelled = false;
     const runHandoff = async () => {
       let targetConversationId = conversationId;
       if (!targetConversationId) {
         targetConversationId = await createConversation(
-          moonHandoff.workflow_id ? `Materialize recovery ${moonHandoff.workflow_id}` : 'Materialize recovery',
+          canvasHandoff.workflow_id ? `Materialize recovery ${canvasHandoff.workflow_id}` : 'Materialize recovery',
         );
         if (!targetConversationId || cancelled) return;
       }
-      const moonCtx = moonChatSelectionContext();
+      const canvasCtx = canvasChatSelectionContext();
       const selectionContext = [
-        ...moonCtx,
+        ...canvasCtx,
         {
-          kind: 'moon_materialize_handoff',
-          workflow_id: moonHandoff.workflow_id,
-          workflow_name: moonHandoff.workflow_name ?? null,
-          phase: moonHandoff.phase,
-          status_message: moonHandoff.status_message,
-          operation_receipt_id: moonHandoff.operation_receipt_id ?? null,
-          correlation_id: moonHandoff.correlation_id ?? null,
-          graph_summary: moonHandoff.graph_summary ?? null,
+          kind: 'canvas_materialize_handoff',
+          workflow_id: canvasHandoff.workflow_id,
+          workflow_name: canvasHandoff.workflow_name ?? null,
+          phase: canvasHandoff.phase,
+          status_message: canvasHandoff.status_message,
+          operation_receipt_id: canvasHandoff.operation_receipt_id ?? null,
+          correlation_id: canvasHandoff.correlation_id ?? null,
+          graph_summary: canvasHandoff.graph_summary ?? null,
         },
       ];
       void sendMessage(
-        moonHandoff.prompt || '',
+        canvasHandoff.prompt || '',
         selectionContext,
         targetConversationId,
         { timeoutMs: 240000 },
       );
-      clearMoonChatHandoff();
-      setMoonHandoff(moonHandoff);
+      clearCanvasChatHandoff();
+      setCanvasHandoff(canvasHandoff);
       void refreshConversations();
     };
 
@@ -409,7 +409,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     return () => {
       cancelled = true;
     };
-  }, [conversationId, createConversation, loading, moonHandoff, refreshConversations, sendMessage, stage]);
+  }, [conversationId, createConversation, loading, canvasHandoff, refreshConversations, sendMessage, stage]);
 
   const handleStartNew = useCallback(async () => {
     const id = await createConversation();
@@ -527,11 +527,11 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
       )}
 
       <div className="strategy-console__stream" role="log" aria-live="polite" aria-relevant="additions">
-        {moonHandoff && (
-          <div className={`strategy-console__handoff strategy-console__handoff--${moonHandoff.phase}`}>
+        {canvasHandoff && (
+          <div className={`strategy-console__handoff strategy-console__handoff--${canvasHandoff.phase}`}>
             <span className="strategy-console__handoff-kicker">Materialize handoff</span>
-            <strong>{moonHandoff.phase === 'chat_fallback' ? 'Recovery is running' : moonHandoff.phase === 'ready' ? 'Materialize ready' : moonHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
-            <p>{moonHandoff.status_message}</p>
+            <strong>{canvasHandoff.phase === 'chat_fallback' ? 'Recovery is running' : canvasHandoff.phase === 'ready' ? 'Materialize ready' : canvasHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
+            <p>{canvasHandoff.status_message}</p>
           </div>
         )}
 

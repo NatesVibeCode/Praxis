@@ -226,7 +226,7 @@ Public route count: `8`. All route count: `464`.
 | `POST` | `/api/models/run` | `internal` | - | models_run_post |
 | `GET` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_get |
 | `POST` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_post |
-| `GET` | `/api/moon/pickers/{rest_of_path:path}` | `internal` | - | moon_pickers_get |
+| `GET` | `/api/canvas/pickers/{rest_of_path:path}` | `internal` | - | canvas_pickers_get |
 | `GET` | `/api/object-truth/compare-versions` | `internal` | `operations` | object_truth_compare_versions |
 | `GET` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_read |
 | `POST` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_record |

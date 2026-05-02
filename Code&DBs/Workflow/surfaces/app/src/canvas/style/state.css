@@ -1,0 +1,148 @@
+/* Canvas Build — interaction state, focus, and accessibility surface */
+
+@layer canvas-state {
+  /* Canonical state hooks */
+  .is-active .canvas-graph-node,
+  .is-active.canvas-graph-node {
+    outline: 1px solid rgba(210, 153, 34, 0.5);
+    box-shadow:
+      0 0 0 3px rgba(210, 153, 34, 0.08),
+      var(--canvas-shadow-line-mid);
+    outline-offset: 2px;
+    z-index: 3;
+  }
+
+  .is-selected .canvas-graph-node,
+  .is-selected.canvas-graph-node,
+  .canvas-graph-node--selected {
+    border-color: rgba(243, 238, 228, 0.34);
+    outline: 1px solid rgba(243, 238, 228, 0.16);
+    outline-offset: 2px;
+    box-shadow:
+      0 0 0 3px rgba(243, 238, 228, 0.018),
+      0 10px 24px rgba(0, 0, 0, 0.24);
+    z-index: 3;
+  }
+
+  .is-drag-over .canvas-graph-node,
+  .canvas-graph-node--drag-over {
+    outline: 2px dashed var(--canvas-accent);
+    box-shadow: var(--canvas-shadow-line-mid);
+    outline-offset: 4px;
+  }
+
+  .is-selected .canvas-graph-gate,
+  .is-selected.canvas-graph-gate,
+  .canvas-graph-gate--selected {
+    z-index: 5;
+  }
+
+  .is-selected .canvas-chain__ring,
+  .is-selected.canvas-chain__ring,
+  .canvas-chain__ring--selected {
+    box-shadow: var(--canvas-shadow-ring-accent-mid);
+  }
+
+  .is-loading .canvas-spinner,
+  .canvas-run__status-badge[aria-busy='true'] {
+    animation-play-state: running;
+  }
+
+  .is-disabled,
+  .is-disabled .canvas-dock-form__btn,
+  .is-disabled .canvas-release__dispatch-btn,
+  .is-disabled .canvas-compose__btn {
+    opacity: 0.45;
+    pointer-events: none;
+    cursor: not-allowed;
+  }
+
+  .is-dragging .canvas-chain--dragging,
+  .canvas-chain--dragging,
+  .is-dragging[data-drag-source] {
+    cursor: grabbing;
+  }
+
+  .is-dragging .canvas-chain__append,
+  .canvas-chain--dragging .canvas-chain__append {
+    opacity: 0.6;
+  }
+
+  .is-dragging .canvas-chain__append--drag-over,
+  .canvas-chain__append--drag-over {
+    opacity: 1;
+    border-color: var(--canvas-accent);
+    box-shadow: var(--canvas-shadow-accent-line-soft);
+  }
+
+  .is-dragging .canvas-chain__ring,
+  .canvas-drop-hover .canvas-chain__ring {
+    box-shadow: var(--canvas-shadow-ring-accent-mid);
+    transform: scale(1.15);
+    transition: transform 100ms ease, box-shadow 100ms ease;
+  }
+
+  .is-dragging .canvas-chain__segment,
+  .canvas-drop-hover-edge .canvas-chain__segment {
+    background: var(--canvas-accent);
+    height: 3px;
+  }
+
+  .is-dragging .canvas-chain__append,
+  .canvas-drop-hover-append {
+    opacity: 1;
+    border-color: var(--canvas-accent);
+    box-shadow: var(--canvas-shadow-accent-line-mid);
+    transform: scale(1.2);
+    transition: transform 100ms ease;
+  }
+
+  .canvas-run--loading,
+  .is-loading .canvas-run__job-output {
+    opacity: 0.85;
+  }
+
+  .canvas-compose__btn,
+  .canvas-dock-form__btn,
+  .canvas-release__dispatch-btn,
+  .canvas-release__run-link,
+  .canvas-action__surface-note,
+  .canvas-edge-popout__apply,
+  .canvas-graph-gate__action {
+    transition-timing-function: ease;
+    transition-duration: 180ms;
+    transition-property: border-color, color, background-color, transform, box-shadow;
+  }
+
+  /* Shared primitives for future class-level reuse */
+  .is-active,
+  .is-selected,
+  .is-loading,
+  .is-disabled,
+  .is-dragging {
+    --canvas-state-active: 1;
+  }
+
+  .canvas-graph-gate:focus-visible,
+  .canvas-dock-form__input:focus-visible,
+  .canvas-compose textarea:focus-visible,
+  .canvas-dock-form__select:focus-visible,
+  button:focus-visible,
+  .canvas-chain__append:focus-visible {
+    outline: 2px solid var(--canvas-accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms;
+      animation-delay: 0ms;
+      animation-iteration-count: 1;
+      transition-duration: 1ms;
+      transition-delay: 0ms;
+      scroll-behavior: auto;
+    }
+  }
+}

@@ -172,8 +172,8 @@ Coordination: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_r
   spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-manual-circuit-breaker.queue.json`  
   bugs: BUG-2D9A6DED  
 
-- `P1` `authority_bug_system` `WIRING` **Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty**  
-  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moon-generated-nodes.queue.json`  
+- `P1` `authority_bug_system` `WIRING` **Canvas generated nodes leave data dictionary, bindings, imports, and DB object contracts empty**  
+  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvas-generated-nodes.queue.json`  
   bugs: BUG-5DD67C2A  
 
 - `P1` `authority_bug_system` `RUNTIME` **Native cutover can leave workspace and database authority split across old mount and local runtime**  
@@ -319,12 +319,12 @@ Coordination: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_r
   spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-cqrs-provider-capability.queue.json`  
   bugs: BUG-EBE27625  
 
-- `P1` `workflow_runtime` `RUNTIME` **Moon dev API crash loop blocks compose engine handoff**  
-  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-dev-api.queue.json`  
+- `P1` `workflow_runtime` `RUNTIME` **Canvas dev API crash loop blocks compose engine handoff**  
+  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-dev-api.queue.json`  
   bugs: BUG-3CC5D3AD  
 
-- `P1` `workflow_runtime` `WIRING` **Moon generated workflow has no release gates or typed gate contracts**  
-  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-generated-workflow.queue.json`  
+- `P1` `workflow_runtime` `WIRING` **Canvas generated workflow has no release gates or typed gate contracts**  
+  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-generated-workflow.queue.json`  
   bugs: BUG-2729F8B7  
 
 - `P1` `workflow_runtime` `RUNTIME` **praxis_submit_code_change marks empty-workspace baseline drift as out_of_scope, blocking seal even when only declared wr…**  
@@ -591,12 +591,12 @@ Coordination: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_r
   spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-live-runtime-still.queue.json`  
   bugs: BUG-7B683C6C  
 
-- `P2` `authority_bug_system` `OTHER` **Moon node state styling uses filled alarm circles as primary graph language**  
-  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moon-node-state.queue.json`  
+- `P2` `authority_bug_system` `OTHER` **Canvas node state styling uses filled alarm circles as primary graph language**  
+  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvas-node-state.queue.json`  
   bugs: BUG-6F69A6DF  
 
-- `P2` `authority_bug_system` `TEST` **MoonBuildPage dock authority tests fail because node-popout is absent**  
-  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority.queue.json`  
+- `P2` `authority_bug_system` `TEST` **CanvasBuildPage dock authority tests fail because node-popout is absent**  
+  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority.queue.json`  
   bugs: BUG-8742C732  
 
 - `P2` `authority_bug_system` `RUNTIME` **Operator console misses assistant reply when SSE stream tears down before final frame**  
@@ -611,8 +611,8 @@ Coordination: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_r
   spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-operator-write-commit-succeeds.queue.json`  
   bugs: BUG-507AB442  
 
-- `P2` `authority_bug_system` `OTHER` **persona_profiles is empty — Moon compose path has no response_contract / system_prompt to teach the LLM the build shape**  
-  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-moon.queue.json`  
+- `P2` `authority_bug_system` `OTHER` **persona_profiles is empty — Canvas compose path has no response_contract / system_prompt to teach the LLM the build shape**  
+  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-canvas.queue.json`  
   bugs: BUG-B7A075E2  
 
 - `P2` `authority_bug_system` `WIRING` **Policy verification scripts and policy artifact renderer hardcode praxis-api-server-1 instead of resolving api-server se…**  
@@ -830,12 +830,12 @@ Coordination: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_r
   spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-manual-migration-promotion.queue.json`  
   bugs: BUG-DF4CAB94  
 
-- `P2` `workflow_runtime` `WIRING` **Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled**  
-  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-compose-creates.queue.json`  
+- `P2` `workflow_runtime` `WIRING` **Canvas compose creates local drafts with no trigger or jobs, leaving release dispatch disabled**  
+  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-compose-creates.queue.json`  
   bugs: BUG-8DADDD64  
 
-- `P2` `workflow_runtime` `RUNTIME` **Moon trigger picker hangs while loading available triggers because catalog API does not return**  
-  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-moon-trigger-picker.queue.json`  
+- `P2` `workflow_runtime` `RUNTIME` **Canvas trigger picker hangs while loading available triggers because catalog API does not return**  
+  spec: `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/wave-1-evidence-normalization-workflow-runtime-title-canvas-trigger-picker.queue.json`  
   bugs: BUG-5861F7F9  
 
 - `P2` `workflow_runtime` `RUNTIME` **praxis_ingest accepts conversation memory that recall cannot retrieve**  

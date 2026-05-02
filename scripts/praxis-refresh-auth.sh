@@ -2,10 +2,9 @@
 # Deprecated compatibility wrapper.
 #
 # The canonical resolver is scripts/praxis-up, which:
-#   1. exports host-resolved auth (including Claude's macOS Keychain token)
+#   1. exports host-resolved integration/provider env
 #   2. recreates the long-lived control containers
-#   3. re-runs praxis_cli_auth_doctor in the worker and fails closed if auth
-#      is still unhealthy
+#   3. verifies workflow-worker control-plane liveness
 #
 # Keep this wrapper so older operator notes and agent memories still land on
 # the one current path instead of preserving parallel auth-fix rituals.

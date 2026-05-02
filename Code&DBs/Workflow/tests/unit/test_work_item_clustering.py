@@ -31,12 +31,12 @@ def test_bug_list_payload_clusters_by_explicit_context_before_single_rows() -> N
             "tags": ["cluster:provider-route-health"],
         },
         {
-            "bug_id": "BUG-MOON-1",
-            "title": "Moon release tray hides stale trigger",
+            "bug_id": "BUG-CANVAS-1",
+            "title": "Canvas release tray hides stale trigger",
             "status": "OPEN",
             "severity": "P2",
             "category": "VERIFY",
-            "source_issue_id": "issue.moon-release",
+            "source_issue_id": "issue.canvas-release",
         },
     ]
 

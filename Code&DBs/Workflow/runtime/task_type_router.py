@@ -603,6 +603,8 @@ class TaskTypeRouter:
                 transport_type=adapter_type,
             )
         except ReasoningEffortRoutingError as exc:
+            if exc.reason_code == "reasoning_effort.matrix_missing":
+                return {}
             raise TaskRouteAuthorityError(
                 f"reasoning effort authority rejected {provider_slug}/{model_slug}: {exc}",
                 reason_code=f"provider_authority.{exc.reason_code}",

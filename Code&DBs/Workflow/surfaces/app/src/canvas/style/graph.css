@@ -1,0 +1,837 @@
+@layer canvas-graph {
+/* === Graph Canvas === */
+.canvas-graph {
+  position: relative;
+  overflow: visible;
+  padding: var(--canvas-canvas-pad);
+}
+
+.canvas-graph-node {
+  position: absolute;
+  box-sizing: border-box;
+  width: var(--canvas-node-instance-width, var(--canvas-node-width));
+  height: var(--canvas-node-instance-height, var(--canvas-node-height));
+  border-radius: 5px;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.018)),
+    rgba(10, 10, 10, 0.88);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.028),
+    0 6px 0 rgba(0, 0, 0, 0.14),
+    0 14px 26px rgba(0, 0, 0, 0.2);
+  color: var(--canvas-fg);
+  filter: none;
+  isolation: isolate;
+  overflow: hidden;
+  z-index: 3;
+  transition: transform 180ms steps(3, end), border-color 180ms ease, box-shadow 180ms ease, opacity 240ms ease;
+}
+
+.canvas-graph-node--shape-checkpoint,
+.canvas-graph-node--shape-decision {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 16px 20px;
+}
+
+.canvas-graph-node--shape-checkpoint {
+  border-radius: 999px;
+}
+
+.canvas-graph-node--shape-decision {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  padding-inline: 30px;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(210, 153, 34, 0.2), transparent 24%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.012)),
+    rgba(11, 11, 11, 0.94);
+  border: 1px solid rgba(210, 153, 34, 0.26);
+  box-shadow:
+    0 0 0 1px rgba(210, 153, 34, 0.06),
+    0 16px 34px rgba(0, 0, 0, 0.32);
+}
+
+.canvas-graph-node--shape-note {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  padding: 13px 14px;
+  border-radius: 5px;
+}
+
+.canvas-graph-node:hover {
+  transform: translateY(-1px);
+  border-color: rgba(243, 238, 228, 0.24);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    3px 8px 0 rgba(0, 0, 0, 0.18),
+    0 16px 30px rgba(0, 0, 0, 0.24);
+  z-index: 3;
+}
+
+.canvas-graph-node:focus-visible {
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 4px;
+  z-index: 5;
+}
+
+.canvas-graph-node--selected {
+  border-color: rgba(243, 238, 228, 0.38);
+  box-shadow:
+    0 0 0 2px rgba(243, 238, 228, 0.1),
+    0 0 0 5px rgba(243, 238, 228, 0.018),
+    3px 8px 0 rgba(0, 0, 0, 0.18),
+    0 14px 26px rgba(0, 0, 0, 0.24);
+  z-index: 5;
+}
+
+.canvas-graph-node--drag-over {
+  outline: 2px dashed var(--canvas-accent);
+  outline-offset: 4px;
+  box-shadow: var(--canvas-shadow-line-mid);
+}
+
+.canvas-graph-node__index {
+  display: grid;
+  grid-template-rows: 10px 1fr;
+  align-items: center;
+  justify-items: center;
+  min-height: 52px;
+  padding: 5px 0;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.028);
+  box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.canvas-graph-node--shape-checkpoint .canvas-graph-node__index,
+.canvas-graph-node--shape-decision .canvas-graph-node__index,
+.canvas-graph-node--shape-note .canvas-graph-node__index {
+  display: none;
+}
+
+.canvas-graph-node__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--canvas-fg-muted);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-graph-node__index-number {
+  font-family: var(--canvas-font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--canvas-fg);
+  letter-spacing: 0;
+}
+
+.canvas-graph-node__body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.canvas-graph-node--shape-checkpoint .canvas-graph-node__body,
+.canvas-graph-node--shape-decision .canvas-graph-node__body {
+  justify-items: center;
+}
+
+.canvas-graph-node__title,
+.canvas-graph-node__summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.canvas-graph-node__title {
+  -webkit-line-clamp: 2;
+  min-height: 0;
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.25;
+  color: var(--canvas-fg);
+}
+
+.canvas-graph-node--shape-checkpoint .canvas-graph-node__title,
+.canvas-graph-node--shape-decision .canvas-graph-node__title {
+  font-size: 12px;
+  line-height: 1.18;
+  max-width: 11ch;
+}
+
+.canvas-graph-node--shape-decision .canvas-graph-node__title {
+  font-weight: 820;
+  text-shadow: 0 0 14px rgba(246, 241, 232, 0.18);
+}
+
+.canvas-graph-node__decision-agent {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  max-width: 12ch;
+  margin-top: 4px;
+  font-family: var(--canvas-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--canvas-palette-amber);
+  letter-spacing: 0.04em;
+  opacity: 0.9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-graph-node--shape-note .canvas-graph-node__title {
+  font-family: var(--canvas-font-mono);
+  font-size: 12px;
+  line-height: 1.28;
+  text-transform: uppercase;
+}
+
+.canvas-graph-node__summary {
+  -webkit-line-clamp: 2;
+  min-height: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.32;
+  color: var(--canvas-fg-muted);
+}
+
+.canvas-graph-node__terminal {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 2px 7px;
+  min-width: 0;
+  padding-top: 2px;
+  font-family: var(--canvas-font-mono);
+  line-height: 1.2;
+}
+
+.canvas-graph-node--shape-checkpoint .canvas-graph-node__terminal,
+.canvas-graph-node--shape-decision .canvas-graph-node__terminal {
+  display: none;
+}
+
+.canvas-graph-node--shape-note .canvas-graph-node__terminal {
+  grid-template-columns: 48px minmax(0, 1fr);
+  padding-top: 6px;
+}
+
+.canvas-graph-node__terminal-label {
+  color: rgba(232, 232, 232, 0.42);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.canvas-graph-node__terminal-value {
+  color: rgba(232, 232, 232, 0.82);
+  font-size: 10px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-graph-node__terminal-value--cadence {
+  color: var(--canvas-palette-amber);
+}
+
+.canvas-graph-node--state-decided-grounded .canvas-graph-node__terminal-value--cadence,
+.canvas-graph-node--state-run-succeeded .canvas-graph-node__terminal-value--cadence {
+  color: var(--canvas-palette-success-bright);
+}
+
+.canvas-graph-node--state-blocked .canvas-graph-node__terminal-value--cadence,
+.canvas-graph-node--state-run-failed .canvas-graph-node__terminal-value--cadence {
+  color: var(--canvas-state-error);
+}
+
+.canvas-graph-node__dots {
+  display: inline-flex;
+  width: 1.5em;
+  margin-left: 2px;
+  color: currentColor;
+  white-space: nowrap;
+}
+
+.canvas-graph-node__dots span {
+  opacity: 0.22;
+  animation: canvas-dot-cadence 1.6s steps(1, end) infinite;
+}
+
+.canvas-graph-node__dots span:nth-child(2) { animation-delay: 0.22s; }
+.canvas-graph-node__dots span:nth-child(3) { animation-delay: 0.44s; }
+
+.canvas-graph-node--state-decided-grounded .canvas-graph-node__status-dot,
+.canvas-graph-node--state-run-succeeded .canvas-graph-node__status-dot {
+  background: var(--canvas-palette-success);
+  box-shadow: 0 0 10px rgba(63, 185, 80, 0.32);
+}
+
+.canvas-graph-node--state-decided-incomplete .canvas-graph-node__status-dot,
+.canvas-graph-node--state-run-active .canvas-graph-node__status-dot,
+.canvas-graph-node--state-active-unresolved .canvas-graph-node__status-dot {
+  background: var(--canvas-palette-amber);
+  box-shadow: 0 0 10px rgba(210, 153, 34, 0.3);
+}
+
+.canvas-graph-node--state-blocked .canvas-graph-node__status-dot,
+.canvas-graph-node--state-run-failed .canvas-graph-node__status-dot {
+  background: var(--canvas-state-error);
+  box-shadow: 0 0 10px rgba(248, 81, 73, 0.34);
+}
+
+.canvas-graph-node--state-blocked,
+.canvas-graph-node--state-run-failed {
+  border-color: rgba(248, 81, 73, 0.24);
+}
+
+@keyframes canvas-dot-cadence {
+  0%, 100% { opacity: 0.18; }
+  35% { opacity: 0.95; }
+  70% { opacity: 0.42; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-graph-node,
+  .canvas-graph-node__dots span {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   Node multiplicity: loop (sequential stack) + parallel (spatial stack)
+   --------------------------------------------------------------------------
+   A single spec node renders as a stack of three rings when it runs N times.
+   Loop offsets the back rings diagonally (up-right) — reads as time, a
+   receding deck. Parallel offsets them vertically — reads as space, a column
+   of workers running side-by-side. The main ring is untouched; the stack is
+   pure visual metadata layered behind it so hover/click/drag still target
+   the real node box.
+   ========================================================================== */
+
+.canvas-graph-node__stack-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.25px solid var(--canvas-fg-muted);
+  background: transparent;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.6;
+  transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 220ms ease;
+}
+
+/* Loop: diagonal offset, decreasing opacity = receding-in-time metaphor */
+.canvas-graph-node--stack-loop .canvas-graph-node__stack-ring--mid {
+  transform: translate(7px, -7px) scale(0.96);
+  opacity: 0.4;
+}
+.canvas-graph-node--stack-loop .canvas-graph-node__stack-ring--back {
+  transform: translate(13px, -13px) scale(0.92);
+  opacity: 0.22;
+}
+
+/* Parallel: vertical offset = workers stacked in space */
+.canvas-graph-node--stack-parallel .canvas-graph-node__stack-ring--mid {
+  transform: translate(0, 8px) scale(0.97);
+  opacity: 0.42;
+}
+.canvas-graph-node--stack-parallel .canvas-graph-node__stack-ring--back {
+  transform: translate(0, 16px) scale(0.94);
+  opacity: 0.24;
+}
+
+/* Hover bumps the stack slightly outward to signal the node is one of many */
+.canvas-graph-node--stack:hover .canvas-graph-node__stack-ring--mid {
+  opacity: 0.55;
+}
+.canvas-graph-node--stack:hover .canvas-graph-node__stack-ring--back {
+  opacity: 0.35;
+}
+
+/* Count pill — iteration count or "N\u00d7" placeholder. Upper-right corner
+   of the node box. Sized small, just readable. Background is a soft glass
+   bubble so the count reads cleanly over any ring state. */
+.canvas-graph-node__count-pill {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--canvas-glass-border);
+  background: var(--canvas-glass-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--canvas-fg);
+  pointer-events: none;
+  z-index: 3;
+  box-shadow: var(--canvas-shadow-line-soft);
+}
+
+/* Family reads through shape, dash, glyph, and label. Color is reserved for
+   state only: pending, passed, blocked. */
+.canvas-graph-gate--family-after_failure .canvas-graph-gate__trigger {
+  border-style: double;
+}
+.canvas-graph-gate--family-after_any .canvas-graph-gate__trigger {
+  border-style: dotted;
+}
+.canvas-graph-gate--family-conditional .canvas-graph-gate__trigger {
+  border-style: dashed;
+}
+
+/* ==========================================================================
+   Node-scoped branch pod — the N-way fanout affordance
+   --------------------------------------------------------------------------
+   A single `+` pod pinned below each step. Click it, pick a
+   family, and a new downstream node + edge is created with that guard. The
+   edge pod still handles *editing* an existing gate; this pod is the only
+   affordance for *adding another branch*.
+   ========================================================================== */
+
+.canvas-node-branch-pod {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.canvas-node-branch-pod__trigger {
+  width: 24px;
+  height: 22px;
+  border-radius: 3px;
+  border: 1px dashed var(--canvas-glass-border);
+  background: rgba(8, 8, 8, 0.88);
+  color: var(--canvas-fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.38;
+  transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease, background 180ms ease, color 180ms ease;
+}
+
+.canvas-graph-node:hover ~ .canvas-node-branch-pod .canvas-node-branch-pod__trigger,
+.canvas-node-branch-pod:hover .canvas-node-branch-pod__trigger,
+.canvas-node-branch-pod--open .canvas-node-branch-pod__trigger {
+  opacity: 1;
+  border-color: var(--canvas-accent);
+  background: var(--canvas-bg, #080808);
+  color: var(--canvas-fg);
+  transform: translateY(1px);
+}
+
+.canvas-node-branch-pod__menu {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+  width: 240px;
+  padding: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--canvas-white-a12);
+  background: linear-gradient(180deg, var(--canvas-shell-glass), var(--canvas-surface-dense));
+  box-shadow: var(--canvas-shadow-line-mid), var(--canvas-shadow-float-soft);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: grid;
+  gap: 4px;
+  z-index: 10;
+}
+
+.canvas-node-branch-pod__title {
+  padding: 4px 6px 8px;
+  font-size: var(--canvas-font-size-xs);
+  font-weight: 700;
+  color: var(--canvas-fg-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--canvas-white-a08);
+  margin-bottom: 4px;
+}
+
+.canvas-node-branch-pod__option {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--canvas-fg);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.canvas-node-branch-pod__option:hover {
+  background: var(--canvas-white-a03);
+  border-color: var(--canvas-accent-a30);
+  transform: translateX(2px);
+}
+
+.canvas-node-branch-pod__option-label {
+  font-size: var(--canvas-font-size-sm);
+  font-weight: 600;
+}
+
+.canvas-node-branch-pod__option-hint {
+  font-size: 11px;
+  color: var(--canvas-fg-muted);
+  line-height: 1.4;
+}
+
+/* Family accents on the menu options use shape, not extra color semantics. */
+.canvas-node-branch-pod__option--after_success { border-left: 2px solid var(--canvas-fg); padding-left: 8px; }
+.canvas-node-branch-pod__option--after_failure { border-left: 3px double var(--canvas-fg); padding-left: 7px; }
+.canvas-node-branch-pod__option--conditional   { border-left: 2px dashed var(--canvas-fg); padding-left: 8px; }
+.canvas-node-branch-pod__option--after_any     { border-left: 2px dotted var(--canvas-fg-muted); padding-left: 8px; }
+
+.canvas-graph-gate {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  z-index: 6;
+}
+
+.canvas-graph-gate--selected {
+  z-index: 8;
+}
+
+.canvas-graph-gate__trigger {
+  min-width: 64px;
+  min-height: 30px;
+  width: 64px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--canvas-glass-border);
+  background: var(--canvas-glass-bg);
+  backdrop-filter: blur(8px);
+  color: var(--canvas-fg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: var(--canvas-shadow-line-soft);
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+}
+
+.canvas-graph-gate__trigger-label {
+  display: inline;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-graph-gate__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: currentColor;
+}
+
+.canvas-graph-gate__icon--plus {
+  color: var(--canvas-color-white);
+  font-weight: 800;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 1px var(--canvas-color-black);
+  text-shadow: var(--canvas-plus-text-glow);
+}
+
+.canvas-graph-gate__trigger:hover,
+.canvas-graph-gate--selected .canvas-graph-gate__trigger,
+.canvas-graph-gate--drag-over .canvas-graph-gate__trigger {
+  transform: translateY(-1px);
+  border-color: rgba(243, 238, 228, 0.38);
+  box-shadow: var(--canvas-shadow-line-mid);
+  z-index: 5;
+}
+
+.canvas-graph-gate--selected .canvas-graph-gate__trigger {
+  background: rgba(243, 238, 228, 0.055);
+  outline: 1px solid rgba(243, 238, 228, 0.16);
+  outline-offset: 2px;
+}
+
+.canvas-graph-gate--empty .canvas-graph-gate__trigger {
+  min-width: 30px;
+  width: 30px;
+  padding: 0;
+  border-style: dashed;
+  color: var(--canvas-glow);
+  opacity: 0.15;
+}
+
+.canvas-graph-gate--empty .canvas-graph-gate__trigger-label {
+  display: none;
+}
+
+.canvas-graph-gate--empty .canvas-graph-gate__trigger:hover,
+.canvas-graph-gate--empty.canvas-graph-gate--selected .canvas-graph-gate__trigger,
+.canvas-graph-gate--empty.canvas-graph-gate--drag-over .canvas-graph-gate__trigger {
+  opacity: 1;
+}
+
+.canvas-graph-gate--pending .canvas-graph-gate__trigger {
+  border-color: rgba(210, 153, 34, 0.42);
+  color: var(--canvas-state-warning);
+  background: rgba(210, 153, 34, 0.08);
+}
+
+.canvas-graph-gate--passed .canvas-graph-gate__trigger {
+  border-color: rgba(63, 185, 80, 0.36);
+  color: var(--canvas-state-success);
+  background: rgba(63, 185, 80, 0.07);
+}
+
+.canvas-graph-gate--blocked .canvas-graph-gate__trigger {
+  border-color: rgba(248, 81, 73, 0.42);
+  color: var(--canvas-state-error);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.canvas-graph-gate__card {
+  width: min(280px, 40vw);
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--canvas-white-a12);
+  background: linear-gradient(180deg, var(--canvas-shell-glass), var(--canvas-surface-dense));
+  box-shadow: var(--canvas-shadow-line-mid), var(--canvas-shadow-float-soft);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.canvas-graph-gate__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.canvas-graph-gate .canvas-surface-badge {
+  border-color: var(--canvas-white-a12);
+  color: var(--canvas-fg);
+  box-shadow: none;
+}
+
+.canvas-graph-gate .canvas-surface-badge--pending {
+  border-color: rgba(210, 153, 34, 0.36);
+  color: var(--canvas-state-warning);
+  background: rgba(210, 153, 34, 0.08);
+}
+
+.canvas-graph-gate .canvas-surface-badge--passed {
+  border-color: rgba(63, 185, 80, 0.32);
+  color: var(--canvas-state-success);
+  background: rgba(63, 185, 80, 0.08);
+}
+
+.canvas-graph-gate .canvas-surface-badge--blocked {
+  border-color: rgba(248, 81, 73, 0.38);
+  color: var(--canvas-state-error);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.canvas-graph-gate__route-label {
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--canvas-white-a12);
+  color: var(--canvas-fg);
+  font-family: var(--canvas-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+}
+
+.canvas-graph-gate__title {
+  color: var(--canvas-fg);
+  font-size: var(--canvas-font-size-md);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.canvas-graph-gate__path {
+  color: var(--canvas-fg-muted);
+  font-size: var(--canvas-font-size-xs);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.canvas-graph-gate__summary,
+.canvas-graph-gate__note {
+  color: var(--canvas-fg-muted);
+  font-size: var(--canvas-font-size-xs);
+  line-height: 1.5;
+}
+
+.canvas-graph-gate__actions {
+  display: grid;
+  gap: 8px;
+}
+
+.canvas-graph-gate__action,
+.canvas-graph-gate__detail-button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--canvas-white-a12);
+  background: var(--canvas-white-a03);
+  color: var(--canvas-fg);
+  font: inherit;
+  font-size: var(--canvas-font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.canvas-graph-gate__action:hover,
+.canvas-graph-gate__detail-button:hover {
+  transform: translateY(-1px);
+  border-color: var(--canvas-accent-a34);
+  background: var(--canvas-accent-a08);
+  color: var(--canvas-fg);
+}
+
+.canvas-graph-gate__action--primary,
+.canvas-graph-gate__detail-button {
+  border-color: var(--canvas-accent-a30);
+}
+
+.canvas-graph-gate__action--wide {
+  width: 100%;
+}
+
+.canvas-graph-append {
+  position: absolute;
+  width: var(--canvas-graph-append-size);
+  height: var(--canvas-graph-append-size);
+  border-radius: 50%;
+  border: 1px dashed var(--canvas-glass-border);
+  background: var(--canvas-white-a02);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.22;
+  box-shadow: var(--canvas-shadow-line-soft);
+  transition: all 200ms ease;
+}
+
+.canvas-graph-append:hover {
+  opacity: 1;
+  border-color: var(--canvas-accent);
+  background: var(--canvas-white-a05);
+  box-shadow: var(--canvas-shadow-line-mid);
+  transform: scale(1.1);
+}
+
+.canvas-graph-append--drag-over {
+  opacity: 1;
+  border-color: var(--canvas-accent);
+  background: var(--canvas-accent-a10);
+  box-shadow: var(--canvas-shadow-accent-line-soft);
+}
+
+.canvas-graph-append__plus {
+  font-size: 22px;
+  color: var(--canvas-color-white);
+  font-weight: 800;
+  paint-order: stroke fill;
+  line-height: 1;
+  -webkit-text-stroke: 1px var(--canvas-color-black);
+  text-shadow: var(--canvas-plus-text-glow-strong);
+}
+
+@media (max-width: 760px) {
+  .canvas-body {
+    padding: 14px 14px 0;
+    gap: 14px;
+  }
+
+  .canvas-start {
+    padding: 14px 12px 20px;
+  }
+
+  .canvas-center--empty .canvas-start {
+    top: 14px;
+    width: calc(100% - 16px);
+  }
+
+  .canvas-compose {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .canvas-center {
+    padding-inline: 8px;
+  }
+
+  .canvas-graph-gate__card {
+    width: min(232px, calc(100vw - 32px));
+  }
+
+  .canvas-center--empty {
+    padding-top: 14px;
+  }
+
+  .canvas-halfcanvas--left,
+  .canvas-halfcanvas--right {
+    padding-block: 24px;
+  }
+
+  .canvas-dock-overlay {
+    min-width: 280px;
+  }
+
+  .canvas-http-request__preset-grid {
+    grid-template-columns: 1fr;
+  }
+}
+}

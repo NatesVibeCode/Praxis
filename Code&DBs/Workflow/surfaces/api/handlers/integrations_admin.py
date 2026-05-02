@@ -2,7 +2,7 @@
 
 Exposes the previously orphaned runtime primitives (``upsert_integration``,
 ``keychain_set``, ``resolve_token``, ``sync_registries``) as HTTP routes so
-Moon and other clients can add a third-party integration without authoring a
+Canvas and other clients can add a third-party integration without authoring a
 TOML manifest or running the builder workflow.
 """
 

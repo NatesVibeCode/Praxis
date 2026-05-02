@@ -56,17 +56,21 @@ def _test_cli_auth_catalog() -> sandbox_runtime._CliAuthCatalog:
             sandbox_runtime._CliAuthMountSpec(
                 provider_slug="openai",
                 host_relative_path=".codex/auth.json",
-                container_path=sandbox_runtime._OPENAI_AUTH_SEED_PATH,
+                container_path=f"{CONTAINER_HOME}/.codex/auth.json",
+                container_seed_path=OPENAI_AUTH_SEED_PATH,
             ),
             sandbox_runtime._CliAuthMountSpec(
                 provider_slug="anthropic",
-                host_relative_path=".claude.json",
-                container_path=f"{CONTAINER_HOME}/.claude.json",
+                host_relative_path=".claude/.credentials.json",
+                container_path=f"{CONTAINER_HOME}/.claude/.credentials.json",
             ),
             sandbox_runtime._CliAuthMountSpec(
                 provider_slug="google",
                 host_relative_path=".gemini/oauth_creds.json",
                 container_path=f"{CONTAINER_HOME}/.gemini/oauth_creds.json",
+                container_seed_path=str(
+                    container_auth_seed_dir() / "google-gemini-oauth_creds.json"
+                ),
             ),
         ),
         home_tmpfs_dirs=(".claude", ".codex", ".gemini"),
@@ -172,18 +176,21 @@ def test_cli_auth_volume_flags_use_explicit_host_home(monkeypatch) -> None:
         "isfile",
         lambda path: path in {
             f"{AUTH_HOME}/.codex/auth.json",
-            f"{AUTH_HOME}/.claude.json",
+            f"{AUTH_HOME}/.claude/.credentials.json",
             f"{AUTH_HOME}/.gemini/oauth_creds.json",
         },
     )
 
     flags = sandbox_runtime._cli_auth_volume_flags()
 
-    assert f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro" in flags
-    assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" not in flags
+    assert f"{AUTH_HOME}/.codex/auth.json:{OPENAI_AUTH_SEED_PATH}:ro" in flags
+    assert (
+        f"{AUTH_HOME}/.claude/.credentials.json:"
+        f"{CONTAINER_HOME}/.claude/.credentials.json:ro"
+    ) in flags
     assert (
         f"{AUTH_HOME}/.gemini/oauth_creds.json:"
-        f"{sandbox_runtime._GOOGLE_AUTH_SEED_PATH}:ro"
+        f"{container_auth_seed_dir() / 'google-gemini-oauth_creds.json'}:ro"
     ) in flags
 
 
@@ -196,18 +203,21 @@ def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypat
         "isfile",
         lambda path: path in {
             f"{AUTH_HOME}/.codex/auth.json",
-            f"{AUTH_HOME}/.claude.json",
+            f"{AUTH_HOME}/.claude/.credentials.json",
             f"{AUTH_HOME}/.gemini/oauth_creds.json",
         },
     )
 
     flags = sandbox_runtime._cli_auth_volume_flags()
 
-    assert f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro" in flags
-    assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" not in flags
+    assert f"{AUTH_HOME}/.codex/auth.json:{OPENAI_AUTH_SEED_PATH}:ro" in flags
+    assert (
+        f"{AUTH_HOME}/.claude/.credentials.json:"
+        f"{CONTAINER_HOME}/.claude/.credentials.json:ro"
+    ) in flags
     assert (
         f"{AUTH_HOME}/.gemini/oauth_creds.json:"
-        f"{sandbox_runtime._GOOGLE_AUTH_SEED_PATH}:ro"
+        f"{container_auth_seed_dir() / 'google-gemini-oauth_creds.json'}:ro"
     ) in flags
 
 
@@ -225,7 +235,7 @@ def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) ->
         "isfile",
         lambda path: path in {
             f"{AUTH_HOME}/.codex/auth.json",
-            f"{AUTH_HOME}/.claude.json",
+            f"{AUTH_HOME}/.claude/.credentials.json",
             f"{AUTH_HOME}/.gemini/oauth_creds.json",
         },
     )
@@ -235,12 +245,20 @@ def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) ->
 
     assert openai_flags == [
         "-v",
-        f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro",
+        f"{AUTH_HOME}/.codex/auth.json:{OPENAI_AUTH_SEED_PATH}:ro",
     ]
-    assert anthropic_flags == []
+    assert anthropic_flags == [
+        "-v",
+        (
+            f"{AUTH_HOME}/.claude/.credentials.json:"
+            f"{CONTAINER_HOME}/.claude/.credentials.json:ro"
+        ),
+    ]
 
 
-def test_google_cli_auth_uses_seed_copy_bootstrap() -> None:
+def test_google_cli_auth_uses_seed_copy_bootstrap(monkeypatch) -> None:
+    _patch_cli_auth_catalog(monkeypatch)
+
     assert sandbox_runtime._cli_requires_root_auth_bootstrap(
         provider_slug="google",
         auth_mount_policy="provider_scoped",
@@ -249,7 +267,7 @@ def test_google_cli_auth_uses_seed_copy_bootstrap() -> None:
 
     command = sandbox_runtime._cli_auth_bootstrap_command("gemini --version", provider_slug="google")
 
-    assert sandbox_runtime._GOOGLE_AUTH_SEED_PATH in command
+    assert str(container_auth_seed_dir() / "google-gemini-oauth_creds.json") in command
     assert f"{CONTAINER_HOME}/.gemini/oauth_creds.json" in command
     assert "setpriv --reuid=1100 --regid=1100" in command
 
@@ -1380,7 +1398,7 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
         "runtime.sandbox_runtime.os.path.isfile",
         lambda path: path in {
             f"{AUTH_HOME}/.codex/auth.json",
-            f"{AUTH_HOME}/.claude.json",
+            f"{AUTH_HOME}/.claude/.credentials.json",
             f"{AUTH_HOME}/.gemini/oauth_creds.json",
         },
     )
@@ -1435,13 +1453,16 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
 
         run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
         joined_cmd = " ".join(run_cmd)
-        assert f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro" in joined_cmd
-        assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" not in joined_cmd
+        assert f"{AUTH_HOME}/.codex/auth.json:{OPENAI_AUTH_SEED_PATH}:ro" in joined_cmd
+        assert f"{AUTH_HOME}/.claude/.credentials.json:{CONTAINER_HOME}/.claude/.credentials.json:ro" not in joined_cmd
         assert (
             f"{AUTH_HOME}/.gemini/oauth_creds.json:"
             f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
         ) not in joined_cmd
-        assert f"{AUTH_HOME}/.gemini/oauth_creds.json:{sandbox_runtime._GOOGLE_AUTH_SEED_PATH}:ro" not in joined_cmd
+        assert (
+            f"{AUTH_HOME}/.gemini/oauth_creds.json:"
+            f"{container_auth_seed_dir() / 'google-gemini-oauth_creds.json'}:ro"
+        ) not in joined_cmd
     finally:
         provider.destroy_session(session, "completed")
 

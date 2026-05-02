@@ -10,7 +10,7 @@
   "artifacts": [],
   "next_actions": [
     "**Drift Corrections:** Resolved issues with `PrimitiveUsagePanel`, `Dashboard`, primitives index, and app-shell CSS.",
-    "**Infrastructure & Sync:** Consolidated session work covering model eval, the primitives catalog, Moon UI, and synthetic data (including migrations 385\u2013392). Updated roadmap priorities and migration drift.",
+    "**Infrastructure & Sync:** Consolidated session work covering model eval, the primitives catalog, Canvas UI, and synthetic data (including migrations 385\u2013392). Updated roadmap priorities and migration drift.",
     "**Tooling:** Regenerated pre-commit hooks, cursor rules, and migration sequences.",
     "**Bug Triage:** Processed a major triage session resulting in 11 fixes, 13 closures, and 19 deferrals, alongside updates to verifier infrastructure.",
     "**Authority Refresh:** An `authority_memory_refresh` process ran today (May 1, 14:53)."

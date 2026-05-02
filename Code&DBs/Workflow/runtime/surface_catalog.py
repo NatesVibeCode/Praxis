@@ -29,7 +29,7 @@ def _raise_storage_boundary(exc: PostgresWriteError) -> None:
 def list_surface_catalog_items(
     conn: Any,
     *,
-    surface_name: str = "moon",
+    surface_name: str = "canvas",
     include_disabled: bool = False,
     limit: int = 100,
 ) -> list[dict[str, Any]]:

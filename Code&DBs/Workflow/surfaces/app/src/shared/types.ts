@@ -38,6 +38,23 @@ export type BuildNodeIntegrationArgs =
   | WorkflowInvokeIntegrationArgs
   | Record<string, unknown>;
 
+export interface AgentRegistryRow {
+  agent_principal_ref: string;
+  title: string;
+  description?: string;
+  icon_hint?: string;
+  visibility?: 'visible' | 'hidden' | 'archived';
+  builder_category?: 'builtin' | 'custom';
+  status: 'active' | 'paused' | 'killed';
+  capability_refs?: string[];
+  allowed_tools?: string[];
+  write_envelope?: string[];
+  system_prompt_template?: string;
+  network_policy?: string;
+  model_preference?: string;
+  reasoning_effort?: string;
+}
+
 export interface BuildGraphPayload {
   graph_id?: string;
   definition_revision?: string;

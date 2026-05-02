@@ -116,7 +116,7 @@ The current toolbelt has useful object-truth primitives, but the full client ope
 8. Add simulation runtime and verifier records.
 9. Add live sandbox promotion and drift feedback.
 10. Package portable cartridges and optional managed runtime controls.
-11. Expose operator/Moon inspection surfaces.
+11. Expose operator/Canvas inspection surfaces.
 
 ## Validation Path
 

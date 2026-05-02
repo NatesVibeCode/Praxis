@@ -45,8 +45,8 @@ export interface UiActionUndoWorkflowBuildMutation {
   body: Record<string, unknown>;
 }
 
-export interface UiActionUndoMoonPayloadRestore {
-  kind: 'moon.payload.restore';
+export interface UiActionUndoCanvasPayloadRestore {
+  kind: 'canvas.payload.restore';
   scope: string;
   payload: unknown;
 }
@@ -59,7 +59,7 @@ export interface UiActionUndoSequence {
 export type UiActionUndoDescriptor =
   | UiActionUndoWorldProposal
   | UiActionUndoWorkflowBuildMutation
-  | UiActionUndoMoonPayloadRestore
+  | UiActionUndoCanvasPayloadRestore
   | UiActionUndoSequence;
 
 export interface ReversibleUiAction {
@@ -94,7 +94,7 @@ let actionSequence = 0;
 
 function defaultCategory(surface: string): UiActionCategory {
   if (surface === 'grid') return 'layout';
-  if (surface === 'moon') return 'graph';
+  if (surface === 'canvas') return 'graph';
   return 'control';
 }
 
@@ -143,13 +143,13 @@ function normalizeUndoDescriptor(value: unknown): UiActionUndoDescriptor | null 
       body: body as Record<string, unknown>,
     };
   }
-  if (descriptor.kind === 'moon.payload.restore') {
+  if (descriptor.kind === 'canvas.payload.restore') {
     const scope = typeof (value as { scope?: unknown }).scope === 'string'
       ? (value as { scope: string }).scope.trim()
       : '';
     if (!scope) return null;
     return {
-      kind: 'moon.payload.restore',
+      kind: 'canvas.payload.restore',
       scope,
       payload: (value as { payload?: unknown }).payload,
     };

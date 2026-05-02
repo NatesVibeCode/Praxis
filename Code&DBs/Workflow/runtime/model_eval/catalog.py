@@ -75,14 +75,14 @@ DEFAULT_MODEL_CONFIGS: tuple[dict[str, Any], ...] = (
     },
     {
         "config_id": "kimi-k2.6-parasail-int4",
-        "model_slug": "moonshotai/kimi-k2.6",
-        "agent": "openrouter/moonshotai/kimi-k2.6",
+        "model_slug": "canvasshotai/kimi-k2.6",
+        "agent": "openrouter/canvasshotai/kimi-k2.6",
         "provider_order": ["parasail/int4"],
         "temperature": 0.1,
         "supports_seed": True,
         "endpoint_source": OPENROUTER_ZDR_ENDPOINT_SOURCE,
         "families": ["docs", "csv", "tool", "swarm", "workflow"],
-        "notes": ["Kimi model admitted only through a non-Moonshot ZDR endpoint."],
+        "notes": ["Kimi model admitted only through a non-Canvasshot ZDR endpoint."],
     },
     {
         "config_id": "qwen3-coder-deepinfra-turbo",

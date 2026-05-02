@@ -2,7 +2,7 @@
   "name": "Name Cleanup TypeScript Config",
   "phase": "W",
   "queue_id": "name_cleanup_ts_20260413",
-  "outcome_goal": "All DAG/Dag naming removed from TypeScript, CSS, and config files. RunDAG -> RunGraph, DagLayout -> GraphLayout, moon-dag -> moon-graph, dag-app -> praxis-app.",
+  "outcome_goal": "All DAG/Dag naming removed from TypeScript, CSS, and config files. RunDAG -> RunGraph, DagLayout -> GraphLayout, canvas-dag -> canvas-graph, dag-app -> praxis-app.",
   "anti_requirements": ["Do NOT modify Python files — those are handled by Run 1"],
   "jobs": [
     {
@@ -21,34 +21,34 @@
       "agent": "openai/gpt-5.4-mini",
       "task_type": "refactor",
       "description": "Rename DagLayout interface -> GraphLayout",
-      "outcome_goal": "No DagLayout references remain in moon/ directory",
-      "prompt": "Rename the `DagLayout` interface to `GraphLayout` in the Moon UI:\n\n1. In `Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts`:\n   - Line 28: change comment from '--- DAG layout ---' to '--- Graph layout ---'\n   - Line 41: rename `interface DagLayout` to `interface GraphLayout`\n   - Update ALL references to `DagLayout` in the same file (return types, variable types, etc.)\n\n2. In `Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx`:\n   - Update the import from `DagLayout` to `GraphLayout`\n   - Update any type annotations using `DagLayout`\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
+      "outcome_goal": "No DagLayout references remain in canvas/ directory",
+      "prompt": "Rename the `DagLayout` interface to `GraphLayout` in the Canvas UI:\n\n1. In `Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildPresenter.ts`:\n   - Line 28: change comment from '--- DAG layout ---' to '--- Graph layout ---'\n   - Line 41: rename `interface DagLayout` to `interface GraphLayout`\n   - Update ALL references to `DagLayout` in the same file (return types, variable types, etc.)\n\n2. In `Code&DBs/Workflow/surfaces/app/src/canvas/CanvasEdges.tsx`:\n   - Update the import from `DagLayout` to `GraphLayout`\n   - Update any type annotations using `DagLayout`\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
       "read": [
-        "Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts",
-        "Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildPresenter.ts",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasEdges.tsx"
       ],
       "write": [
-        "Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts",
-        "Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvasBuildPresenter.ts",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasEdges.tsx"
       ],
-      "verify_command": "! grep -q 'DagLayout' Code\\&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts && ! grep -q 'DagLayout' Code\\&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
+      "verify_command": "! grep -q 'DagLayout' Code\\&DBs/Workflow/surfaces/app/src/canvas/canvasBuildPresenter.ts && ! grep -q 'DagLayout' Code\\&DBs/Workflow/surfaces/app/src/canvas/CanvasEdges.tsx"
     },
     {
-      "label": "rename_moon_graph_css",
+      "label": "rename_canvas_graph_css",
       "agent": "openai/gpt-5.4",
       "task_type": "refactor",
-      "description": "Rename .moon-dag* CSS classes to .moon-graph* in CSS and TSX",
-      "outcome_goal": "No moon-dag references remain in Moon UI files",
-      "prompt": "Rename all moon-dag CSS classes to moon-graph in the Moon UI:\n\n1. In `Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css`:\n   - Replace ALL `.moon-dag` selectors with `.moon-graph`\n   - This includes: `.moon-dag`, `.moon-dag-node`, `.moon-dag-node:hover`, `.moon-dag-node--selected`, `.moon-dag-node--drag-over`, `.moon-dag-node__label`, `.moon-dag-append`, `.moon-dag-append:hover`, `.moon-dag-append--drag-over`\n   - Each becomes: `.moon-graph`, `.moon-graph-node`, `.moon-graph-node:hover`, etc.\n\n2. In `Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx`:\n   - Replace ALL `moon-dag` className strings with `moon-graph`\n   - This includes string literals like `'moon-dag'`, `'moon-dag-node'`, `'moon-dag-node--selected'`, `'moon-dag-node--drag-over'`, `'moon-dag-node__label'`, `'moon-dag-append'`, `'moon-dag-append--drag-over'`\n\nDo a thorough search-and-replace. There should be ~9 CSS class definitions and several className references in the TSX.\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
+      "description": "Rename .canvas-dag* CSS classes to .canvas-graph* in CSS and TSX",
+      "outcome_goal": "No canvas-dag references remain in Canvas UI files",
+      "prompt": "Rename all canvas-dag CSS classes to canvas-graph in the Canvas UI:\n\n1. In `Code&DBs/Workflow/surfaces/app/src/canvas/canvas-build.css`:\n   - Replace ALL `.canvas-dag` selectors with `.canvas-graph`\n   - This includes: `.canvas-dag`, `.canvas-dag-node`, `.canvas-dag-node:hover`, `.canvas-dag-node--selected`, `.canvas-dag-node--drag-over`, `.canvas-dag-node__label`, `.canvas-dag-append`, `.canvas-dag-append:hover`, `.canvas-dag-append--drag-over`\n   - Each becomes: `.canvas-graph`, `.canvas-graph-node`, `.canvas-graph-node:hover`, etc.\n\n2. In `Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx`:\n   - Replace ALL `canvas-dag` className strings with `canvas-graph`\n   - This includes string literals like `'canvas-dag'`, `'canvas-dag-node'`, `'canvas-dag-node--selected'`, `'canvas-dag-node--drag-over'`, `'canvas-dag-node__label'`, `'canvas-dag-append'`, `'canvas-dag-append--drag-over'`\n\nDo a thorough search-and-replace. There should be ~9 CSS class definitions and several className references in the TSX.\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
       "read": [
-        "Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css",
-        "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvas-build.css",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx"
       ],
       "write": [
-        "Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css",
-        "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+        "Code&DBs/Workflow/surfaces/app/src/canvas/canvas-build.css",
+        "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx"
       ],
-      "verify_command": "! grep -q 'moon-dag' Code\\&DBs/Workflow/surfaces/app/src/moon/moon-build.css && ! grep -q 'moon-dag' Code\\&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+      "verify_command": "! grep -q 'canvas-dag' Code\\&DBs/Workflow/surfaces/app/src/canvas/canvas-build.css && ! grep -q 'canvas-dag' Code\\&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx"
     },
     {
       "label": "rename_configs",

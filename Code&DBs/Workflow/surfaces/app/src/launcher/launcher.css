@@ -107,7 +107,7 @@
   50% { transform: translate(-50%, -50%) scale(1.06); opacity: 0.78; }
 }
 
-/* State: checking — core sweeps like the MoonStatusRing active state. */
+/* State: checking — core sweeps like the CanvasStatusRing active state. */
 .launcher-nucleus--checking .launcher-nucleus__halo {
   animation: launcher-nucleus-breath 2.4s ease-in-out infinite;
   opacity: 0.65;

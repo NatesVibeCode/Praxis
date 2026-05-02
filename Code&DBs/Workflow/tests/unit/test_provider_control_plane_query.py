@@ -30,6 +30,7 @@ class _FakeConn:
                     "model_version": "claude-opus-4-7",
                     "cost_structure": "subscription_included",
                     "cost_metadata": {"billing_mode": "subscription_included"},
+                    "route_rank": 1,
                     "route_temperature": 0.2,
                     "route_max_tokens": 32768,
                     "route_reasoning_control": {"default_level": "medium"},
@@ -65,6 +66,7 @@ class _FakeConn:
                     "model_version": "claude-disabled-by-policy",
                     "cost_structure": "subscription_included",
                     "cost_metadata": {"billing_mode": "subscription_included"},
+                    "route_rank": 3,
                     "control_enabled": False,
                     "control_state": "off",
                     "control_scope": "task/provider/model/access_method_denylist",
@@ -97,6 +99,7 @@ class _FakeConn:
                     "model_version": "claude-sonnet-4-6",
                     "cost_structure": "subscription_included",
                     "cost_metadata": {"billing_mode": "subscription_included"},
+                    "route_rank": 2,
                     "control_enabled": True,
                     "control_state": "on",
                     "control_scope": "transport_default_allow",
@@ -141,7 +144,19 @@ class _FakeConn:
                     "model_slug": "gpt-5.4",
                     "model_version": "gpt-5.4",
                     "cost_structure": "metered_api",
-                    "cost_metadata": {"billing_mode": "metered_api"},
+                    "cost_metadata": {
+                        "billing_mode": "metered_api",
+                        "budget_bucket": "openai_api_payg",
+                        "effective_marginal_cost": 8.0,
+                    },
+                    "budget_window": {
+                        "provider_policy_id": "provider_policy.openai",
+                        "provider_ref": "provider.openai",
+                        "budget_status": "warning",
+                        "request_limit": 100,
+                        "requests_used": 82,
+                    },
+                    "route_rank": 1,
                     "control_enabled": False,
                     "control_state": "off",
                     "control_scope": "transport_default_deny",
@@ -273,6 +288,7 @@ def test_provider_control_plane_returns_projected_snapshot_payload() -> None:
     assert payload["rows"][0]["control_state"] == "on"
     assert payload["rows"][0]["control_enabled"] is True
     assert payload["rows"][0]["route_request"] == {
+        "rank": 1,
         "temperature": 0.2,
         "max_tokens": 32768,
         "reasoning_control": {"default_level": "medium"},
@@ -284,6 +300,18 @@ def test_provider_control_plane_returns_projected_snapshot_payload() -> None:
     assert payload["rows"][0]["credential_availability_state"] == "available"
     assert payload["rows"][0]["credential_sources"] == ["ambient_cli_session"]
     assert payload["rows"][0]["projection_ref"] == "projection.private_provider_control_plane_snapshot"
+    assert payload["capability_matrix"][0]["provider"] == "anthropic"
+    assert payload["capability_matrix"][0]["model"] == "claude-opus-4-7"
+    assert payload["capability_matrix"][0]["route_rank"] == 1
+    assert payload["capability_matrix"][0]["effective_availability_state"] == "available"
+    assert payload["capability_matrix"][0]["credential_sources"] == ["ambient_cli_session"]
+    assert payload["capability_matrix"][0]["credential_observations"] == []
+    assert payload["route_explanation"]["selected_routes"][0]["provider_slug"] == "anthropic"
+    assert payload["route_explanation"]["selected_routes"][0]["model_slug"] == "claude-opus-4-7"
+    assert payload["route_explanation"]["selected_routes"][0]["route_rank"] == 1
+    assert payload["route_explanation"]["selected_routes"][0]["credential_sources"] == [
+        "ambient_cli_session"
+    ]
     assert "operator.circuit_override" in payload["levers"]["commands"]
 
 
@@ -303,12 +331,70 @@ def test_provider_control_plane_surfaces_structured_removal_reasons() -> None:
     assert openai_row["credential_availability_state"] == "missing"
     assert openai_row["credential_sources"] == ["OPENAI_API_KEY"]
     assert openai_row["breaker_state"] == "OPEN"
+    assert openai_row["cost_posture"] == {
+        "billing_mode": "metered_api",
+        "budget_bucket": "openai_api_payg",
+        "pricing_model": "",
+        "effective_marginal_cost": 8.0,
+        "prefer_prepaid": None,
+        "allow_payg_fallback": None,
+        "budget_status": "warning",
+        "spend_pressure": "medium",
+        "budget_window": {
+            "provider_policy_id": "provider_policy.openai",
+            "provider_ref": "provider.openai",
+            "budget_status": "warning",
+            "request_limit": 100,
+            "requests_used": 82,
+        },
+    }
     assert openai_row["primary_removal_reason_code"] == "provider_transport.policy_denied"
     assert [reason["reason_code"] for reason in openai_row["removal_reasons"]] == [
         "control_panel.transport_turned_off",
         "provider_transport.policy_denied",
         "circuit_breaker.open",
     ]
+    openai_matrix_row = [
+        row for row in payload["capability_matrix"] if row["provider_slug"] == "openai"
+    ][0]
+    assert openai_matrix_row["effective_availability_state"] == "blocked"
+    assert openai_matrix_row["blocked_reasons"] == [
+        "control_panel.transport_turned_off",
+        "provider_transport.policy_denied",
+        "circuit_breaker.open",
+        "credential.missing",
+    ]
+    assert openai_matrix_row["credential_sources"] == ["OPENAI_API_KEY"]
+    assert openai_matrix_row["credential_observations"] == [
+        {
+            "credential_ref": "OPENAI_API_KEY",
+            "status": "failed",
+            "source_kind": "env",
+        }
+    ]
+    assert openai_matrix_row["cost_posture"]["spend_pressure"] == "medium"
+    openai_explanation = [
+        row
+        for row in payload["route_explanation"]["candidates"]
+        if row["provider_slug"] == "openai"
+    ][0]
+    assert openai_explanation["availability"] == "blocked"
+    assert openai_explanation["removed_reasons"] == [
+        "control_panel.transport_turned_off",
+        "provider_transport.policy_denied",
+        "circuit_breaker.open",
+        "credential.missing",
+    ]
+    assert openai_explanation["circuit_state"] == "OPEN"
+    assert openai_explanation["credential_sources"] == ["OPENAI_API_KEY"]
+    assert openai_explanation["credential_observations"] == [
+        {
+            "credential_ref": "OPENAI_API_KEY",
+            "status": "failed",
+            "source_kind": "env",
+        }
+    ]
+    assert openai_explanation["cost_posture"]["budget_status"] == "warning"
 
     disabled_candidate_row = [
         row

@@ -108,6 +108,13 @@ def handle_register_agent_principal(
                agent_principal_ref,
                title,
                status,
+               system_prompt_template,
+               description,
+               icon_hint,
+               visibility,
+               builder_category,
+               model_preference,
+               reasoning_effort,
                max_in_flight_wakes,
                write_envelope,
                capability_refs,
@@ -120,13 +127,20 @@ def handle_register_agent_principal(
                metadata
            )
            VALUES (
-               $1, $2, $3, $4,
-               $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb,
-               $10, $11, $12::jsonb, $13::jsonb
+               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+               $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb,
+               $16::jsonb, $17, $18, $19::jsonb, $20::jsonb
            )
            ON CONFLICT (agent_principal_ref) DO UPDATE SET
                title = EXCLUDED.title,
                status = EXCLUDED.status,
+               system_prompt_template = EXCLUDED.system_prompt_template,
+               description = EXCLUDED.description,
+               icon_hint = EXCLUDED.icon_hint,
+               visibility = EXCLUDED.visibility,
+               builder_category = EXCLUDED.builder_category,
+               model_preference = EXCLUDED.model_preference,
+               reasoning_effort = EXCLUDED.reasoning_effort,
                max_in_flight_wakes = EXCLUDED.max_in_flight_wakes,
                write_envelope = EXCLUDED.write_envelope,
                capability_refs = EXCLUDED.capability_refs,
@@ -142,6 +156,13 @@ def handle_register_agent_principal(
         command.agent_principal_ref,
         command.title,
         command.status,
+        command.system_prompt_template,
+        command.description,
+        command.icon_hint,
+        command.visibility,
+        command.builder_category,
+        command.model_preference,
+        command.reasoning_effort,
         int(command.max_in_flight_wakes),
         json.dumps(command.write_envelope),
         json.dumps(command.capability_refs),

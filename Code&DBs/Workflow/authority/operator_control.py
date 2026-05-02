@@ -98,7 +98,7 @@ def _optional_text(value: object, *, field_name: str) -> str | None:
 PENDING_REVIEW_SCOPE_CLAMP_TOKEN = "pending_review"
 """Marker string in scope_clamp.applies_to identifying a row that has not yet
 been reviewed by the operator. Migration 264 backfills existing rows with this
-token so the Moon Decisions panel can surface them for review."""
+token so the Canvas Decisions panel can surface them for review."""
 
 
 def _default_pending_review_scope_clamp() -> Mapping[str, Any]:

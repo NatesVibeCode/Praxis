@@ -46,9 +46,9 @@ const MIN_ROUTES: RouteRegistryRow[] = [
     display_order: 20,
     binding_revision: 'b',
     decision_ref: 'd',
-    component_ref: 'moon/MoonBuildPage.MoonBuildPage',
+    component_ref: 'canvas/CanvasBuildPage.CanvasBuildPage',
     tab_kind_label: 'Build',
-    tab_label_template: '{{moonRunId ? "Run view" : buildWorkflowId ? "Workflow workspace" : "New workflow"}}',
+    tab_label_template: '{{canvasRunId ? "Run view" : buildWorkflowId ? "Workflow workspace" : "New workflow"}}',
     context_label: 'App builder',
     context_detail_template: '',
     nav_description_template: '',
@@ -71,7 +71,7 @@ const MIN_ROUTES: RouteRegistryRow[] = [
     display_order: 40,
     binding_revision: 'b',
     decision_ref: 'd',
-    component_ref: 'moon/MoonBuildPage.MoonBuildPage',
+    component_ref: 'canvas/CanvasBuildPage.CanvasBuildPage',
     tab_kind_label: 'Run',
     tab_label_template: 'Run view',
     context_label: 'Run observer',
@@ -242,20 +242,20 @@ describe('routeRegistry', () => {
     });
 
     test('handles ternary expression with truthy branch', () => {
-      const tmpl = '{{moonRunId ? "Run view" : "Build"}}';
-      expect(interpolateLabel(tmpl, { moonRunId: 'wf_42' })).toBe('Run view');
+      const tmpl = '{{canvasRunId ? "Run view" : "Build"}}';
+      expect(interpolateLabel(tmpl, { canvasRunId: 'wf_42' })).toBe('Run view');
     });
 
     test('handles ternary expression with falsy branch', () => {
-      const tmpl = '{{moonRunId ? "Run view" : "Build"}}';
-      expect(interpolateLabel(tmpl, { moonRunId: null })).toBe('Build');
+      const tmpl = '{{canvasRunId ? "Run view" : "Build"}}';
+      expect(interpolateLabel(tmpl, { canvasRunId: null })).toBe('Build');
     });
 
     test('handles nested ternary', () => {
-      const tmpl = '{{moonRunId ? "Run view" : buildWorkflowId ? "Workflow workspace" : "New workflow"}}';
-      expect(interpolateLabel(tmpl, { moonRunId: null, buildWorkflowId: null })).toBe('New workflow');
-      expect(interpolateLabel(tmpl, { moonRunId: null, buildWorkflowId: 'wf_1' })).toBe('Workflow workspace');
-      expect(interpolateLabel(tmpl, { moonRunId: 'r_1' })).toBe('Run view');
+      const tmpl = '{{canvasRunId ? "Run view" : buildWorkflowId ? "Workflow workspace" : "New workflow"}}';
+      expect(interpolateLabel(tmpl, { canvasRunId: null, buildWorkflowId: null })).toBe('New workflow');
+      expect(interpolateLabel(tmpl, { canvasRunId: null, buildWorkflowId: 'wf_1' })).toBe('Workflow workspace');
+      expect(interpolateLabel(tmpl, { canvasRunId: 'r_1' })).toBe('Run view');
     });
 
     test('returns empty for malformed expression', () => {

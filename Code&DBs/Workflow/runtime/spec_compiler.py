@@ -815,8 +815,8 @@ def compile_prompt_launch_spec(
 # Plan → spec → launch continuous flow
 # ---------------------------------------------------------------------------
 #
-# The programmatic counterpart to the Moon UI's graph-to-run chain
-# (roadmap_item.make.moon.ui.emit.runnable.graph.authority.for.gated.9.step.workflows).
+# The programmatic counterpart to the Canvas UI's graph-to-run chain
+# (roadmap_item.make.canvas.ui.emit.runnable.graph.authority.for.gated.9.step.workflows).
 # Callers describe packets as minimal intents; this module compiles, translates
 # into the platform's workflow spec shape, and submits — never handing the
 # spec-JSON step back to a caller or LLM.
@@ -955,7 +955,7 @@ def _emit_plan_launched_event(
     :func:`runtime.system_events.emit_system_event` helper. Per architecture-
     policy::platform-architecture::expected-envelope-vs-actual-truth-
     separation, this event marks the pre-run envelope crossing into
-    runtime — downstream projections (future Phase 2/3) wire it into Moon
+    runtime — downstream projections (future Phase 2/3) wire it into Canvas
     observability and the agent operating manifest's "what changed recently"
     question.
 
@@ -1105,7 +1105,7 @@ def _build_packet_map_entry(
     # runtime emits a matching produced artifact. No human review required —
     # gate satisfaction is computable from typed state per
     # architecture-policy::platform-architecture::legal-equals-computable-to-
-    # non-gap-output. Closes BUG-2729F8B7 (Moon generated workflow has no
+    # non-gap-output. Closes BUG-2729F8B7 (Canvas generated workflow has no
     # release gates or typed gate contracts).
     expected_typed_gates = [
         {
@@ -2159,7 +2159,7 @@ def compile_plan(
     # all packets.
     #
     # Before raising, emit typed_gap.created events for structured gap
-    # errors so observers (Moon, operator console, projections) see the
+    # errors so observers (Canvas, operator console, projections) see the
     # failure at event-stream level — not just as an exception string.
     # Opt-in via conn: if no conn, skip emission (unit-test paths stay
     # cheap). Per architecture-policy::platform-architecture::conceptual-

@@ -14,7 +14,7 @@ export type StaticTabId = 'dashboard' | 'build' | 'manifests' | 'atlas';
 export type DashboardDetail = 'costs' | null;
 export type DynamicTabKind = 'run-detail' | 'manifest' | 'manifest-editor' | 'compose';
 export type AppTabId = StaticTabId | string;
-export type BuildView = 'moon';
+export type BuildView = 'canvas';
 
 export interface DynamicTab {
   id: string;
@@ -40,8 +40,8 @@ export interface ShellState {
   buildIntent: string | null;
   builderSeed: unknown | null;
   buildView: BuildView;
-  /** When set, Moon renders a run-view over its canvas using this run_id. */
-  moonRunId: string | null;
+  /** When set, Canvas renders a run-view over its canvas using this run_id. */
+  canvasRunId: string | null;
   /** Optional drill-in on Overview (e.g. token spend) without a top-level tab. */
   dashboardDetail: DashboardDetail;
 }
@@ -84,8 +84,8 @@ export function createDefaultShellState(): ShellState {
     buildWorkflowId: null,
     buildIntent: null,
     builderSeed: null,
-    buildView: 'moon',
-    moonRunId: null,
+    buildView: 'canvas',
+    canvasRunId: null,
     dashboardDetail: null,
   };
 }

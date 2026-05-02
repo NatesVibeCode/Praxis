@@ -604,7 +604,7 @@ def build_execution_bundle(
         ),
         "access_policy": {
             "workspace_mode": "docker_packet_only",
-            "write_scope": normalized_write_scope,
+            "write_scope": list(normalized_write_scope),
             "declared_read_scope": normalized_declared_read_scope,
             "resolved_read_scope": normalized_resolved_read_scope,
             "blast_radius": normalized_blast_radius,

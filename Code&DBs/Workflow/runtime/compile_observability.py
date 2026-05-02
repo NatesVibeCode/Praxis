@@ -1,6 +1,6 @@
 """compile_runs trace recorder — single source of truth for what just happened.
 
-The Moon "Describe it" / compile_prose path can degrade silently in five
+The Canvas "Describe it" / compile_prose path can degrade silently in five
 distinct ways:
 
   1. LLM was requested but routing missed (no llm_task primary for the task

@@ -68,7 +68,7 @@ def _require_int(value: object, *, field_name: str) -> int:
 
 def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
     catalog_item_id = _require_text(item.get("catalog_item_id"), field_name="catalog_item_id")
-    surface_name = _require_text(item.get("surface_name") or "moon", field_name="surface_name")
+    surface_name = _require_text(item.get("surface_name") or "canvas", field_name="surface_name")
     label = _require_text(item.get("label"), field_name="label")
     icon = _require_text(item.get("icon"), field_name="icon")
     family = _require_enum(item.get("family"), field_name="family", allowed=_ALLOWED_FAMILIES)
@@ -227,7 +227,7 @@ def load_surface_catalog_record(conn: Any, *, catalog_item_id: str) -> dict[str,
 def list_surface_catalog_records(
     conn: Any,
     *,
-    surface_name: str = "moon",
+    surface_name: str = "canvas",
     include_disabled: bool = False,
     limit: int = 100,
 ) -> list[dict[str, Any]]:

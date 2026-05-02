@@ -1119,14 +1119,14 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Refine a manifest", {"manifest_id": "manifest_abc123", "feedback": "Add weekly trends and remove the status grid"}),
         ],
     ),
-    "praxis_moon": _tool(
+    "praxis_canvas": _tool(
         surface="workflow",
         tier="advanced",
-        recommended_alias="moon",
+        recommended_alias="canvas",
         when_to_use=(
             "Read, compose, suggest, mutate, or launch Workflow graphs through "
             "the same CQRS-backed build authority used by the in-app Workflow surface. "
-            "The praxis_moon tool name and moon alias remain compatibility entrypoints."
+            "The praxis_canvas tool name and canvas alias remain compatibility entrypoints."
         ),
         when_not_to_use=(
             "Do not use it for unrelated roadmap, bug, provider-routing, or direct "
@@ -3718,7 +3718,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                         "name": "q2_roadmap_landing",
                         "why": "Land the two active roadmap items this phase.",
                         "from_roadmap_items": [
-                            "roadmap_item.make.moon.ui.emit.runnable.graph.authority.for.gated.9.step.workflows",
+                            "roadmap_item.make.canvas.ui.emit.runnable.graph.authority.for.gated.9.step.workflows",
                         ],
                     }
                 },
@@ -3731,7 +3731,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                         "why": "Explore open operator ideas as bounded build packets.",
                         "from_ideas": [
                             "operator_idea.ingest_shopify_orders",
-                            "operator_idea.moon_inbox_digest",
+                            "operator_idea.canvas_inbox_digest",
                         ],
                     }
                 },

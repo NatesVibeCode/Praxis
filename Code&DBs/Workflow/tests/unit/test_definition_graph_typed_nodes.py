@@ -2,7 +2,7 @@
 
 Before this change, ``build_definition_graph`` emitted capability and
 draft_step nodes with only a ``payload`` blob — no machine-readable
-``consumes`` / ``produces``. Moon Composer rendered nodes without typed
+``consumes`` / ``produces``. Canvas Composer rendered nodes without typed
 ports, the type-flow validator could not reason about graph state, and
 "Provide X" uncertainty cards filled the gap with prose stubs
 (BUG-C6EE740C / BUG-99B9DC7E).

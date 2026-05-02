@@ -2182,7 +2182,7 @@ def test_manifest_frontdoor_supports_generate_and_save_as(
     )
 
     stdout = StringIO()
-    assert workflow_cli_main(["manifest", "generate", "moon", "dashboard"], stdout=stdout) == 0
+    assert workflow_cli_main(["manifest", "generate", "canvas", "dashboard"], stdout=stdout) == 0
     generated = json.loads(stdout.getvalue())
     assert generated["manifest_id"] == "manifest_123"
     assert generated["confidence"] == 0.88
@@ -2372,6 +2372,7 @@ def test_active_frontdoor_uses_operator_status_snapshot(
             "pass_rate": 0.5,
             "adjusted_pass_rate": 0.75,
             "observability_state": "ready",
+            "in_flight_status_authority": "runtime.workflow.unified.get_run_status",
             "queue_depth": 4,
             "queue_depth_status": "ok",
             "queue_depth_pending": 3,
@@ -2404,6 +2405,9 @@ def test_active_frontdoor_uses_operator_status_snapshot(
     assert payload["count"] == 1
     assert payload["runs"][0]["workflow_name"] == "Live Workflow"
     assert payload["queue"]["running"] == 1
+    assert payload["metrics"]["in_flight_status_authority"] == (
+        "runtime.workflow.unified.get_run_status"
+    )
 
 
 def test_firecheck_frontdoor_fails_closed_when_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3013,6 +3017,52 @@ def test_chain_frontdoor_detects_coordination_program(
     assert captured["coordination_path"] == str(coord_path)
     assert captured["requested_by_kind"] == "cli"
     assert captured["adopt_active"] is True
+
+
+def test_chain_frontdoor_fallback_uses_sync_postgres_connection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    coord = {
+        "program": "test_program",
+        "validate_order": ["config/cascade/specs/s1.json"],
+        "waves": [{"wave_id": "w1", "specs": ["config/cascade/specs/s1.json"]}],
+    }
+    coord_path = tmp_path / "test_chain.json"
+    coord_path.write_text(json.dumps(coord))
+    sync_conn = object()
+    pool = object()
+    captured: dict[str, object] = {}
+
+    class _BrokenSubsystems:
+        def get_pg_conn(self):
+            raise RuntimeError("no mcp subsystem connection")
+
+    def _fake_request(pg_conn, **kwargs):
+        captured["pg_conn"] = pg_conn
+        captured.update(kwargs)
+        return SimpleNamespace(command_id="cmd_test", command_type="workflow.chain.submit")
+
+    def _fake_render(pg_conn, command, **kwargs):  # noqa: ARG001
+        assert pg_conn is sync_conn
+        return {"status": "submitted", "chain_id": "chain_test_fallback"}
+
+    import runtime.control_commands as _cc
+    import storage.postgres.connection as _pg_connection
+    import surfaces.mcp.subsystems as _subs_mod
+
+    monkeypatch.setattr(_cc, "request_workflow_chain_submit_command", _fake_request)
+    monkeypatch.setattr(_cc, "render_workflow_chain_submit_response", _fake_render)
+    monkeypatch.setattr(_subs_mod, "_subs", _BrokenSubsystems())
+    monkeypatch.setattr(_pg_connection, "get_workflow_pool", lambda: pool)
+    monkeypatch.setattr(_pg_connection, "SyncPostgresConnection", lambda observed_pool: sync_conn if observed_pool is pool else None)
+
+    stdout = StringIO()
+    exit_code = workflow_cli_main(["chain", str(coord_path)], stdout=stdout)
+
+    assert exit_code == 0, f"unexpected failure: {stdout.getvalue()!r}"
+    assert captured["pg_conn"] is sync_conn
+    assert json.loads(stdout.getvalue())["chain_id"] == "chain_test_fallback"
 
 
 def test_chain_frontdoor_no_adopt_active_flag(

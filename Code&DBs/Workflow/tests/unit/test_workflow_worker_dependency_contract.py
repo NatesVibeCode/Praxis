@@ -12,6 +12,24 @@ WORKSPACE_ROOT = Path(tempfile.gettempdir()) / "praxis-workspace"
 REQUIREMENTS_MANIFEST = WORKSPACE_ROOT / "requirements.runtime.txt"
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _compose_text() -> str:
+    return (_repo_root() / "docker-compose.yml").read_text(encoding="utf-8")
+
+
+def _compose_worker_block() -> str:
+    text = _compose_text()
+    marker = "  workflow-worker:\n"
+    start = text.index(marker)
+    next_service = text.find("\n  ", start + len(marker))
+    while next_service != -1 and text[next_service + 3 : next_service + 4].isspace():
+        next_service = text.find("\n  ", next_service + 1)
+    return text[start:] if next_service == -1 else text[start:next_service]
+
+
 def test_worker_concurrency_env_override_wins(monkeypatch) -> None:
     monkeypatch.setattr(worker_loop, "_worker_cpu_count", lambda: 8)
     monkeypatch.setattr(
@@ -64,59 +82,90 @@ def test_local_worker_slots_ignore_host_cap_when_admission_disabled() -> None:
 
 
 def test_compose_worker_does_not_pin_parallelism_by_default() -> None:
-    repo_root = Path(__file__).resolve().parents[4]
-    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+    compose_text = _compose_text()
 
     assert "PRAXIS_WORKER_MAX_PARALLEL:-8" not in compose_text
     assert "PRAXIS_WORKER_MAX_PARALLEL: ${PRAXIS_WORKER_MAX_PARALLEL:-}" in compose_text
 
 
 def test_compose_builds_pass_layout_defaults_to_required_dockerfiles() -> None:
-    repo_root = Path(__file__).resolve().parents[4]
-    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+    compose_text = _compose_text()
 
     assert (
         compose_text.count(
             "PRAXIS_CONTAINER_WORKSPACE_ROOT: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
         )
-        == 4
+        == 5
     )
     assert (
         compose_text.count(
             "PRAXIS_CONTAINER_HOME: ${PRAXIS_CONTAINER_HOME:-/home/praxis-agent}"
         )
-        == 4
+        == 5
     )
 
 
 def test_compose_allows_docker_specific_database_authority_override() -> None:
-    repo_root = Path(__file__).resolve().parents[4]
-    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+    compose_text = _compose_text()
 
     assert (
         compose_text.count(
             "WORKFLOW_DATABASE_URL: ${PRAXIS_DOCKER_WORKFLOW_DATABASE_URL:-${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}}"
         )
-        == 3
+        == 4
     )
-    assert compose_text.count('"host.docker.internal:host-gateway"') == 3
+    assert compose_text.count('"host.docker.internal:host-gateway"') == 5
 
 
 def test_compose_declares_explicit_workflow_pool_caps_per_service() -> None:
-    repo_root = Path(__file__).resolve().parents[4]
-    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+    compose_text = _compose_text()
 
     assert "WORKFLOW_POOL_MAX_SIZE: ${PRAXIS_API_WORKFLOW_POOL_MAX_SIZE:-8}" in compose_text
     assert "WORKFLOW_POOL_MAX_SIZE: ${PRAXIS_SCHEDULER_WORKFLOW_POOL_MAX_SIZE:-2}" in compose_text
     assert "WORKFLOW_POOL_MAX_SIZE: ${PRAXIS_WORKER_WORKFLOW_POOL_MAX_SIZE:-4}" in compose_text
-    assert compose_text.count("WORKFLOW_POOL_MIN_SIZE: ${") == 3
+    assert compose_text.count("WORKFLOW_POOL_MIN_SIZE: ${") == 4
 
 
 def test_compose_worker_receives_openrouter_credentials() -> None:
-    repo_root = Path(__file__).resolve().parents[4]
-    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+    compose_text = _compose_text()
 
     assert "OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}" in compose_text
+
+
+def test_compose_worker_healthcheck_is_not_provider_auth() -> None:
+    worker_block = _compose_worker_block()
+
+    assert "claude auth status" not in worker_block
+    assert "worker-control-plane-ok" in worker_block
+
+
+def test_compose_worker_does_not_mount_provider_cli_auth_homes() -> None:
+    worker_block = _compose_worker_block()
+
+    assert "/root/.codex" not in worker_block
+    assert "/root/.gemini" not in worker_block
+    assert "/root/.claude" not in worker_block
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in worker_block
+
+
+def test_worker_image_is_not_a_provider_cli_bundle() -> None:
+    dockerfile = (_repo_root() / "Code&DBs/Workflow/docker/praxis-worker.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    forbidden = (
+        "@anthropic-ai/claude-code",
+        "@openai/codex",
+        "@google/gemini-cli",
+        "cursor.com/install",
+        "which claude",
+        "which codex",
+        "which gemini",
+        "which cursor-agent",
+    )
+    for token in forbidden:
+        assert token not in dockerfile
+    assert "which praxis" in dockerfile
 
 
 def test_start_worker_checks_dependency_contract_before_launch(monkeypatch) -> None:

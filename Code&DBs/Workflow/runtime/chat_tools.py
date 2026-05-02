@@ -43,22 +43,22 @@ def _dispatch_op(pg_conn: Any, operation_name: str, payload: dict[str, Any]) -> 
     )
 
 
-# Discriminator the App's moonChatContext.ts writes into selection_context.
-MOON_CONTEXT_KIND = "moon_context"
+# Discriminator the App's canvasChatContext.ts writes into selection_context.
+CANVAS_CONTEXT_KIND = "canvas_context"
 
 
-def _extract_moon_context(selection_context: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """Pull the moon-context entry (if any) out of the selection_context list.
+def _extract_canvas_context(selection_context: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Pull the canvas-context entry (if any) out of the selection_context list.
 
-    The frontend's ``moonChatSelectionContext()`` packs a single
-    ``{kind: 'moon_context', workflow_id, selected_node_id, ...}`` entry.
+    The frontend's ``canvasChatSelectionContext()`` packs a single
+    ``{kind: canvas_context, workflow_id, selected_node_id, ...}`` entry.
     Returning ``None`` here means there is no active Workflow authoring context
     and tools must require explicit ``workflow_id`` arguments.
     """
     if not selection_context:
         return None
     for entry in selection_context:
-        if isinstance(entry, dict) and entry.get("kind") == MOON_CONTEXT_KIND:
+        if isinstance(entry, dict) and entry.get("kind") == CANVAS_CONTEXT_KIND:
             return entry
     return None
 
@@ -196,8 +196,8 @@ CHAT_TOOLS: list[dict[str, Any]] = [
     # commands) authority_event row.
     # ------------------------------------------------------------------
     {
-        "name": "moon_get_build",
-        "description": "Load the current Workflow BuildPayload for a workflow — every node, edge, gate, contract, outcome, and any compile/binding issues. Use this BEFORE proposing edits. If the Workflow canvas is open, omit workflow_id and the active context will target it; the result may also include a read-only visible_ui_snapshot witness when saved state lags the UI. The tool name is the legacy moon_get_build alias.",
+        "name": "canvas_get_build",
+        "description": "Load the current Workflow BuildPayload for a workflow — every node, edge, gate, contract, outcome, and any compile/binding issues. Use this BEFORE proposing edits. If the Workflow canvas is open, omit workflow_id and the active context will target it; the result may also include a read-only visible_ui_snapshot witness when saved state lags the UI. The tool name is the legacy canvas_get_build alias.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -207,8 +207,8 @@ CHAT_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "moon_compose_from_prose",
-        "description": "Generate a complete Workflow graph from a natural-language description. One LLM synthesis pass + N parallel author calls produces nodes, edges, contracts, and gates. Use when the user describes what they want from scratch. Returns the composed plan; pair with moon_get_build, the legacy read alias, to inspect what was created.",
+        "name": "canvas_compose",
+        "description": "Generate a complete Workflow graph from a natural-language description. One LLM synthesis pass + N parallel author calls produces nodes, edges, contracts, and gates. Use when the user describes what they want from scratch. Returns the composed plan; pair with canvas_get_build, the legacy read alias, to inspect what was created.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -221,8 +221,8 @@ CHAT_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "moon_mutate_field",
-        "description": "Edit one field on one Workflow node at a time. Prefer repeated focused calls such as nodes/{node_id}/prompt, nodes/{node_id}/outputs, nodes/{node_id}/agent_tool_plan, nodes/{node_id}/completion_contract. Body shape is {\"value\": ...}. Use after moon_get_build, the legacy read alias, so you target real ids. Whole-graph edits are reserved for structural changes.",
+        "name": "canvas_mutate_field",
+        "description": "Edit one field on one Workflow node at a time. Prefer repeated focused calls such as nodes/{node_id}/prompt, nodes/{node_id}/outputs, nodes/{node_id}/agent_tool_plan, nodes/{node_id}/completion_contract. Body shape is {\"value\": ...}. Use after canvas_get_build, the legacy read alias, so you target real ids. Whole-graph edits are reserved for structural changes.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -234,7 +234,7 @@ CHAT_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "moon_suggest_next",
+        "name": "canvas_suggest_next",
         "description": "Ask the graph what nodes are LEGAL to add next given the current accumulator types. Returns ranked likely_next_steps + possible_next_steps + blocked_next_steps. Use when the user asks 'what now' or you need to narrow a 100-tool decision space to 3-5.",
         "input_schema": {
             "type": "object",
@@ -246,7 +246,7 @@ CHAT_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "moon_launch",
+        "name": "canvas_launch",
         "description": "Launch the composed workflow as a real run through the gateway. Returns run_id + tracking handle. Only call after the user confirms or after compose+edits have produced a coherent graph.",
         "input_schema": {
             "type": "object",
@@ -611,8 +611,8 @@ def execute_tool(
 
     ``selection_context`` is forwarded by the chat orchestrator. When the
     frontend has an active Workflow authoring surface open, an entry of the form
-    ``{kind: 'moon_context', workflow_id, selected_node_id, ...}`` is in the
-    list. The moon_* tools read it to default-target the active workflow
+    ``{kind: canvas_context, workflow_id, selected_node_id, ...}`` is in the
+    list. The canvas_* tools read it to default-target the active workflow
     when the LLM omits ``workflow_id``.
     """
     if name == "search_knowledge":
@@ -633,16 +633,18 @@ def execute_tool(
         return _get_job_output(arguments, pg_conn)
     elif name == "cancel_workflow":
         return _cancel_workflow(arguments, pg_conn)
-    elif name == "moon_get_build":
-        return _moon_get_build(arguments, pg_conn, selection_context)
-    elif name == "moon_compose_from_prose":
-        return _moon_compose_from_prose(arguments, pg_conn, selection_context)
-    elif name == "moon_mutate_field":
-        return _moon_mutate_field(arguments, pg_conn, selection_context)
-    elif name == "moon_suggest_next":
-        return _moon_suggest_next(arguments, pg_conn, selection_context)
-    elif name == "moon_launch":
-        return _moon_launch(arguments, pg_conn, selection_context)
+    elif name == "canvas_get_build":
+        return _canvas_get_build(arguments, pg_conn, selection_context)
+    elif name == "canvas_compose":
+        return _canvas_compose(arguments, pg_conn, selection_context)
+    elif name == "canvas_mutate_field":
+        return _canvas_mutate_field(arguments, pg_conn, selection_context)
+    elif name == "canvas_assign_agent":
+        return _canvas_assign_agent(arguments, pg_conn, selection_context)
+    elif name == "canvas_suggest_next":
+        return _canvas_suggest_next(arguments, pg_conn, selection_context)
+    elif name == "canvas_launch":
+        return _canvas_launch(arguments, pg_conn, selection_context)
     elif name == "praxis_search":
         return _dispatch_op(pg_conn, "search.federated", dict(arguments or {}))
     elif name == "praxis_agent_describe":
@@ -672,17 +674,17 @@ def execute_tool(
 
 
 # ---------------------------------------------------------------------------
-# Workflow graph authoring tool implementations — gateway-dispatched under legacy moon_* names
+# Workflow graph authoring tool implementations — gateway-dispatched under legacy canvas_* names
 # ---------------------------------------------------------------------------
 
-def _moon_error(message: str, *, action: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+def _canvas_error(message: str, *, action: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {"message": message, "action": action}
     if details:
         payload["details"] = details
     return {"type": "error", "data": payload, "selectable": False, "summary": message}
 
 
-def _moon_status_summary(action: str, payload: dict[str, Any]) -> str:
+def _canvas_status_summary(action: str, payload: dict[str, Any]) -> str:
     """Render a compact JSON-string summary the LLM can reason about.
 
     The chat orchestrator passes only ``summary`` back to the model, so
@@ -839,10 +841,10 @@ def _compact_visible_list(
     return items
 
 
-def _compact_visible_ui_snapshot(moon_ctx: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not moon_ctx:
+def _compact_visible_ui_snapshot(canvas_ctx: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not canvas_ctx:
         return None
-    snapshot = moon_ctx.get("visible_ui_snapshot")
+    snapshot = canvas_ctx.get("visible_ui_snapshot")
     if not isinstance(snapshot, dict):
         return None
     compact = {
@@ -875,12 +877,12 @@ def _attach_visible_ui_witness(
 ) -> None:
     """Attach the visible canvas witness and mark durable/UI disagreement.
 
-    ``moon_get_build`` is still the write/read authority for saved workflow
+    ``canvas_get_build`` is still the write/read authority for saved workflow
     state. The visible snapshot is a read-only UI witness so the chat agent
     can avoid falsely claiming "no graph" when the operator is looking at an
     unsaved or projection-stale graph.
     """
-    visible = _compact_visible_ui_snapshot(_extract_moon_context(selection_context))
+    visible = _compact_visible_ui_snapshot(_extract_canvas_context(selection_context))
     if not visible:
         return
     compact["visible_ui_snapshot"] = visible
@@ -895,7 +897,7 @@ def _attach_visible_ui_witness(
             "durable_edge_count": durable_edges,
             "visible_node_count": visible_nodes,
             "visible_edge_count": visible_edges,
-            "instruction": "Use visible_ui_snapshot for orientation, but save repairs through moon_mutate_field/workflow build authority.",
+            "instruction": "Use visible_ui_snapshot for orientation, but save repairs through canvas_mutate_field/workflow build authority.",
         }
 
 
@@ -903,7 +905,7 @@ def _resolve_workflow_id(
     args: dict[str, Any],
     selection_context: list[dict[str, Any]] | None,
 ) -> tuple[str, bool]:
-    """Pick workflow_id from args first, then the moon_context fallback.
+    """Pick workflow_id from args first, then the canvas_context fallback.
 
     Returns ``(workflow_id, came_from_context)``. The boolean lets handlers
     surface context-defaulting in the summary so the LLM (and the user
@@ -912,43 +914,43 @@ def _resolve_workflow_id(
     explicit = str(args.get("workflow_id") or "").strip()
     if explicit:
         return explicit, False
-    moon_ctx = _extract_moon_context(selection_context)
-    if moon_ctx:
-        ctx_id = str(moon_ctx.get("workflow_id") or "").strip()
+    canvas_ctx = _extract_canvas_context(selection_context)
+    if canvas_ctx:
+        ctx_id = str(canvas_ctx.get("workflow_id") or "").strip()
         if ctx_id:
             return ctx_id, True
     return "", False
 
 
-def _moon_get_build(
+def _canvas_get_build(
     args: dict[str, Any],
     pg_conn: Any,
     selection_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workflow_id, from_context = _resolve_workflow_id(args, selection_context)
     if not workflow_id:
-        return _moon_error(
+        return _canvas_error(
             "workflow_id is required (no active Workflow authoring context in selection context)",
-            action="moon_get_build",
+            action="canvas_get_build",
         )
     try:
         result = _dispatch_op(pg_conn, "workflow_build_get", {"workflow_id": workflow_id})
     except Exception as exc:
-        return _moon_error(f"moon_get_build failed: {exc}", action="moon_get_build")
+        return _canvas_error(f"canvas_get_build failed: {exc}", action="canvas_get_build")
     payload = result if isinstance(result, dict) else {"raw": result}
     compact = _compact_build_payload(payload)
     if from_context:
-        compact["targeted_via"] = "moon_context"
+        compact["targeted_via"] = "canvas_context"
     _attach_visible_ui_witness(compact, selection_context)
     return {
         "type": "status",
-        "data": {"status": "moon_build_loaded", **compact, "full_payload": payload},
+        "data": {"status": "canvas_build_loaded", **compact, "full_payload": payload},
         "selectable": False,
-        "summary": _moon_status_summary("moon_get_build", compact),
+        "summary": _canvas_status_summary("canvas_get_build", compact),
     }
 
 
-def _moon_compose_from_prose(
+def _canvas_compose(
     args: dict[str, Any],
     pg_conn: Any,
     selection_context: list[dict[str, Any]] | None = None,
@@ -956,7 +958,7 @@ def _moon_compose_from_prose(
     """Materialize prose into a real, editable Workflow."""
     intent = str(args.get("intent") or "").strip()
     if not intent:
-        return _moon_error("intent is required", action="moon_compose_from_prose")
+        return _canvas_error("intent is required", action="canvas_compose")
 
     plan_name = ""
     raw_plan_name = args.get("plan_name")
@@ -985,32 +987,32 @@ def _moon_compose_from_prose(
         msg = f"compile_materialize failed: {exc}"
         if workflow_id:
             msg = f"{msg} (workflow_id={workflow_id})"
-        return _moon_error(msg, action="moon_compose_from_prose")
+        return _canvas_error(msg, action="canvas_compose")
 
     if not isinstance(materialized, dict):
-        return _moon_error(
+        return _canvas_error(
             f"compile_materialize returned non-object payload: {materialized!r}",
-            action="moon_compose_from_prose",
+            action="canvas_compose",
         )
     if materialized.get("ok") is False:
-        return _moon_error(
+        return _canvas_error(
             str(materialized.get("error") or "compile materialization blocked"),
-            action="moon_compose_from_prose",
+            action="canvas_compose",
             details=materialized,
         )
     workflow_id = str(materialized.get("workflow_id") or workflow_id or "").strip()
     if not workflow_id:
-        return _moon_error(
+        return _canvas_error(
             f"compile_materialize returned no workflow_id: {materialized!r}",
-            action="moon_compose_from_prose",
+            action="canvas_compose",
         )
 
     try:
         result = _dispatch_op(pg_conn, "workflow_build_get", {"workflow_id": workflow_id})
     except Exception as exc:
-        return _moon_error(
-            f"moon_get_build after materialize failed (workflow_id={workflow_id}): {exc}",
-            action="moon_compose_from_prose",
+        return _canvas_error(
+            f"canvas_get_build after materialize failed (workflow_id={workflow_id}): {exc}",
+            action="canvas_compose",
             details={"materialization": materialized},
         )
 
@@ -1026,21 +1028,21 @@ def _moon_compose_from_prose(
     if isinstance(materialized.get("graph_summary"), dict):
         compact["graph_summary"] = materialized["graph_summary"]
     if from_context and not created_new:
-        compact["targeted_via"] = "moon_context"
+        compact["targeted_via"] = "canvas_context"
     return {
         "type": "status",
         "data": {
-            "status": "moon_composed",
+            "status": "canvas_composed",
             **compact,
             "full_payload": payload,
             "materialization": materialized,
         },
         "selectable": False,
-        "summary": _moon_status_summary("moon_compose_from_prose", compact),
+        "summary": _canvas_status_summary("canvas_compose", compact),
     }
 
 
-def _moon_mutate_field(
+def _canvas_mutate_field(
     args: dict[str, Any],
     pg_conn: Any,
     selection_context: list[dict[str, Any]] | None = None,
@@ -1049,14 +1051,14 @@ def _moon_mutate_field(
     subpath = str(args.get("subpath") or "").strip()
     body = args.get("body")
     if not workflow_id:
-        return _moon_error(
+        return _canvas_error(
             "workflow_id is required (no active Workflow authoring context in selection context)",
-            action="moon_mutate_field",
+            action="canvas_mutate_field",
         )
     if not subpath:
-        return _moon_error("subpath is required", action="moon_mutate_field")
+        return _canvas_error("subpath is required", action="canvas_mutate_field")
     if not isinstance(body, dict):
-        return _moon_error("body must be an object", action="moon_mutate_field")
+        return _canvas_error("body must be an object", action="canvas_mutate_field")
     try:
         result = _dispatch_op(
             pg_conn,
@@ -1064,42 +1066,96 @@ def _moon_mutate_field(
             {"workflow_id": workflow_id, "subpath": subpath, "body": body},
         )
     except Exception as exc:
-        return _moon_error(f"workflow_build_mutate failed: {exc}", action="moon_mutate_field")
+        return _canvas_error(f"workflow_build_mutate failed: {exc}", action="canvas_mutate_field")
     payload = result if isinstance(result, dict) else {"raw": result}
     compact = _compact_build_payload(payload)
     compact["mutated_subpath"] = subpath
     if from_context:
-        compact["targeted_via"] = "moon_context"
+        compact["targeted_via"] = "canvas_context"
     return {
         "type": "status",
-        "data": {"status": "moon_mutated", **compact, "full_payload": payload},
+        "data": {"status": "canvas_mutated", **compact, "full_payload": payload},
         "selectable": False,
-        "summary": _moon_status_summary("moon_mutate_field", compact),
+        "summary": _canvas_status_summary("canvas_mutate_field", compact),
     }
 
 
-def _moon_suggest_next(
+def _canvas_assign_agent(
     args: dict[str, Any],
     pg_conn: Any,
     selection_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workflow_id, from_context = _resolve_workflow_id(args, selection_context)
     if not workflow_id:
-        return _moon_error(
+        return _canvas_error(
             "workflow_id is required (no active Workflow authoring context in selection context)",
-            action="moon_suggest_next",
+            action="canvas_assign_agent",
+        )
+    node_id = str(args.get("node_id") or "").strip()
+    if not node_id:
+        return _canvas_error("node_id is required", action="canvas_assign_agent")
+    
+    agent_principal_ref = args.get("agent_principal_ref")
+    if agent_principal_ref is not None:
+        agent_principal_ref = str(agent_principal_ref).strip()
+        if not agent_principal_ref:
+            agent_principal_ref = None
+
+    if agent_principal_ref:
+        try:
+            rows = pg_conn.execute("SELECT 1 FROM agent_registry WHERE agent_principal_ref = $1", agent_principal_ref)
+            if not rows:
+                return _canvas_error(f"agent_principal_ref '{agent_principal_ref}' not found in agent_registry", action="canvas_assign_agent")
+        except Exception as exc:
+            return _canvas_error(f"registry validation failed: {exc}", action="canvas_assign_agent")
+
+    subpath = f"nodes/{node_id}/agent"
+    body = {"value": agent_principal_ref}
+
+    try:
+        result = _dispatch_op(
+            pg_conn,
+            "workflow_build.mutate",
+            {"workflow_id": workflow_id, "subpath": subpath, "body": body},
+        )
+    except Exception as exc:
+        return _canvas_error(f"workflow_build_mutate failed: {exc}", action="canvas_assign_agent")
+    payload = result if isinstance(result, dict) else {"raw": result}
+    compact = _compact_build_payload(payload)
+    compact["mutated_subpath"] = subpath
+    compact["assigned_agent"] = agent_principal_ref
+    if from_context:
+        compact["targeted_via"] = "canvas_context"
+    return {
+        "type": "status",
+        "data": {"status": "agent_assigned", **compact, "full_payload": payload},
+        "selectable": False,
+        "summary": _canvas_status_summary("canvas_assign_agent", compact),
+    }
+
+
+def _canvas_suggest_next(
+    args: dict[str, Any],
+    pg_conn: Any,
+    selection_context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    workflow_id, from_context = _resolve_workflow_id(args, selection_context)
+    if not workflow_id:
+        return _canvas_error(
+            "workflow_id is required (no active Workflow authoring context in selection context)",
+            action="canvas_suggest_next",
         )
     try:
         build_result = _dispatch_op(pg_conn, "workflow_build_get", {"workflow_id": workflow_id})
     except Exception as exc:
-        return _moon_error(f"loading build for suggest_next failed: {exc}", action="moon_suggest_next")
+        return _canvas_error(f"loading build for suggest_next failed: {exc}", action="canvas_suggest_next")
     build_graph = build_result.get("build_graph") if isinstance(build_result, dict) else None
     body: dict[str, Any] = {"build_graph": build_graph or {}}
     raw_node_id = args.get("node_id")
     node_id = str(raw_node_id).strip() if isinstance(raw_node_id, str) else ""
     if not node_id:
-        moon_ctx = _extract_moon_context(selection_context) or {}
-        ctx_node = str(moon_ctx.get("selected_node_id") or "").strip()
+        canvas_ctx = _extract_canvas_context(selection_context) or {}
+        ctx_node = str(canvas_ctx.get("selected_node_id") or "").strip()
         if ctx_node:
             node_id = ctx_node
     if node_id:
@@ -1111,7 +1167,7 @@ def _moon_suggest_next(
             {"workflow_id": workflow_id, "body": body},
         )
     except Exception as exc:
-        return _moon_error(f"workflow_build_suggest_next failed: {exc}", action="moon_suggest_next")
+        return _canvas_error(f"workflow_build_suggest_next failed: {exc}", action="canvas_suggest_next")
     payload = result if isinstance(result, dict) else {"raw": result}
     likely = payload.get("likely_next_steps") or []
     possible = payload.get("possible_next_steps") or []
@@ -1123,27 +1179,27 @@ def _moon_suggest_next(
         "likely_titles": [str(c.get("title") or c.get("capability_slug") or "") for c in likely if isinstance(c, dict)][:5],
     }
     if from_context:
-        compact["targeted_via"] = "moon_context"
+        compact["targeted_via"] = "canvas_context"
     if node_id:
         compact["anchor_node_id"] = node_id
     return {
         "type": "status",
-        "data": {"status": "moon_suggest_next", **compact, "full_payload": payload},
+        "data": {"status": "canvas_suggest_next", **compact, "full_payload": payload},
         "selectable": False,
-        "summary": _moon_status_summary("moon_suggest_next", compact),
+        "summary": _canvas_status_summary("canvas_suggest_next", compact),
     }
 
 
-def _moon_launch(
+def _canvas_launch(
     args: dict[str, Any],
     pg_conn: Any,
     selection_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workflow_id, from_context = _resolve_workflow_id(args, selection_context)
     if not workflow_id:
-        return _moon_error(
+        return _canvas_error(
             "workflow_id is required (no active Workflow authoring context in selection context)",
-            action="moon_launch",
+            action="canvas_launch",
         )
     payload: dict[str, Any] = {"workflow_id": workflow_id}
     for key in ("approved_by", "plan_name"):
@@ -1153,7 +1209,7 @@ def _moon_launch(
     try:
         result = _dispatch_op(pg_conn, "launch_plan", payload)
     except Exception as exc:
-        return _moon_error(f"launch_plan failed: {exc}", action="moon_launch")
+        return _canvas_error(f"launch_plan failed: {exc}", action="canvas_launch")
     body = result if isinstance(result, dict) else {"raw": result}
     run_id = body.get("run_id") or body.get("workflow_run_id")
     compact = {
@@ -1162,12 +1218,12 @@ def _moon_launch(
         "status": body.get("status") or body.get("execution_status"),
     }
     if from_context:
-        compact["targeted_via"] = "moon_context"
+        compact["targeted_via"] = "canvas_context"
     return {
         "type": "status",
-        "data": {"status": "moon_launched", **compact, "full_payload": body},
+        "data": {"status": "canvas_launched", **compact, "full_payload": body},
         "selectable": False,
-        "summary": _moon_status_summary("moon_launch", compact),
+        "summary": _canvas_status_summary("canvas_launch", compact),
     }
 
 
@@ -1639,6 +1695,29 @@ def _list_workflows(repo_root: str) -> dict:
                   COALESCE(NULLIF(request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
                   COALESCE(request_envelope->>'outcome_goal', request_envelope->>'objective', normalized_definition->>'phase', '') AS goal
              FROM workflow_definitions
+            WHERE status = 'active'
+            ORDER BY created_at DESC
+            LIMIT 100"""
+    )
+    rows = [
+        {
+            "file": row["workflow_definition_id"],
+            "name": row.get("workflow_name") or row.get("workflow_id") or row["workflow_definition_id"],
+            "jobs": int(row.get("total_jobs") or 0),
+            "goal": row.get("goal") or "",
+        }
+        for row in definition_rows
+    ]
+    return {
+        "type": "table",
+        "data": {
+            "columns": ["file", "name", "jobs", "goal"],
+            "rows": rows,
+        },
+        "selectable": True,
+        "summary": f"Found {len(rows)} DB workflow definitions",
+    }
+finitions
             WHERE status = 'active'
             ORDER BY created_at DESC
             LIMIT 100"""

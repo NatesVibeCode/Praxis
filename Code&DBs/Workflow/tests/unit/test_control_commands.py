@@ -798,7 +798,12 @@ def test_control_command_confirmation_required_handlers_execute_after_approval(
     if handler_attr == "cancel_run":
         assert called == [((conn, "run-7"), {"include_running": True})]
     else:
-        assert called == [((conn, "run-7", "build_a"), {})]
+        assert called == [
+            (
+                (conn, "run-7", "build_a"),
+                {"retry_command_id": "control.command.retry.1"},
+            )
+        ]
 
 
 def test_workflow_retry_idempotency_key_tracks_current_job_attempt() -> None:

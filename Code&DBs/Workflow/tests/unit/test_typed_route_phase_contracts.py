@@ -2,7 +2,7 @@
 
 Before this change, ``make_execution_phase`` emitted phases with
 ``agent_route="auto/build"`` and a human-readable ``outputs`` list but no
-machine-readable ``consumes`` / ``produces``. Moon Composer nodes inherited
+machine-readable ``consumes`` / ``produces``. Canvas Composer nodes inherited
 prose-only contracts and the type-flow validator could not check them at
 commit time (BUG-C6EE740C and the data-dictionary / gates / Provide-X
 chain it gates: BUG-5DD67C2A, BUG-99B9DC7E, BUG-2729F8B7).

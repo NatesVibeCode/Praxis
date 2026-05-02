@@ -29,10 +29,10 @@
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-queue-cancel-job-id.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-request-body-size.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-workflow-run-request.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moon-interaction-lacks.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moon-interactions-lack.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority.queue.json",
-    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-interaction-coverage.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-canvas-interaction-lacks.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-canvas-interactions-lack.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-interaction-coverage.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-accepts-full.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-commit-succeeds.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-repo-env-contains.queue.json",
@@ -140,9 +140,9 @@
       "specs": [
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-request-body-size.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-workflow-run-request.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moon-interaction-lacks.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moon-interactions-lack.queue.json",
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority.queue.json"
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-canvas-interaction-lacks.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-canvas-interactions-lack.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority.queue.json"
       ],
       "wave_id": "wave_0_authority_repair_batch_006"
     },
@@ -151,7 +151,7 @@
         "wave_0_authority_repair_batch_006"
       ],
       "specs": [
-        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-interaction-coverage.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-interaction-coverage.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-accepts-full.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-commit-succeeds.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-repo-env-contains.queue.json",

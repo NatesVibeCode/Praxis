@@ -1,4 +1,4 @@
-"""Runtime-owned Moon build moment assembly."""
+"""Runtime-owned Canvas build moment assembly."""
 
 from __future__ import annotations
 

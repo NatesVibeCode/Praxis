@@ -189,10 +189,99 @@ def resolve_references(
 # Job generation
 # ---------------------------------------------------------------------------
 
+def resolve_agent_from_registry(
+    conn: Any,
+    agent_ref: str | None,
+    slug: str | None,
+    reference: dict[str, Any],
+    route_hints: tuple[tuple[str, str], ...] = (),
+    route_hints_cache: tuple[tuple[str, str], ...] = (),
+) -> dict[str, Any]:
+    from runtime.agent_context import (
+        build_agent_prompt_envelope,
+        load_standing_orders,
+    )
+    import json
+
+    agent_ref_str = _as_text(agent_ref)
+    if agent_ref_str and not agent_ref_str.startswith("agent."):
+        legacy_to_builtin = {
+            "auto/build": "agent.builtin.build",
+            "auto/review": "agent.builtin.review",
+            "auto/research": "agent.builtin.research",
+            "auto/reasoning": "agent.builtin.reasoning",
+        }
+        if agent_ref_str in legacy_to_builtin:
+            agent_ref_str = legacy_to_builtin[agent_ref_str]
+
+    agent_def = None
+    if agent_ref_str and conn is not None:
+        try:
+            rows = conn.execute(
+                """SELECT
+                       agent_principal_ref,
+                       title,
+                       status,
+                       system_prompt_template,
+                       write_envelope,
+                       capability_refs,
+                       integration_refs,
+                       standing_order_keys,
+                       allowed_tools,
+                       network_policy
+                   FROM agent_registry
+                   WHERE agent_principal_ref = $1
+                   LIMIT 1""",
+                agent_ref_str,
+            )
+            if rows:
+                agent_def = dict(rows[0])
+        except Exception:
+            pass
+
+    if agent_def:
+        def _normalise_jsonb_list(value: Any) -> tuple[str, ...]:
+            if value is None: return ()
+            if isinstance(value, str):
+                try: value = json.loads(value)
+                except Exception: return ()
+            if not isinstance(value, (list, tuple)): return ()
+            return tuple(str(item) for item in value if isinstance(item, (str, int, float)))
+
+        standing_keys = _normalise_jsonb_list(agent_def.get("standing_order_keys"))
+        standing_orders = load_standing_orders(conn, standing_keys) if standing_keys and conn else []
+        
+        system_prompt = build_agent_prompt_envelope(
+            agent=agent_def,
+            base_instruction=agent_def.get("system_prompt_template") or f"You are {slug}. Execute the responsibilities assigned in this operating model.",
+            standing_orders=standing_orders,
+        )
+        return {
+            "route": agent_def["agent_principal_ref"],
+            "agent_principal_ref": agent_def["agent_principal_ref"],
+            "system_prompt": system_prompt,
+            "write_envelope": list(_normalise_jsonb_list(agent_def.get("write_envelope"))),
+            "allowed_tools": list(_normalise_jsonb_list(agent_def.get("allowed_tools"))),
+            "network_policy": agent_def.get("network_policy") or "praxis_only",
+        }
+
+    inferred_route = infer_agent_route(
+        slug,
+        reference,
+        route_hints=route_hints,
+        route_hints_cache=route_hints_cache,
+    )
+    return {
+        "route": inferred_route,
+        "system_prompt": f"You are {slug}. Execute the responsibilities assigned in this operating model." if slug else "Execute the responsibilities assigned in this operating model.",
+    }
+
+
 def generate_jobs(
     materialized_prose: str,
     references: list[dict[str, Any]],
     *,
+    conn: Any = None,
     route_hints: tuple[tuple[str, str], ...] = (),
     route_hints_cache: tuple[tuple[str, str], ...] = (),
 ) -> list[dict[str, Any]]:

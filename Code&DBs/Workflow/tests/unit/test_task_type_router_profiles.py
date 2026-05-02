@@ -193,6 +193,15 @@ class _EffortAuthorityConn(_FakeConn):
         return super().execute(sql, *params)
 
 
+class _MissingEffortMatrixConn(_EffortAuthorityConn):
+    def execute(self, sql: str, *params):
+        if "FROM provider_lane_policy" in sql:
+            return _lane_policy_rows(["together"])
+        if "FROM provider_reasoning_effort_matrix" in sql:
+            return []
+        return super().execute(sql, *params)
+
+
 def test_resolve_medium_route_tier_chain() -> None:
     router = TaskTypeRouter(_FakeConn())
 
@@ -233,6 +242,34 @@ def test_decision_chain_threads_reasoning_effort_when_authority_present() -> Non
         "provider": "openai",
         "reasoning_effort": "medium",
     }
+
+
+def test_decision_chain_does_not_treat_missing_effort_matrix_as_access_denial() -> None:
+    router = TaskTypeRouter(_MissingEffortMatrixConn())
+
+    chain = router._decision_chain(
+        "build",
+        [
+            {
+                "provider_slug": "together",
+                "model_slug": "moonshotai/Kimi-K2.6",
+                "rank": 1,
+                "adapter_type": "llm_task",
+                "billing_mode": "metered_api",
+                "budget_bucket": "together_api_payg",
+                "effective_marginal_cost": 1.0,
+                "spend_pressure": "low",
+                "budget_status": "",
+                "prefer_prepaid": False,
+                "allow_payg_fallback": True,
+            }
+        ],
+    )
+
+    assert chain[0].provider_slug == "together"
+    assert chain[0].model_slug == "moonshotai/Kimi-K2.6"
+    assert chain[0].reasoning_effort_slug == ""
+    assert chain[0].reasoning_provider_payload == {}
 
 
 def test_resolve_instant_latency_chain() -> None:

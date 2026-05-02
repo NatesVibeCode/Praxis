@@ -270,6 +270,38 @@ def test_provider_wide_reject_filters_entire_provider_from_chain() -> None:
     ]
 
 
+def test_model_specific_reject_filters_candidate_from_chain() -> None:
+    as_of = _as_of()
+    router = TaskTypeRouter(
+        _FakeConn(
+            _route_rows(),
+            eligibility_rows=[
+                {
+                    "task_route_eligibility_id": "eligibility.anthropic.sonnet.off",
+                    "task_type": None,
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-sonnet-4-6",
+                    "eligibility_status": "rejected",
+                    "reason_code": "deepseek_scope.denied",
+                    "rationale": "Provider/model is outside its permitted lanes",
+                    "effective_from": as_of - timedelta(minutes=1),
+                    "effective_to": None,
+                    "decision_ref": "architecture-policy::providers::deepseek-research-only",
+                }
+            ],
+        ),
+        now_factory=lambda: as_of,
+    )
+
+    chain = router.resolve_failover_chain("auto/build")
+
+    assert [decision.provider_slug for decision in chain] == ["openai", "google"]
+    assert [decision.model_slug for decision in chain] == [
+        "gpt-5.4",
+        "gemini-3.1-pro-preview",
+    ]
+
+
 def test_catalog_transport_type_drives_adapter_in_auto_chain() -> None:
     router = TaskTypeRouter(_TransportTypeConn([]))
 

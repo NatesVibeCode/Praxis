@@ -1,6 +1,6 @@
 """Smoke for BUG-89F67F22: Vite dev config reads PRAXIS_API_HOST env var.
 
-The Moon dev server's ``API_HOST`` constant must read ``process.env.PRAXIS_API_HOST``
+The Canvas dev server's ``API_HOST`` constant must read ``process.env.PRAXIS_API_HOST``
 so operators can override the bind address (mirroring the existing
 ``PRAXIS_UI_HOST`` pattern). Without the env var, ``127.0.0.1`` is the only
 allowed bind, which breaks dev setups behind a different loopback or remote.

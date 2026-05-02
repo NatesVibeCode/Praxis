@@ -469,14 +469,14 @@
       "$semantic_only": true
     },
     {
-      "decision_key": "architecture-policy::moon::moon-is-the-app",
-      "title": "Moon is the entire Praxis UI — not a tab, not a builder surface",
+      "decision_key": "architecture-policy::canvas::canvas-is-the-app",
+      "title": "Canvas is the entire Praxis UI — not a tab, not a builder surface",
       "match": [],
       "$semantic_only": true
     },
     {
-      "decision_key": "architecture-policy::moon::moon-visual-language",
-      "title": "Moon visual language: black/white, hollow nodes, compact-idle expand-on-interact",
+      "decision_key": "architecture-policy::canvas::canvas-visual-language",
+      "title": "Canvas visual language: black/white, hollow nodes, compact-idle expand-on-interact",
       "match": [],
       "$semantic_only": true
     },

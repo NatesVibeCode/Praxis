@@ -1544,14 +1544,14 @@
         "BUG-5DD67C2A"
       ],
       "bug_titles": [
-        "Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty"
+        "Canvas generated nodes leave data dictionary, bindings, imports, and DB object contracts empty"
       ],
       "categories": [
         "WIRING"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moon.generated.nodes",
-        "label": "title: moon.generated.nodes",
+        "cluster_key": "bug.title_anchor:canvas.generated.nodes",
+        "label": "title: canvas.generated.nodes",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [],
@@ -1563,9 +1563,9 @@
       "highest_severity": "P1",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
-      "packet_id": "bug_resolution_program_20260428_full.wave-0-authority-repair-authority-bug-system-title-moon-generated-nodes",
+      "packet_id": "bug_resolution_program_20260428_full.wave-0-authority-repair-authority-bug-system-title-canvas-generated-nodes",
       "packet_kind": "authority_repair",
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moon-generated-nodes",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvas-generated-nodes",
       "replay_blocked_bug_ids": [
         "BUG-5DD67C2A"
       ],
@@ -4570,14 +4570,14 @@
         "BUG-6F69A6DF"
       ],
       "bug_titles": [
-        "Moon node state styling uses filled alarm circles as primary graph language"
+        "Canvas node state styling uses filled alarm circles as primary graph language"
       ],
       "categories": [
         "OTHER"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moon.node.state",
-        "label": "title: moon.node.state",
+        "cluster_key": "bug.title_anchor:canvas.node.state",
+        "label": "title: canvas.node.state",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [],
@@ -4589,9 +4589,9 @@
       "highest_severity": "P2",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
-      "packet_id": "bug_resolution_program_20260428_full.wave-0-authority-repair-authority-bug-system-title-moon-node-state",
+      "packet_id": "bug_resolution_program_20260428_full.wave-0-authority-repair-authority-bug-system-title-canvas-node-state",
       "packet_kind": "authority_repair",
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moon-node-state",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvas-node-state",
       "replay_blocked_bug_ids": [
         "BUG-6F69A6DF"
       ],
@@ -4609,14 +4609,14 @@
         "BUG-8742C732"
       ],
       "bug_titles": [
-        "MoonBuildPage dock authority tests fail because node-popout is absent"
+        "CanvasBuildPage dock authority tests fail because node-popout is absent"
       ],
       "categories": [
         "TEST"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moonbuildpage.dock.authority",
-        "label": "title: moonbuildpage.dock.authority",
+        "cluster_key": "bug.title_anchor:canvasbuildpage.dock.authority",
+        "label": "title: canvasbuildpage.dock.authority",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [],
@@ -4628,9 +4628,9 @@
       "highest_severity": "P2",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
-      "packet_id": "bug_resolution_program_20260428_full.wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority",
+      "packet_id": "bug_resolution_program_20260428_full.wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority",
       "packet_kind": "authority_repair",
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority",
       "replay_blocked_bug_ids": [
         "BUG-8742C732"
       ],
@@ -4765,14 +4765,14 @@
         "BUG-B7A075E2"
       ],
       "bug_titles": [
-        "persona_profiles is empty \u2014 Moon compose path has no response_contract / system_prompt to teach the LLM the build shape"
+        "persona_profiles is empty \u2014 Canvas compose path has no response_contract / system_prompt to teach the LLM the build shape"
       ],
       "categories": [
         "OTHER"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:persona_profiles.empty.moon",
-        "label": "title: persona_profiles.empty.moon",
+        "cluster_key": "bug.title_anchor:persona_profiles.empty.canvas",
+        "label": "title: persona_profiles.empty.canvas",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [],
@@ -4784,9 +4784,9 @@
       "highest_severity": "P2",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
-      "packet_id": "bug_resolution_program_20260428_full.wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-moon",
+      "packet_id": "bug_resolution_program_20260428_full.wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-canvas",
       "packet_kind": "authority_repair",
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-moon",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-persona-profiles-empty-canvas",
       "replay_blocked_bug_ids": [
         "BUG-B7A075E2"
       ],
@@ -7044,14 +7044,14 @@
         "BUG-3CC5D3AD"
       ],
       "bug_titles": [
-        "Moon dev API crash loop blocks compose engine handoff"
+        "Canvas dev API crash loop blocks compose engine handoff"
       ],
       "categories": [
         "RUNTIME"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moon.dev.api",
-        "label": "title: moon.dev.api",
+        "cluster_key": "bug.title_anchor:canvas.dev.api",
+        "label": "title: canvas.dev.api",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [
@@ -7065,9 +7065,9 @@
       "highest_severity": "P1",
       "lane_id": "workflow_runtime",
       "lane_label": "Workflow / runtime",
-      "packet_id": "bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-moon-dev-api",
+      "packet_id": "bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-canvas-dev-api",
       "packet_kind": "evidence_recovery",
-      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-moon-dev-api",
+      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-canvas-dev-api",
       "replay_blocked_bug_ids": [
         "BUG-3CC5D3AD"
       ],
@@ -7085,14 +7085,14 @@
         "BUG-2729F8B7"
       ],
       "bug_titles": [
-        "Moon generated workflow has no release gates or typed gate contracts"
+        "Canvas generated workflow has no release gates or typed gate contracts"
       ],
       "categories": [
         "WIRING"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moon.generated.workflow",
-        "label": "title: moon.generated.workflow",
+        "cluster_key": "bug.title_anchor:canvas.generated.workflow",
+        "label": "title: canvas.generated.workflow",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [
@@ -7106,9 +7106,9 @@
       "highest_severity": "P1",
       "lane_id": "workflow_runtime",
       "lane_label": "Workflow / runtime",
-      "packet_id": "bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-moon-generated-workflow",
+      "packet_id": "bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-canvas-generated-workflow",
       "packet_kind": "evidence_recovery",
-      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-moon-generated-workflow",
+      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-canvas-generated-workflow",
       "replay_blocked_bug_ids": [
         "BUG-2729F8B7"
       ],
@@ -7908,14 +7908,14 @@
         "BUG-8DADDD64"
       ],
       "bug_titles": [
-        "Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled"
+        "Canvas compose creates local drafts with no trigger or jobs, leaving release dispatch disabled"
       ],
       "categories": [
         "WIRING"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moon.compose.creates",
-        "label": "title: moon.compose.creates",
+        "cluster_key": "bug.title_anchor:canvas.compose.creates",
+        "label": "title: canvas.compose.creates",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [
@@ -7929,9 +7929,9 @@
       "highest_severity": "P2",
       "lane_id": "workflow_runtime",
       "lane_label": "Workflow / runtime",
-      "packet_id": "bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-moon-compose-creates",
+      "packet_id": "bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-canvas-compose-creates",
       "packet_kind": "evidence_recovery",
-      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-moon-compose-creates",
+      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-canvas-compose-creates",
       "replay_blocked_bug_ids": [
         "BUG-8DADDD64"
       ],
@@ -7949,14 +7949,14 @@
         "BUG-5861F7F9"
       ],
       "bug_titles": [
-        "Moon trigger picker hangs while loading available triggers because catalog API does not return"
+        "Canvas trigger picker hangs while loading available triggers because catalog API does not return"
       ],
       "categories": [
         "RUNTIME"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moon.trigger.picker",
-        "label": "title: moon.trigger.picker",
+        "cluster_key": "bug.title_anchor:canvas.trigger.picker",
+        "label": "title: canvas.trigger.picker",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [
@@ -7970,9 +7970,9 @@
       "highest_severity": "P2",
       "lane_id": "workflow_runtime",
       "lane_label": "Workflow / runtime",
-      "packet_id": "bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-moon-trigger-picker",
+      "packet_id": "bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-canvas-trigger-picker",
       "packet_kind": "evidence_recovery",
-      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-moon-trigger-picker",
+      "packet_slug": "wave-1-evidence-normalization-workflow-runtime-title-canvas-trigger-picker",
       "replay_blocked_bug_ids": [
         "BUG-5861F7F9"
       ],
@@ -12573,7 +12573,7 @@
         "replay_run_id": null,
         "severity": "P2",
         "status": "OPEN",
-        "title": "persona_profiles is empty \u2014 Moon compose path has no response_contract / system_prompt to teach the LLM the build shape",
+        "title": "persona_profiles is empty \u2014 Canvas compose path has no response_contract / system_prompt to teach the LLM the build shape",
         "updated_at": "2026-04-25T01:50:54.276307+00:00"
       },
       {
@@ -12954,14 +12954,14 @@
       {
         "bug_id": "BUG-5DD67C2A",
         "category": "WIRING",
-        "description": "Generated Moon workflow nodes expose inspector sections for data dictionary kinds, field bindings, staged imports, attachments, and DB objects, but the integration-design workflow populated none of th...",
+        "description": "Generated Canvas workflow nodes expose inspector sections for data dictionary kinds, field bindings, staged imports, attachments, and DB objects, but the integration-design workflow populated none of th...",
         "filed_at": "2026-04-24T17:54:39.443176+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
         "replay_receipt_id": null,
         "replay_run_id": null,
         "resume_context": {
-          "blocked_on": "dedicated Moon composer session (sibling of BUG-C6EE740C)",
+          "blocked_on": "dedicated Canvas composer session (sibling of BUG-C6EE740C)",
           "downstream_of": "BUG-C6EE740C",
           "fix_path": "Same code path as BUG-C6EE740C: runtime/compiler.py:compile_prose. The bindings/imports/db-objects sections are populated downstream via runtime.build_authority.attach_authority / stage_import_snapshot / restore_binding (called from runtime/canonical_workflows.py:1015-1030 for the attachments subpath). The composer should call these helpers after LLM produces the structural definition so each node arrives with full attachments. Currently the LLM emits node skeletons but no bindings are attached.",
           "investigation_at": "2026-04-24",
@@ -12971,30 +12971,30 @@
         },
         "severity": "P1",
         "status": "OPEN",
-        "title": "Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty",
+        "title": "Canvas generated nodes leave data dictionary, bindings, imports, and DB object contracts empty",
         "updated_at": "2026-04-25T01:23:34.331159+00:00"
       },
       {
         "bug_id": "BUG-2729F8B7",
         "category": "WIRING",
-        "description": "Moon generated a workflow from an integration-design prompt, but the resulting graph has no visible release gates or typed gate contracts on the generated units. The release surface blocks with checks...",
+        "description": "Canvas generated a workflow from an integration-design prompt, but the resulting graph has no visible release gates or typed gate contracts on the generated units. The release surface blocks with checks...",
         "filed_at": "2026-04-24T17:52:12.115111+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
         "replay_receipt_id": null,
         "replay_run_id": null,
         "resume_context": {
-          "blocked_on": "dedicated Moon composer session (sibling of BUG-C6EE740C, BUG-5DD67C2A)",
+          "blocked_on": "dedicated Canvas composer session (sibling of BUG-C6EE740C, BUG-5DD67C2A)",
           "downstream_of": "BUG-C6EE740C",
-          "fix_path": "Composer needs to emit release_gates and typed gate contracts on every node it generates. Look at runtime/build_authority.py for gate primitives. The Moon save-boundary type-flow validator (_validate_type_flow_on_commit in surfaces/api/handlers/workflow_query.py:1361, 1411) currently rejects untyped types but does not require gates. Fix path: (1) compile_prose includes default release_gates per node-kind from catalog metadata; (2) save-boundary validator gains a release_gate_present check.",
+          "fix_path": "Composer needs to emit release_gates and typed gate contracts on every node it generates. Look at runtime/build_authority.py for gate primitives. The Canvas save-boundary type-flow validator (_validate_type_flow_on_commit in surfaces/api/handlers/workflow_query.py:1361, 1411) currently rejects untyped types but does not require gates. Fix path: (1) compile_prose includes default release_gates per node-kind from catalog metadata; (2) save-boundary validator gains a release_gate_present check.",
           "investigation_at": "2026-04-24",
           "scope_estimate": "Bundled with BUG-C6EE740C and BUG-5DD67C2A \u2014 one composer session covers all three",
           "status": "likely_fixed_by_upstream_pending_verification",
-          "trace": "compile_prose backend at runtime/compiler.py:448 calls build_authority_bundle(definition) and apply_authority_bundle which DO populate release gates and binding metadata when the LLM produces a clean structured definition. The empty-gate symptom in this bug is downstream of BUG-C6EE740C (LLM input contaminated with meta-prose -> LLM produced prose-shaped output -> build_authority could not extract gates from prose nodes). With BUG-C6EE740C fixed (meta-prose stripped at moonComposeAuthority), the LLM should produce structured nodes that build_authority can decorate with gates correctly. Browser verification needed to confirm."
+          "trace": "compile_prose backend at runtime/compiler.py:448 calls build_authority_bundle(definition) and apply_authority_bundle which DO populate release gates and binding metadata when the LLM produces a clean structured definition. The empty-gate symptom in this bug is downstream of BUG-C6EE740C (LLM input contaminated with meta-prose -> LLM produced prose-shaped output -> build_authority could not extract gates from prose nodes). With BUG-C6EE740C fixed (meta-prose stripped at canvasComposeAuthority), the LLM should produce structured nodes that build_authority can decorate with gates correctly. Browser verification needed to confirm."
         },
         "severity": "P1",
         "status": "OPEN",
-        "title": "Moon generated workflow has no release gates or typed gate contracts",
+        "title": "Canvas generated workflow has no release gates or typed gate contracts",
         "updated_at": "2026-04-25T01:23:34.028375+00:00"
       },
       {
@@ -13353,7 +13353,7 @@
       {
         "bug_id": "BUG-DDFA8F9E",
         "category": "RUNTIME",
-        "description": "Live Moon Support Intake Orchestrator proof validated and dispatched run:wf_d22b7388f065:32e3d355bd34a952, but execution failed at normalize-intake with credential.env_var_missing: OPENAI_API_KEY not ...",
+        "description": "Live Canvas Support Intake Orchestrator proof validated and dispatched run:wf_d22b7388f065:32e3d355bd34a952, but execution failed at normalize-intake with credential.env_var_missing: OPENAI_API_KEY not ...",
         "filed_at": "2026-04-24T06:33:43.892897+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -13532,7 +13532,7 @@
         "replay_run_id": "workflow_562b40c61833",
         "severity": "P2",
         "status": "OPEN",
-        "title": "Moon trigger picker hangs while loading available triggers because catalog API does not return",
+        "title": "Canvas trigger picker hangs while loading available triggers because catalog API does not return",
         "updated_at": "2026-04-24T05:38:43.640876+00:00"
       },
       {
@@ -13546,7 +13546,7 @@
         "replay_run_id": "workflow_562b40c61833",
         "severity": "P2",
         "status": "OPEN",
-        "title": "Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled",
+        "title": "Canvas compose creates local drafts with no trigger or jobs, leaving release dispatch disabled",
         "updated_at": "2026-04-24T05:38:43.630267+00:00"
       },
       {
@@ -13566,7 +13566,7 @@
       {
         "bug_id": "BUG-3CC5D3AD",
         "category": "RUNTIME",
-        "description": "Moon compose can render an editable fallback graph, but the live workflow engine handoff is blocked because the dev API crash-loops on startup/restart. Observed failures include 'WorkflowMigrationErro...",
+        "description": "Canvas compose can render an editable fallback graph, but the live workflow engine handoff is blocked because the dev API crash-loops on startup/restart. Observed failures include 'WorkflowMigrationErro...",
         "filed_at": "2026-04-24T04:40:24.282475+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -13574,7 +13574,7 @@
         "replay_run_id": null,
         "severity": "P1",
         "status": "OPEN",
-        "title": "Moon dev API crash loop blocks compose engine handoff",
+        "title": "Canvas dev API crash loop blocks compose engine handoff",
         "updated_at": "2026-04-24T04:40:24.282475+00:00"
       },
       {
@@ -14504,7 +14504,7 @@
       {
         "bug_id": "BUG-6F69A6DF",
         "category": "OTHER",
-        "description": "Moon node rendering currently lets blocked/error route-bearing nodes paint the full circular node body, so status becomes the dominant graph shape. This makes normal workflows read as filled red/alarm...",
+        "description": "Canvas node rendering currently lets blocked/error route-bearing nodes paint the full circular node body, so status becomes the dominant graph shape. This makes normal workflows read as filled red/alarm...",
         "filed_at": "2026-04-23T22:17:34.163507+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -14512,7 +14512,7 @@
         "replay_run_id": null,
         "severity": "P2",
         "status": "OPEN",
-        "title": "Moon node state styling uses filled alarm circles as primary graph language",
+        "title": "Canvas node state styling uses filled alarm circles as primary graph language",
         "updated_at": "2026-04-23T22:17:34.163507+00:00"
       },
       {
@@ -14894,7 +14894,7 @@
       {
         "bug_id": "BUG-D7801F5D",
         "category": "VERIFY",
-        "description": "No receipts/runs were found for wave IDs ui_atlas_refinement_wave, ui_atlas_refinement_moon_run_graph_gates, ui_atlas_refinement_moon_interaction_navigation_cleanup, or ui_atlas_refinement_atlas_graph...",
+        "description": "No receipts/runs were found for wave IDs ui_atlas_refinement_wave, ui_atlas_refinement_canvas_run_graph_gates, ui_atlas_refinement_canvas_interaction_navigation_cleanup, or ui_atlas_refinement_atlas_graph...",
         "filed_at": "2026-04-23T21:16:27.077908+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -14933,7 +14933,7 @@
       {
         "bug_id": "BUG-AD8C5792",
         "category": "WIRING",
-        "description": "The requested Wave artifacts location artifacts/workflow/ui_atlas_refinement_wave does not exist in repo, so prescribed queue specs (01_moon_run_graph_gates, 02_moon_interaction_navigation_cleanup, 03...",
+        "description": "The requested Wave artifacts location artifacts/workflow/ui_atlas_refinement_wave does not exist in repo, so prescribed queue specs (01_canvas_run_graph_gates, 02_canvas_interaction_navigation_cleanup, 03...",
         "filed_at": "2026-04-23T21:16:12.860644+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -14947,7 +14947,7 @@
       {
         "bug_id": "BUG-8742C732",
         "category": "TEST",
-        "description": "Frontend npm test fails in MoonBuildPage.dockAuthority.test.tsx: both dock-authority tests expect data-testid=node-popout, but the rendered MoonBuildPage tree has no node-popout element before opening...",
+        "description": "Frontend npm test fails in CanvasBuildPage.dockAuthority.test.tsx: both dock-authority tests expect data-testid=node-popout, but the rendered CanvasBuildPage tree has no node-popout element before opening...",
         "filed_at": "2026-04-23T21:09:21.027740+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -14956,23 +14956,23 @@
         "resume_context": {
           "hypothesis": "The selected-node popout contract changed or no longer renders in the test fixture, while dock authority tests still assume it exists.",
           "next_steps": [
-            "Run npm test -- MoonBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
+            "Run npm test -- CanvasBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
             "Decide whether node popout should render on selected node in this state or update the test to assert the new interaction contract",
             "Keep npm test green and bounded before treating frontend quality as release-ready"
           ],
           "observed_commands": [
             "npm run build: passed",
-            "./scripts/test.sh moon-style-lint: ok true",
-            "npm test: MoonBuildPage.dockAuthority.test.tsx failed 2 tests; stopped after prolonged worker churn"
+            "./scripts/test.sh canvas-style-lint: ok true",
+            "npm test: CanvasBuildPage.dockAuthority.test.tsx failed 2 tests; stopped after prolonged worker churn"
           ],
           "related_files": [
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.dockAuthority.test.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+            "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.dockAuthority.test.tsx",
+            "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx"
           ]
         },
         "severity": "P2",
         "status": "OPEN",
-        "title": "MoonBuildPage dock authority tests fail because node-popout is absent",
+        "title": "CanvasBuildPage dock authority tests fail because node-popout is absent",
         "updated_at": "2026-04-23T21:09:21.027740+00:00"
       },
       {
@@ -18955,10 +18955,10 @@
         "category_counts": {
           "OTHER": 1
         },
-        "cluster_key": "bug.title_anchor:persona_profiles.empty.moon",
+        "cluster_key": "bug.title_anchor:persona_profiles.empty.canvas",
         "common_tags": [],
         "count": 1,
-        "label": "title: persona_profiles.empty.moon",
+        "label": "title: persona_profiles.empty.canvas",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -18969,7 +18969,7 @@
           "OPEN": 1
         },
         "titles": [
-          "persona_profiles is empty \u2014 Moon compose path has no response_contract / system_prompt to teach the LLM the build shape"
+          "persona_profiles is empty \u2014 Canvas compose path has no response_contract / system_prompt to teach the LLM the build shape"
         ]
       },
       {
@@ -19417,10 +19417,10 @@
         "category_counts": {
           "WIRING": 1
         },
-        "cluster_key": "bug.title_anchor:moon.generated.nodes",
+        "cluster_key": "bug.title_anchor:canvas.generated.nodes",
         "common_tags": [],
         "count": 1,
-        "label": "title: moon.generated.nodes",
+        "label": "title: canvas.generated.nodes",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -19431,7 +19431,7 @@
           "OPEN": 1
         },
         "titles": [
-          "Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty"
+          "Canvas generated nodes leave data dictionary, bindings, imports, and DB object contracts empty"
         ]
       },
       {
@@ -19441,10 +19441,10 @@
         "category_counts": {
           "WIRING": 1
         },
-        "cluster_key": "bug.title_anchor:moon.generated.workflow",
+        "cluster_key": "bug.title_anchor:canvas.generated.workflow",
         "common_tags": [],
         "count": 1,
-        "label": "title: moon.generated.workflow",
+        "label": "title: canvas.generated.workflow",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -19455,7 +19455,7 @@
           "OPEN": 1
         },
         "titles": [
-          "Moon generated workflow has no release gates or typed gate contracts"
+          "Canvas generated workflow has no release gates or typed gate contracts"
         ]
       },
       {
@@ -19822,10 +19822,10 @@
         "category_counts": {
           "RUNTIME": 1
         },
-        "cluster_key": "bug.title_anchor:moon.trigger.picker",
+        "cluster_key": "bug.title_anchor:canvas.trigger.picker",
         "common_tags": [],
         "count": 1,
-        "label": "title: moon.trigger.picker",
+        "label": "title: canvas.trigger.picker",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -19836,7 +19836,7 @@
           "OPEN": 1
         },
         "titles": [
-          "Moon trigger picker hangs while loading available triggers because catalog API does not return"
+          "Canvas trigger picker hangs while loading available triggers because catalog API does not return"
         ]
       },
       {
@@ -19846,10 +19846,10 @@
         "category_counts": {
           "WIRING": 1
         },
-        "cluster_key": "bug.title_anchor:moon.compose.creates",
+        "cluster_key": "bug.title_anchor:canvas.compose.creates",
         "common_tags": [],
         "count": 1,
-        "label": "title: moon.compose.creates",
+        "label": "title: canvas.compose.creates",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -19860,7 +19860,7 @@
           "OPEN": 1
         },
         "titles": [
-          "Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled"
+          "Canvas compose creates local drafts with no trigger or jobs, leaving release dispatch disabled"
         ]
       },
       {
@@ -19894,10 +19894,10 @@
         "category_counts": {
           "RUNTIME": 1
         },
-        "cluster_key": "bug.title_anchor:moon.dev.api",
+        "cluster_key": "bug.title_anchor:canvas.dev.api",
         "common_tags": [],
         "count": 1,
-        "label": "title: moon.dev.api",
+        "label": "title: canvas.dev.api",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -19908,7 +19908,7 @@
           "OPEN": 1
         },
         "titles": [
-          "Moon dev API crash loop blocks compose engine handoff"
+          "Canvas dev API crash loop blocks compose engine handoff"
         ]
       },
       {
@@ -20675,10 +20675,10 @@
         "category_counts": {
           "OTHER": 1
         },
-        "cluster_key": "bug.title_anchor:moon.node.state",
+        "cluster_key": "bug.title_anchor:canvas.node.state",
         "common_tags": [],
         "count": 1,
-        "label": "title: moon.node.state",
+        "label": "title: canvas.node.state",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -20689,7 +20689,7 @@
           "OPEN": 1
         },
         "titles": [
-          "Moon node state styling uses filled alarm circles as primary graph language"
+          "Canvas node state styling uses filled alarm circles as primary graph language"
         ]
       },
       {
@@ -21084,12 +21084,12 @@
         "category_counts": {
           "TEST": 1
         },
-        "cluster_key": "bug.title_anchor:moonbuildpage.dock.authority",
+        "cluster_key": "bug.title_anchor:canvasbuildpage.dock.authority",
         "common_tags": [],
         "count": 1,
-        "label": "title: moonbuildpage.dock.authority",
+        "label": "title: canvasbuildpage.dock.authority",
         "next_steps": [
-          "Run npm test -- MoonBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
+          "Run npm test -- CanvasBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
           "Decide whether node popout should render on selected node in this state or update the test to assert the new interaction contract",
           "Keep npm test green and bounded before treating frontend quality as release-ready"
         ],
@@ -21102,7 +21102,7 @@
           "OPEN": 1
         },
         "titles": [
-          "MoonBuildPage dock authority tests fail because node-popout is absent"
+          "CanvasBuildPage dock authority tests fail because node-popout is absent"
         ]
       },
       {
@@ -21636,18 +21636,18 @@
         {
           "bug_id": "BUG-FC232024",
           "category": "RUNTIME",
-          "description": "Moon displayed 'Request timed out after 15s' while reviewing the generated workflow. When suggestion or catalog calls time out, the builder should retain visible partial graph state, show the failed a...",
+          "description": "Canvas displayed 'Request timed out after 15s' while reviewing the generated workflow. When suggestion or catalog calls time out, the builder should retain visible partial graph state, show the failed a...",
           "filed_at": "2026-04-24T17:54:39.594814+00:00",
           "resolved_at": "2026-04-25T01:28:51.859892+00:00",
           "resume_context": {
             "finding": "already_fixed_in_react",
             "investigation_at": "2026-04-24",
             "status": "verified_already_fixed",
-            "trace": "MoonActionDock.tsx already has full partial-state fallback: suggestedError + suggestedStale states (lines 66-67), .catch preserves previous suggestedCatalogIds, UI renders 'Couldn't refresh suggestions (showing last known)' with explicit retry button (lines 500-541), aria-live='polite' for screen readers, .moon-action__suggestions--stale class on the cached set, role='status' on error block. Implementation matches every requirement in the bug description: 'retain visible partial graph state', 'show the failed authority call', 'offer retry', 'offline legal-next fallback'."
+            "trace": "CanvasActionDock.tsx already has full partial-state fallback: suggestedError + suggestedStale states (lines 66-67), .catch preserves previous suggestedCatalogIds, UI renders 'Couldn't refresh suggestions (showing last known)' with explicit retry button (lines 500-541), aria-live='polite' for screen readers, .canvas-action__suggestions--stale class on the cached set, role='status' on error block. Implementation matches every requirement in the bug description: 'retain visible partial graph state', 'show the failed authority call', 'offer retry', 'offline legal-next fallback'."
           },
           "severity": "P2",
           "status": "FIXED",
-          "title": "Moon suggest-next request times out without graceful partial-state fallback",
+          "title": "Canvas suggest-next request times out without graceful partial-state fallback",
           "updated_at": "2026-04-25T01:28:51.859892+00:00"
         },
         {
@@ -21747,10 +21747,10 @@
           "category_counts": {
             "RUNTIME": 1
           },
-          "cluster_key": "bug.title_anchor:moon.suggest-next.request",
+          "cluster_key": "bug.title_anchor:canvas.suggest-next.request",
           "common_tags": [],
           "count": 1,
-          "label": "title: moon.suggest-next.request",
+          "label": "title: canvas.suggest-next.request",
           "next_steps": [],
           "reason_code": "bug_cluster.title_anchor",
           "severity_counts": {
@@ -21761,7 +21761,7 @@
             "FIXED": 1
           },
           "titles": [
-            "Moon suggest-next request times out without graceful partial-state fallback"
+            "Canvas suggest-next request times out without graceful partial-state fallback"
           ]
         },
         {

@@ -899,7 +899,7 @@ def test_plan_definition_materializes_webhook_routes_as_generic_integration_jobs
     }
 
 
-def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gates() -> None:
+def test_plan_definition_emits_after_failure_dependency_edges_from_canvas_edge_gates() -> None:
     result = plan_definition(
         {
             "source_prose": "Run fallback remediation when the primary step fails.",
@@ -1152,7 +1152,7 @@ def test_plan_definition_wires_retry_edge_gates_into_job_max_attempts() -> None:
     assert jobs["step-002"]["max_attempts"] == 5
 
 
-def test_plan_definition_emits_conditional_dependency_edges_from_moon_edge_gates() -> None:
+def test_plan_definition_emits_conditional_dependency_edges_from_canvas_edge_gates() -> None:
     condition = {"field": "should_continue", "op": "equals", "value": True}
     result = plan_definition(
         {

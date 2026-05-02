@@ -304,7 +304,7 @@ def test_catalog_upsert_requires_confirmation() -> None:
                 "catalog",
                 "upsert",
                 "--item-json",
-                '{"catalog_item_id":"x","surface_name":"moon","label":"X","icon":"x","family":"think","status":"ready","drop_kind":"node","action_value":"auto/x","description":"","truth_category":"runtime","truth_badge":"ok","truth_detail":"ok","surface_tier":"primary","surface_badge":"ok","surface_detail":"ok","enabled":true,"display_order":1,"binding_revision":"rev","decision_ref":"decision"}',
+                '{"catalog_item_id":"x","surface_name":"canvas","label":"X","icon":"x","family":"think","status":"ready","drop_kind":"node","action_value":"auto/x","description":"","truth_category":"runtime","truth_badge":"ok","truth_detail":"ok","surface_tier":"primary","surface_badge":"ok","surface_detail":"ok","enabled":true,"display_order":1,"binding_revision":"rev","decision_ref":"decision"}',
             ],
             stdout=stdout,
         )

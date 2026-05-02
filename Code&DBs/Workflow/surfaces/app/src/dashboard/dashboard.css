@@ -847,7 +847,7 @@ button.dash-hero-card__stat--link:focus-visible {
   min-height: 20px;
 }
 
-.wf-card__eyebrow-row .moon-workflow-silhouette {
+.wf-card__eyebrow-row .canvas-workflow-silhouette {
   display: block;
   flex-shrink: 0;
 }

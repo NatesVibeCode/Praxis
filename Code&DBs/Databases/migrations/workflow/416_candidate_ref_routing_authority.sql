@@ -403,6 +403,23 @@ SELECT
    AND sources.model_slug = needs.model_slug
 ON CONFLICT (candidate_ref) DO NOTHING;
 
+-- Migration 378 made provider_transport_admissions the hard authority for
+-- task_type_routing transports. Some scratch/live beta databases can still
+-- carry stale rows inserted before that trigger (for example direct DeepSeek
+-- with transport_type='CLI'). Clean them before the candidate_ref UPDATE below,
+-- because even a metadata-only UPDATE must satisfy the trigger.
+DELETE FROM task_type_routing AS r
+ WHERE NOT EXISTS (
+     SELECT 1
+       FROM provider_transport_admissions AS admission
+      WHERE admission.provider_slug = r.provider_slug
+        AND admission.status = 'active'
+        AND (
+            (r.transport_type = 'API' AND admission.transport_kind = 'http')
+            OR (r.transport_type = 'CLI' AND admission.transport_kind = 'cli')
+        )
+ );
+
 UPDATE task_type_routing
    SET host_provider_slug = COALESCE(host_provider_slug, ''),
        variant = COALESCE(variant, ''),

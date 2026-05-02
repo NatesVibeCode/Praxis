@@ -38,7 +38,7 @@ A previous Claude session already drafted fixes to five migrations — those edi
 - `100_adapter_config_authority.sql` — draft prepends `CREATE TABLE IF NOT EXISTS platform_config` + default rows.
 - `106_acceptance_status_index.sql` — draft removes `CONCURRENTLY` (cannot run inside a transaction).
 
-The other 10 modified files (Moon UI, build_authority, canonical_workflows, capability_catalog wiring, tests) are **out of scope** for this task — leave them alone.
+The other 10 modified files (Canvas UI, build_authority, canonical_workflows, capability_catalog wiring, tests) are **out of scope** for this task — leave them alone.
 
 ## Goals
 

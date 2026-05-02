@@ -1,7 +1,7 @@
 """Gateway-friendly query handler for ``workflow_build.get``.
 
 Loads the workflow row and composes the canonical ``BuildPayload`` shape
-used by Moon and any other authoring surface. Same payload the
+used by Canvas and any other authoring surface. Same payload the
 ``GET /api/workflows/{workflow_id}/build`` HTTP route returns, but
 dispatched through the CQRS gateway so the read records its own receipt
 and is reachable from CLI / MCP / chat tools as a registered operation.

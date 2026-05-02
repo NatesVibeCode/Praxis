@@ -1,7 +1,7 @@
 """Typed workflow graph helpers.
 
 This is the first narrow contract layer for graph-authoring legality: a node
-or catalog item declares the state types it consumes and produces, and Moon can
+or catalog item declares the state types it consumes and produces, and Canvas can
 ask which next actions are actually possible from the accumulated graph state.
 """
 
@@ -292,7 +292,7 @@ def route_type_contract(
     and friends) to attach typed ``consumes`` / ``consumes_any`` / ``produces``
     to phases that previously only carried the route literal (``auto/build``,
     ``auto/review``, etc). Without this, downstream graph nodes inherit no
-    type contract and Moon Composer cannot validate type-flow before commit
+    type contract and Canvas Composer cannot validate type-flow before commit
     (BUG-C6EE740C / BUG-5DD67C2A / BUG-99B9DC7E / BUG-2729F8B7).
 
     Resolution: ``extra`` overrides take precedence (declared contract from

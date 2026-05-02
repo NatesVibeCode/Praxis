@@ -1276,14 +1276,14 @@
         "BUG-9B4C9384"
       ],
       "bug_titles": [
-        "Moon interaction lacks standard canvas navigation and deletion controls"
+        "Canvas interaction lacks standard canvas navigation and deletion controls"
       ],
       "categories": [
         "VERIFY"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moon.interaction.lacks",
-        "label": "title: moon.interaction.lacks",
+        "cluster_key": "bug.title_anchor:canvas.interaction.lacks",
+        "label": "title: canvas.interaction.lacks",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [],
@@ -1295,9 +1295,9 @@
       "highest_severity": "P2",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
-      "packet_id": "bug_resolution_program_20260423.wave-0-authority-repair-authority-bug-system-title-moon-interaction-lacks",
+      "packet_id": "bug_resolution_program_20260423.wave-0-authority-repair-authority-bug-system-title-canvas-interaction-lacks",
       "packet_kind": "authority_repair",
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moon-interaction-lacks",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvas-interaction-lacks",
       "replay_blocked_bug_ids": [
         "BUG-9B4C9384"
       ],
@@ -1315,14 +1315,14 @@
         "BUG-11898FCA"
       ],
       "bug_titles": [
-        "Moon interactions lack standard zoom, pan, and delete controls"
+        "Canvas interactions lack standard zoom, pan, and delete controls"
       ],
       "categories": [
         "WIRING"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moon.interactions.lack",
-        "label": "title: moon.interactions.lack",
+        "cluster_key": "bug.title_anchor:canvas.interactions.lack",
+        "label": "title: canvas.interactions.lack",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [],
@@ -1334,9 +1334,9 @@
       "highest_severity": "P2",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
-      "packet_id": "bug_resolution_program_20260423.wave-0-authority-repair-authority-bug-system-title-moon-interactions-lack",
+      "packet_id": "bug_resolution_program_20260423.wave-0-authority-repair-authority-bug-system-title-canvas-interactions-lack",
       "packet_kind": "authority_repair",
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moon-interactions-lack",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvas-interactions-lack",
       "replay_blocked_bug_ids": [
         "BUG-11898FCA"
       ],
@@ -1354,14 +1354,14 @@
         "BUG-8742C732"
       ],
       "bug_titles": [
-        "MoonBuildPage dock authority tests fail because node-popout is absent"
+        "CanvasBuildPage dock authority tests fail because node-popout is absent"
       ],
       "categories": [
         "TEST"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moonbuildpage.dock.authority",
-        "label": "title: moonbuildpage.dock.authority",
+        "cluster_key": "bug.title_anchor:canvasbuildpage.dock.authority",
+        "label": "title: canvasbuildpage.dock.authority",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [],
@@ -1373,9 +1373,9 @@
       "highest_severity": "P2",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
-      "packet_id": "bug_resolution_program_20260423.wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority",
+      "packet_id": "bug_resolution_program_20260423.wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority",
       "packet_kind": "authority_repair",
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-dock-authority",
       "replay_blocked_bug_ids": [
         "BUG-8742C732"
       ],
@@ -1393,14 +1393,14 @@
         "BUG-6D4D0B3D"
       ],
       "bug_titles": [
-        "MoonBuildPage interaction coverage missing for delete and canvas controls"
+        "CanvasBuildPage interaction coverage missing for delete and canvas controls"
       ],
       "categories": [
         "TEST"
       ],
       "cluster": {
-        "cluster_key": "bug.title_anchor:moonbuildpage.interaction.coverage",
-        "label": "title: moonbuildpage.interaction.coverage",
+        "cluster_key": "bug.title_anchor:canvasbuildpage.interaction.coverage",
+        "label": "title: canvasbuildpage.interaction.coverage",
         "reason_code": "bug_cluster.title_anchor"
       },
       "depends_on_wave": [],
@@ -1412,9 +1412,9 @@
       "highest_severity": "P2",
       "lane_id": "authority_bug_system",
       "lane_label": "Authority / bug system",
-      "packet_id": "bug_resolution_program_20260423.wave-0-authority-repair-authority-bug-system-title-moonbuildpage-interaction-coverage",
+      "packet_id": "bug_resolution_program_20260423.wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-interaction-coverage",
       "packet_kind": "authority_repair",
-      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-moonbuildpage-interaction-coverage",
+      "packet_slug": "wave-0-authority-repair-authority-bug-system-title-canvasbuildpage-interaction-coverage",
       "replay_blocked_bug_ids": [
         "BUG-6D4D0B3D"
       ],
@@ -3067,7 +3067,7 @@
         "replay_run_id": null,
         "severity": "P2",
         "status": "OPEN",
-        "title": "MoonBuildPage interaction coverage missing for delete and canvas controls",
+        "title": "CanvasBuildPage interaction coverage missing for delete and canvas controls",
         "updated_at": "2026-04-23T21:28:05.411106+00:00"
       },
       {
@@ -3103,7 +3103,7 @@
       {
         "bug_id": "BUG-9B4C9384",
         "category": "VERIFY",
-        "description": "MoonBuildPage lacks standard pointer-based pan/zoom controls in build mode and lacks a deterministic keyboard deletion flow for selected nodes/edges. This blocks basic graph navigation and destructive...",
+        "description": "CanvasBuildPage lacks standard pointer-based pan/zoom controls in build mode and lacks a deterministic keyboard deletion flow for selected nodes/edges. This blocks basic graph navigation and destructive...",
         "filed_at": "2026-04-23T21:26:33.344900+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -3111,7 +3111,7 @@
         "replay_run_id": null,
         "severity": "P2",
         "status": "OPEN",
-        "title": "Moon interaction lacks standard canvas navigation and deletion controls",
+        "title": "Canvas interaction lacks standard canvas navigation and deletion controls",
         "updated_at": "2026-04-23T21:26:33.344900+00:00"
       },
       {
@@ -3194,7 +3194,7 @@
       {
         "bug_id": "BUG-11898FCA",
         "category": "WIRING",
-        "description": "Moon canvas currently supports click/dragger interactions only; there is no wheel/trackpad zoom around pointer, no drag-to-pan on empty canvas, and no delete mutation authority flow for selected node/...",
+        "description": "Canvas canvas currently supports click/dragger interactions only; there is no wheel/trackpad zoom around pointer, no drag-to-pan on empty canvas, and no delete mutation authority flow for selected node/...",
         "filed_at": "2026-04-23T21:23:29.231038+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -3202,7 +3202,7 @@
         "replay_run_id": null,
         "severity": "P2",
         "status": "OPEN",
-        "title": "Moon interactions lack standard zoom, pan, and delete controls",
+        "title": "Canvas interactions lack standard zoom, pan, and delete controls",
         "updated_at": "2026-04-23T21:23:29.231038+00:00"
       },
       {
@@ -3269,7 +3269,7 @@
       {
         "bug_id": "BUG-976B5502",
         "category": "TEST",
-        "description": "The frontend test run surfaced two real MoonBuildPage.dockAuthority failures, then continued with prolonged Vitest worker churn until manually stopped. Impact: future agents get a red test signal, but...",
+        "description": "The frontend test run surfaced two real CanvasBuildPage.dockAuthority failures, then continued with prolonged Vitest worker churn until manually stopped. Impact: future agents get a red test signal, but...",
         "filed_at": "2026-04-23T21:18:00.728520+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -3282,13 +3282,13 @@
             "Keep interaction-test failures visible without requiring manual worker cleanup"
           ],
           "observed_commands": [
-            "npm test -> MoonBuildPage.dockAuthority.test.tsx failed 2 tests",
+            "npm test -> CanvasBuildPage.dockAuthority.test.tsx failed 2 tests",
             "ps showed multiple node vitest workers still running several minutes into the run",
             "pkill -f node .*vitest was used to stop the run after useful failure signal was captured"
           ],
           "related_files": [
             "Code&DBs/Workflow/surfaces/app/package.json",
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.dockAuthority.test.tsx"
+            "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.dockAuthority.test.tsx"
           ]
         },
         "severity": "P3",
@@ -3587,7 +3587,7 @@
       {
         "bug_id": "BUG-D7801F5D",
         "category": "VERIFY",
-        "description": "No receipts/runs were found for wave IDs ui_atlas_refinement_wave, ui_atlas_refinement_moon_run_graph_gates, ui_atlas_refinement_moon_interaction_navigation_cleanup, or ui_atlas_refinement_atlas_graph...",
+        "description": "No receipts/runs were found for wave IDs ui_atlas_refinement_wave, ui_atlas_refinement_canvas_run_graph_gates, ui_atlas_refinement_canvas_interaction_navigation_cleanup, or ui_atlas_refinement_atlas_graph...",
         "filed_at": "2026-04-23T21:16:27.077908+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -3662,7 +3662,7 @@
       {
         "bug_id": "BUG-E340E42A",
         "category": "WIRING",
-        "description": "While preparing the Moon/Atlas UI wave, shell/surfaceRegistry.tsx still defines a top-level Cost Summary primary tab in surfaces for navigation despite spec explicitly requiring removal from primary n...",
+        "description": "While preparing the Canvas/Atlas UI wave, shell/surfaceRegistry.tsx still defines a top-level Cost Summary primary tab in surfaces for navigation despite spec explicitly requiring removal from primary n...",
         "filed_at": "2026-04-23T21:16:17.541416+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -3698,7 +3698,7 @@
       {
         "bug_id": "BUG-AD8C5792",
         "category": "WIRING",
-        "description": "The requested Wave artifacts location artifacts/workflow/ui_atlas_refinement_wave does not exist in repo, so prescribed queue specs (01_moon_run_graph_gates, 02_moon_interaction_navigation_cleanup, 03...",
+        "description": "The requested Wave artifacts location artifacts/workflow/ui_atlas_refinement_wave does not exist in repo, so prescribed queue specs (01_canvas_run_graph_gates, 02_canvas_interaction_navigation_cleanup, 03...",
         "filed_at": "2026-04-23T21:16:12.860644+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -3712,7 +3712,7 @@
       {
         "bug_id": "BUG-8742C732",
         "category": "TEST",
-        "description": "Frontend npm test fails in MoonBuildPage.dockAuthority.test.tsx: both dock-authority tests expect data-testid=node-popout, but the rendered MoonBuildPage tree has no node-popout element before opening...",
+        "description": "Frontend npm test fails in CanvasBuildPage.dockAuthority.test.tsx: both dock-authority tests expect data-testid=node-popout, but the rendered CanvasBuildPage tree has no node-popout element before opening...",
         "filed_at": "2026-04-23T21:09:21.027740+00:00",
         "replay_ready": false,
         "replay_reason_code": "bug.replay_missing_run_context",
@@ -3721,23 +3721,23 @@
         "resume_context": {
           "hypothesis": "The selected-node popout contract changed or no longer renders in the test fixture, while dock authority tests still assume it exists.",
           "next_steps": [
-            "Run npm test -- MoonBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
+            "Run npm test -- CanvasBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
             "Decide whether node popout should render on selected node in this state or update the test to assert the new interaction contract",
             "Keep npm test green and bounded before treating frontend quality as release-ready"
           ],
           "observed_commands": [
             "npm run build: passed",
-            "./scripts/test.sh moon-style-lint: ok true",
-            "npm test: MoonBuildPage.dockAuthority.test.tsx failed 2 tests; stopped after prolonged worker churn"
+            "./scripts/test.sh canvas-style-lint: ok true",
+            "npm test: CanvasBuildPage.dockAuthority.test.tsx failed 2 tests; stopped after prolonged worker churn"
           ],
           "related_files": [
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.dockAuthority.test.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+            "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.dockAuthority.test.tsx",
+            "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasBuildPage.tsx"
           ]
         },
         "severity": "P2",
         "status": "OPEN",
-        "title": "MoonBuildPage dock authority tests fail because node-popout is absent",
+        "title": "CanvasBuildPage dock authority tests fail because node-popout is absent",
         "updated_at": "2026-04-23T21:09:21.027740+00:00"
       },
       {
@@ -5397,10 +5397,10 @@
         "category_counts": {
           "TEST": 1
         },
-        "cluster_key": "bug.title_anchor:moonbuildpage.interaction.coverage",
+        "cluster_key": "bug.title_anchor:canvasbuildpage.interaction.coverage",
         "common_tags": [],
         "count": 1,
-        "label": "title: moonbuildpage.interaction.coverage",
+        "label": "title: canvasbuildpage.interaction.coverage",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -5411,7 +5411,7 @@
           "OPEN": 1
         },
         "titles": [
-          "MoonBuildPage interaction coverage missing for delete and canvas controls"
+          "CanvasBuildPage interaction coverage missing for delete and canvas controls"
         ]
       },
       {
@@ -5421,10 +5421,10 @@
         "category_counts": {
           "VERIFY": 1
         },
-        "cluster_key": "bug.title_anchor:moon.interaction.lacks",
+        "cluster_key": "bug.title_anchor:canvas.interaction.lacks",
         "common_tags": [],
         "count": 1,
-        "label": "title: moon.interaction.lacks",
+        "label": "title: canvas.interaction.lacks",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -5435,7 +5435,7 @@
           "OPEN": 1
         },
         "titles": [
-          "Moon interaction lacks standard canvas navigation and deletion controls"
+          "Canvas interaction lacks standard canvas navigation and deletion controls"
         ]
       },
       {
@@ -5527,10 +5527,10 @@
         "category_counts": {
           "WIRING": 1
         },
-        "cluster_key": "bug.title_anchor:moon.interactions.lack",
+        "cluster_key": "bug.title_anchor:canvas.interactions.lack",
         "common_tags": [],
         "count": 1,
-        "label": "title: moon.interactions.lack",
+        "label": "title: canvas.interactions.lack",
         "next_steps": [],
         "reason_code": "bug_cluster.title_anchor",
         "severity_counts": {
@@ -5541,7 +5541,7 @@
           "OPEN": 1
         },
         "titles": [
-          "Moon interactions lack standard zoom, pan, and delete controls"
+          "Canvas interactions lack standard zoom, pan, and delete controls"
         ]
       },
       {
@@ -6090,12 +6090,12 @@
         "category_counts": {
           "TEST": 1
         },
-        "cluster_key": "bug.title_anchor:moonbuildpage.dock.authority",
+        "cluster_key": "bug.title_anchor:canvasbuildpage.dock.authority",
         "common_tags": [],
         "count": 1,
-        "label": "title: moonbuildpage.dock.authority",
+        "label": "title: canvasbuildpage.dock.authority",
         "next_steps": [
-          "Run npm test -- MoonBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
+          "Run npm test -- CanvasBuildPage.dockAuthority.test.tsx to isolate the failing fixture",
           "Decide whether node popout should render on selected node in this state or update the test to assert the new interaction contract",
           "Keep npm test green and bounded before treating frontend quality as release-ready"
         ],
@@ -6108,7 +6108,7 @@
           "OPEN": 1
         },
         "titles": [
-          "MoonBuildPage dock authority tests fail because node-popout is absent"
+          "CanvasBuildPage dock authority tests fail because node-popout is absent"
         ]
       },
       {

@@ -35,7 +35,7 @@ class ExecuteChatTurnCommand(BaseModel):
     selection_context: list[dict[str, Any]] | None = Field(
         default=None,
         description=(
-            "Optional list of selection-context entries (Moon canvas refs, "
+            "Optional list of selection-context entries (Canvas canvas refs, "
             "attached files) to splice into the LLM prompt."
         ),
     )
