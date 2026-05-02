@@ -313,8 +313,8 @@ function WorkflowCard({
       action={<span className={`wf-card__badge ${badge.class_name}`}>{badge.label}</span>}
       footer={
         <div className="prx-button-row">
-          <Button tone="primary" size="sm" onClick={onEdit}>Open</Button>
-          <Button size="sm" onClick={onRunNow}>Run now</Button>
+          <Button size="sm" onClick={onEdit}>Open</Button>
+          <Button tone="primary" size="sm" onClick={onRunNow}>Run now</Button>
           {hasRun && (
             <Button size="sm" onClick={onViewRun}>View latest</Button>
           )}
@@ -722,17 +722,24 @@ export function Dashboard({
           )}
 
           <div className="prx-tile-grid" aria-label="Dashboard metrics">
-            {overviewCards.map((card) => (
-              <MetricTile
-                key={card.id}
-                label={card.title}
-                value={card.value}
-                detail={card.detail}
-                action={`${card.action} →`}
-                onClick={card.onClick}
-                aria-label={`${card.title}: ${card.value}`}
-              />
-            ))}
+            {overviewCards.map((card) => {
+              const tileTone = card.tone === 'danger' ? 'err' as const
+                : card.tone === 'warning' ? 'warn' as const
+                : card.tone === 'healthy' ? 'ok' as const
+                : 'default' as const;
+              return (
+                <MetricTile
+                  key={card.id}
+                  label={card.title}
+                  value={card.value}
+                  detail={card.detail}
+                  action={`${card.action} →`}
+                  onClick={card.onClick}
+                  tone={tileTone}
+                  aria-label={`${card.title}: ${card.value}`}
+                />
+              );
+            })}
           </div>
 
 

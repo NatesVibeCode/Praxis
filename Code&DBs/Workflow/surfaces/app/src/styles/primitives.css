@@ -433,6 +433,7 @@
 .prx-led[data-tone="err"] {
   background: var(--danger, #f85149);
   box-shadow: 0 0 6px rgba(248,81,73,0.45);
+  animation: prx-led-pulse 2.4s ease-in-out infinite;
 }
 .prx-led[data-tone="idle"] { background: var(--text-muted, #9b9488); opacity: 0.6; }
 @keyframes prx-led-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.45 } }

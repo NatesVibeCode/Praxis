@@ -671,6 +671,17 @@ button.dash-hero-card__stat--link:focus-visible {
   background: transparent;
 }
 
+/* Tone-coded left edge on workflow cards — scan the margin, know the status */
+.dash-section--live .prx-card {
+  border-left: 3px solid var(--accent);
+}
+.dash-section--saved .prx-card {
+  border-left: 3px solid var(--success);
+}
+.dash-section--draft .prx-card {
+  border-left: 3px solid rgba(255, 255, 255, 0.08);
+}
+
 .dash-section__header,
 .dash-panel__header {
   display: flex;
@@ -718,6 +729,19 @@ button.dash-hero-card__stat--link:focus-visible {
   font-size: 10px;
   font-weight: 600;
   color: var(--text-muted);
+}
+
+/* Section count badges carry tone */
+.dash-section--live .dash-section__count-badge {
+  background: var(--surface-accent-soft);
+  color: var(--accent);
+}
+.dash-section--saved .dash-section__count-badge {
+  background: var(--surface-success-soft);
+  color: var(--success);
+}
+.dash-section--live .dash-section__label {
+  color: var(--accent);
 }
 
 .dash-section__count {
@@ -800,6 +824,11 @@ button.dash-hero-card__stat--link:focus-visible {
   box-shadow: 0 18px 30px rgba(0, 0, 0, 0.18);
 }
 
+.dash-section--live .wf-card:hover {
+  border-color: rgba(243, 238, 228, 0.28);
+  box-shadow: 0 0 20px rgba(243, 238, 228, 0.06), 0 18px 30px rgba(0, 0, 0, 0.18);
+}
+
 .wf-card__header {
   display: flex;
   justify-content: space-between;
@@ -850,6 +879,12 @@ button.dash-hero-card__stat--link:focus-visible {
   color: #9be8c5;
   background: rgba(63, 185, 80, 0.12);
   border-color: rgba(63, 185, 80, 0.24);
+  animation: badge-breathe 3s ease-in-out infinite;
+}
+
+@keyframes badge-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+  50% { box-shadow: 0 0 8px 2px rgba(63, 185, 80, 0.18); }
 }
 
 .wf-card__badge--scheduled {
