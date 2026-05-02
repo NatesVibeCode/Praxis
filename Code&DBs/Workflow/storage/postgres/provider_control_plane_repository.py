@@ -247,6 +247,10 @@ class PostgresProviderControlPlaneRepository:
                  AND route.transport_type = snapshot.transport_type
                  AND route.provider_slug = snapshot.provider_slug
                  AND route.model_slug = snapshot.model_slug
+                 AND (
+                     snapshot.candidate_ref IS NULL
+                     OR route.candidate_ref IS NOT DISTINCT FROM snapshot.candidate_ref
+                 )
                  AND route.sub_task_type = '*'
                 WHERE snapshot.runtime_profile_ref = $1
                   AND ($2::text IS NULL OR snapshot.job_type = $2)

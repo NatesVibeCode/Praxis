@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 195 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 200 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -25,9 +25,14 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `launch`, `read`, `write` | - | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | - | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
 | `praxis_friction` | `evidence` | `advanced` | - | `read` | - | Read or write the friction ledger — every guardrail bounce, warning, or hard failure (scope violations, secret leaks, policy bounces, JIT trigger matches). |
+| `praxis_healer_catalog` | `evidence` | `stable` | `workflow healer-catalog` | `read` | - | List registered healer authority refs from healer_registry. Returns each healer's healer_ref, executor_kind, action_ref, auto_mode (manual / assisted / automatic), safety_mode (guarded / unsafe), enabled state, and the bound verifier_refs (which verifiers this healer can repair after a failure). Use this before picking a healer for praxis_healer_run, or to inspect the repair surface. |
+| `praxis_healer_register` | `evidence` | `stable` | `workflow healer-register` | `write` | - | Register (or update) a healer authority ref without authoring a SQL migration. Upserts a healer_registry row idempotently. action_ref names a built-in handler from runtime.verifier_builtins.run_builtin_healer; executor_kind is fixed at 'builtin' today (registry CHECK constraint). auto_mode controls when the runtime auto-fires (manual / assisted / automatic) and safety_mode is the replay-safety classifier (guarded / unsafe). Both default to safest values. |
+| `praxis_healer_run` | `evidence` | `stable` | `workflow healer-run` | `write` | - | Run a registered healer to attempt repair after a verifier failure. verifier_ref is required (every heal is invoked in the context of a verifier whose result it tries to fix). healer_ref is OPTIONAL — when omitted, the runtime auto-resolves from the verifier's bound healers and errors if zero or multiple are bound. The runtime reruns the bound verifier as post-verification, so 'status: succeeded' means BOTH the healer action returned succeeded AND the post-verification passed. |
+| `praxis_healer_runs_list` | `evidence` | `stable` | `workflow healer-runs` | `read` | - | List past healing_runs newest-first, optionally filtered by healer_ref, verifier_ref (which verifier triggered the heal), target_kind / target_ref, status (succeeded / failed / skipped / error), and trailing-window. Returns full run rows including action+post-verification outputs. |
 | `praxis_patterns` | `evidence` | `stable` | - | `read`, `write` | - | Inspect and materialize durable platform patterns: recurring failure shapes clustered from friction events, bugs, and receipts. Patterns sit between raw evidence and bug tickets so repeated platform pain becomes one queryable authority object with evidence links and promotion rules. |
 | `praxis_receipts` | `evidence` | `advanced` | - | `read` | - | Search through past workflow results and analyze costs. Every workflow run produces receipts — this tool lets you search them by keyword and analyze token/cost spending. |
 | `praxis_verifier_catalog` | `evidence` | `stable` | `workflow verifier-catalog` | `read` | - | List registered verifier authority refs from verifier_registry. Returns each verifier's verifier_ref, kind (platform / receipt / run / path), enabled state, and any bound suggested-healer refs. Use this before picking a verifier for a bug-resolve, code-change preflight, or workflow-packet review gate so the chosen ref actually exists and is enabled. Backed by the verifier.catalog.list CQRS query (registered via migration 369). |
+| `praxis_verifier_register` | `evidence` | `stable` | `workflow verifier-register` | `write` | - | Register (or update) a verifier authority ref without authoring a SQL migration. Upserts a verifier_registry row idempotently and optionally creates verifier_healer_bindings for any healer_refs you pass via bind_healer_refs. Per the registry CHECK constraint, exactly one of builtin_ref OR verification_ref must be set, matching verifier_kind. Use this instead of writing a migration when adding a new verifier. |
 | `praxis_verifier_run` | `evidence` | `stable` | `workflow verifier-run` | `write` | - | Run a registered verifier against a target. Records a verification_runs row, returns the outcome (status: passed / failed / error, plus outputs, duration_ms, suggested_healer_ref). The verifier_ref must be one the registry knows (use praxis_verifier_catalog to list). target_kind / target_ref must match what the verifier accepts: 'platform' for system-wide checks (target_ref typically empty), 'path' for file-targeted verifiers like pytest_file (target_ref = absolute path), 'receipt' / 'run' for receipt or run targets. promote_bug defaults to FALSE — leave that on only for canonical scheduler runs that should auto-file control-plane bugs on failure. |
 | `praxis_verifier_runs_list` | `evidence` | `stable` | `workflow verifier-runs` | `read` | - | List past verification_runs newest-first, optionally filtered by verifier_ref, target_kind (platform / receipt / run / path), target_ref, status (passed / failed / error), and an ISO trailing-window. Use this to confirm a verifier actually ran on a target — for example, to verify a fix's evidence chain before calling a bug FIXED, or to inspect failure rates of a specific verifier ref. Returns full run rows including inputs, outputs, suggested_healer_ref, decision_ref, and duration_ms. Backed by the verifier.runs.list CQRS query. |
 | `praxis_audit_primitive` | `general` | `advanced` | - | `read` | - | Generic scan/plan/resolve surface for platform audits (wiring, governance, drift). Call action='playbook' first to read the structured usage guide; then 'registered' to discover audits/patterns, 'plan' to see findings + proposed actions, 'apply' to execute auto-safe patterns. Code-editing patterns are gated behind autorun_ok=False and never fire from 'apply'. |
@@ -462,6 +467,101 @@ Example input:
 }
 ```
 
+#### `praxis_healer_catalog`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:healer-catalog`
+- Risks: `read`
+- CLI entrypoint: `workflow healer-catalog`
+- CLI schema help: `workflow tools describe praxis_healer_catalog`
+- When to use: List registered healer authority refs before picking one for praxis_healer_run, or to inspect what repairs are available after a verifier fails. Returns each healer's auto_mode, safety_mode, action_ref, and the verifier_refs it's bound to.
+- When not to use: Do not use it to actually run a healer — use praxis_healer_run for that. This is a read-only catalog query.
+- Recommended alias: `workflow healer-catalog`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "enabled": true,
+  "limit": 50
+}
+```
+
+#### `praxis_healer_register`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:healer-register`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow healer-register`
+- CLI schema help: `workflow tools describe praxis_healer_register`
+- When to use: Register (or update) a healer authority ref without authoring a SQL migration. Use when adding a new healer that will be bound to one or more verifiers. action_ref must name a built-in handler from runtime.verifier_builtins.run_builtin_healer.
+- When not to use: Do not use this to RUN a healer — that's praxis_healer_run. Do not use it to register verifiers — that's praxis_verifier_register.
+- Recommended alias: `workflow healer-register`
+- Selector: none
+- Required args: `healer_ref`, `display_name`, `action_ref`, `decision_ref`
+
+Example input:
+
+```json
+{
+  "healer_ref": "healer.platform.example_repair",
+  "display_name": "Example platform repair",
+  "action_ref": "heal_schema_bootstrap",
+  "auto_mode": "manual",
+  "safety_mode": "guarded",
+  "decision_ref": "decision.example.repair.20260501"
+}
+```
+
+#### `praxis_healer_run`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:healer-run`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow healer-run`
+- CLI schema help: `workflow tools describe praxis_healer_run`
+- When to use: Manually trigger a healer to repair a verifier failure. verifier_ref is required; healer_ref is optional (auto-resolves from verifier bindings when exactly one is bound). The runtime reruns the bound verifier as post-verification — succeeded status means BOTH healer action AND post-verification passed.
+- When not to use: Do not use it for fuzzy LLM-driven repair — healers are deterministic. The internal scheduler (run_due_platform_verifications) already runs canonical heals automatically; use this surface for manual repair gates.
+- Recommended alias: `workflow healer-run`
+- Selector: none
+- Required args: `verifier_ref`
+
+Example input:
+
+```json
+{
+  "verifier_ref": "verifier.platform.schema_authority"
+}
+```
+
+#### `praxis_healer_runs_list`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:healer-runs`
+- Risks: `read`
+- CLI entrypoint: `workflow healer-runs`
+- CLI schema help: `workflow tools describe praxis_healer_runs_list`
+- When to use: List past healing_runs newest-first to inspect repair history. Filter by healer_ref / verifier_ref (which verifier triggered the heal) / target / status / trailing-window. Use to confirm a heal succeeded, audit failure rates, or check whether a specific target has been auto-repaired recently.
+- When not to use: Do not use it to RUN a healer — use praxis_healer_run.
+- Recommended alias: `workflow healer-runs`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "healer_ref": "healer.platform.schema_bootstrap",
+  "limit": 20
+}
+```
+
 #### `praxis_patterns`
 
 - Surface: `evidence`
@@ -525,6 +625,32 @@ Example input:
 {
   "enabled": true,
   "limit": 50
+}
+```
+
+#### `praxis_verifier_register`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:verifier-register`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow verifier-register`
+- CLI schema help: `workflow tools describe praxis_verifier_register`
+- When to use: Register (or update) a verifier authority ref without authoring a SQL migration. Use when adding a new verifier — replaces the old hand-edited verifier_builtins.py + migration pattern. Optional bind_healer_refs creates verifier_healer_bindings in the same call.
+- When not to use: Do not use this to RUN a verifier — that's praxis_verifier_run. Do not use it to register healers — that's praxis_healer_register.
+- Recommended alias: `workflow verifier-register`
+- Selector: none
+- Required args: `verifier_ref`, `display_name`, `verifier_kind`, `decision_ref`
+
+Example input:
+
+```json
+{
+  "verifier_ref": "verifier.platform.example_check",
+  "display_name": "Example platform check",
+  "verifier_kind": "builtin",
+  "builtin_ref": "verify_schema_authority",
+  "decision_ref": "decision.example.check.20260501"
 }
 ```
 

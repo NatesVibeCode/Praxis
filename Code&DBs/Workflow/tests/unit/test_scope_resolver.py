@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -50,3 +51,20 @@ def test_resolve_scope_accepts_exact_non_python_artifact_ref(tmp_path: Path) -> 
 
     assert resolution.write_scope == ["artifacts/report.md"]
     assert resolution.computed_read_scope == []
+
+
+def test_resolve_scope_uses_git_ignored_file_authority(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _write(tmp_path / ".gitignore", ".claude/worktrees/\n")
+    _write(tmp_path / "pkg" / "__init__.py", "")
+    _write(tmp_path / "pkg" / "helper.py", "VALUE = 1\n")
+    _write(tmp_path / "pkg" / "core.py", "import pkg.helper\n")
+    _write(
+        tmp_path / ".claude" / "worktrees" / "old" / "pkg" / "consumer.py",
+        "import pkg.core\n",
+    )
+
+    resolution = resolve_scope(["pkg/core.py"], root_dir=str(tmp_path))
+
+    assert resolution.computed_read_scope == ["pkg/helper.py"]
+    assert not any(path.startswith(".claude/worktrees/") for path in resolution.blast_radius)

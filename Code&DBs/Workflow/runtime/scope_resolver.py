@@ -21,10 +21,76 @@ from __future__ import annotations
 
 import ast
 import os
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+_IGNORED_IMPORT_GRAPH_DIRS = frozenset(
+    {
+        ".git",
+        ".claude",
+        ".codex",
+        ".gemini",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "scratch",
+        "node_modules",
+    }
+)
+
+
+def _is_import_graph_path(relpath: str) -> bool:
+    path = Path(str(relpath).replace("\\", "/"))
+    return (
+        path.suffix == ".py"
+        and not path.is_absolute()
+        and not any(part in _IGNORED_IMPORT_GRAPH_DIRS for part in path.parts)
+    )
+
+
+def _git_python_relpaths(root: Path) -> list[str] | None:
+    """Return Python files admitted by git workspace authority, if available."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    relpaths: list[str] = []
+    for raw in (result.stdout or b"").split(b"\0"):
+        if not raw:
+            continue
+        relpath = raw.decode("utf-8", errors="surrogateescape")
+        relpath = Path(relpath).as_posix()
+        if _is_import_graph_path(relpath):
+            relpaths.append(relpath)
+    return relpaths
+
+
+def _fallback_python_relpaths(root: Path) -> list[str]:
+    relpaths: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in _IGNORED_IMPORT_GRAPH_DIRS]
+        current = Path(dirpath)
+        for filename in filenames:
+            absolute = current / filename
+            try:
+                relpath = absolute.relative_to(root).as_posix()
+            except ValueError:
+                continue
+            if _is_import_graph_path(relpath):
+                relpaths.append(relpath)
+    return relpaths
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +150,17 @@ class ImportGraph:
         # multiple files with the same stem in different packages).
         stem_to_paths: dict[str, list[str]] = {}
 
-        # First pass: discover all .py files and their stems
+        # First pass: discover all Python files and their stems. Match the
+        # sandbox hydrator's Git authority so ignored sidecar worktrees cannot
+        # become intended read scope that hydration will never copy.
         py_files: list[Path] = []
-        for py_file in root.rglob("*.py"):
-            rel = str(py_file.relative_to(root))
+        relpaths = _git_python_relpaths(root)
+        if relpaths is None:
+            relpaths = _fallback_python_relpaths(root)
+        for rel in sorted(set(relpaths)):
+            py_file = root / rel
+            if not py_file.is_file():
+                continue
             all_files.add(rel)
             py_files.append(py_file)
             stem = py_file.stem

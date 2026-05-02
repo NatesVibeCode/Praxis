@@ -4,9 +4,14 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #000000;
+  /* Brand bible: never pure black. Layer the canonical --backdrop
+   * (cream / blue / green almost-subliminal radials) over --bg. */
+  background: var(--backdrop), var(--bg);
 }
 
+/* App-shell chrome — system bar.
+ * Brand bible: top-chrome uses --bg (#080808) with hairline divider.
+ * Page backdrop carries the subliminal radials. */
 .app-shell__chrome,
 .app-shell__chrome--collapsed {
   position: sticky;
@@ -14,15 +19,12 @@
   z-index: 30;
   display: grid;
   grid-template-columns: 78px minmax(0, 1fr) auto;
-  min-height: 64px;
+  min-height: 56px;
   gap: 10px;
   align-items: center;
   padding: 4px 16px 4px 18px;
-  border-bottom: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.008)),
-    #0a0a0a;
-  box-shadow: inset 0 -1px 0 rgba(243, 238, 228, 0.035);
+  border-bottom: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  background: var(--bg);
   overflow: hidden;
 }
 
@@ -596,9 +598,9 @@
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at top left, rgba(243, 238, 228, 0.06), transparent 24%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 20%);
+  /* Brand bible: surface inherits page backdrop. No per-surface gradient
+   * overlays (those compound with the page backdrop and produce drift). */
+  background: transparent;
   animation: app-shell-enter 180ms ease;
 }
 
@@ -612,11 +614,11 @@
   justify-content: space-between;
   gap: 18px;
   padding: 18px 20px 16px;
-  border-bottom: 1px solid var(--shell-border);
-  background: linear-gradient(180deg, rgba(11, 11, 11, 0.96), rgba(11, 11, 11, 0.84));
+  border-bottom: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  /* Brand bible: top-chrome / docks use blur over translucent --bg, NOT a gradient. */
+  background: rgba(8, 8, 8, 0.84);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16);
 }
 
 .app-shell__surface-header--workbench {
@@ -626,16 +628,15 @@
 }
 
 .app-shell__surface--workspace-compose {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 18%),
-    #0b0b0b;
+  /* Inherits page backdrop. No per-surface gradient overlays. */
+  background: transparent;
 }
 
 .app-shell__surface-header--compose {
   position: static;
   padding: 7px 18px;
-  border-bottom-color: rgba(255, 255, 255, 0.065);
-  background: rgba(8, 8, 8, 0.9);
+  border-bottom-color: var(--border-soft, rgba(255, 255, 255, 0.08));
+  background: rgba(8, 8, 8, 0.84);
   box-shadow: none;
 }
 
@@ -1141,7 +1142,7 @@
 .workspace-compose__main {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 42vw);
+  grid-template-columns: 1fr;
 }
 
 .workspace-compose__draft {
@@ -1238,12 +1239,12 @@
 .workspace-compose__path-search input,
 .workspace-compose__pathlist input {
   width: 100%;
-  border: 1px solid var(--shell-border);
-  border-radius: 5px;
-  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius, 8px);
+  background: var(--bg-input, rgba(10, 10, 10, 0.94));
   color: var(--text);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-md, 14px);
   line-height: 1.55;
   outline: none;
 }
@@ -1363,20 +1364,23 @@
 .workspace-compose__scope-choice {
   min-width: 0;
   display: grid;
-  gap: 3px;
-  min-height: 48px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.028);
+  gap: 4px;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface-elevated), var(--bg-card);
   color: var(--text);
   cursor: pointer;
   text-align: left;
+  transition: border-color var(--motion-fast), background var(--motion-fast), transform var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .workspace-compose__scope-choice:hover {
-  border-color: rgba(243, 238, 228, 0.28);
-  background: rgba(243, 238, 228, 0.055);
+  border-color: var(--border-accent-soft);
+  background: var(--surface-raised), var(--bg-card);
+  transform: translateY(-1px);
+  box-shadow: var(--glow-soft);
 }
 
 .workspace-compose__scope-choice:disabled {
@@ -1719,86 +1723,6 @@
   opacity: 0.48;
 }
 
-.workspace-compose__manifest {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  padding: 48px 30px 42px;
-  overflow: auto;
-  border-left: 1px solid rgba(255, 255, 255, 0.07);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent 58%),
-    rgba(255, 255, 255, 0.012);
-}
-
-.workspace-compose__contract-kicker {
-  position: absolute;
-  top: 18px;
-  left: 30px;
-  color: var(--text-subtle, var(--text-muted));
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.workspace-compose__manifest-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 15px;
-  align-items: center;
-  margin-bottom: 26px;
-  padding-bottom: 18px;
-  border-bottom: 1px dashed rgba(255, 255, 255, 0.14);
-}
-
-.workspace-compose__seal {
-  width: 52px;
-  height: 52px;
-  position: relative;
-  border: 2px solid rgba(243, 238, 228, 0.72);
-  border-radius: 10px;
-  color: var(--accent);
-}
-
-.workspace-compose__seal::before,
-.workspace-compose__seal::after {
-  content: '';
-  position: absolute;
-  border: 2px solid currentColor;
-}
-
-.workspace-compose__seal::before {
-  inset: 10px;
-  border-radius: 999px;
-}
-
-.workspace-compose__seal::after {
-  inset: 20px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.workspace-compose__manifest-name {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 750;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-compose__manifest-meta {
-  margin-top: 5px;
-  color: var(--text-subtle, var(--text-muted));
-  font-size: 11px;
-}
-
-.workspace-compose__manifest-meta b {
-  color: var(--text-muted);
-}
-
 .workspace-compose__mblock {
   margin-bottom: 22px;
 }
@@ -2034,9 +1958,11 @@
 .workspace-receipts__list,
 .workspace-receipts__detail {
   min-height: 0;
-  border: 1px solid var(--shell-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
+  /* Brand bible: containers are cards — 14px radius, hairline border, paper-over-dark. */
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface-elevated), var(--bg-card);
+  box-shadow: var(--shadow-card);
 }
 
 .workspace-receipts__list {
@@ -2252,18 +2178,10 @@
     overflow: visible;
   }
 
-  .workspace-compose__manifest {
-    min-height: auto;
-    overflow: visible;
-    border-left: 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
-    min-height: 360px;
-  }
 }
 
 @media (max-width: 760px) {
   .workspace-compose__draft,
-  .workspace-compose__manifest,
   .workspace-receipts {
     padding: 18px;
   }

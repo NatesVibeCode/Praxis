@@ -567,7 +567,7 @@ export function PanelCard({
 // ReceiptCard for at-a-glance numbers (its key/value rows are wrong here).
 export type MetricTileTone = 'default' | 'ok' | 'warn' | 'err';
 
-export interface MetricTileProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+export interface MetricTileProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'value'> {
   label: ReactNode;
   value: ReactNode;
   detail?: ReactNode;

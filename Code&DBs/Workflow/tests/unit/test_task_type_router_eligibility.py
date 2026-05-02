@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import runtime.task_type_router as _ttr_mod
 from runtime.task_type_router import TaskTypeRouter
@@ -182,6 +183,29 @@ class _FakeConn:
         raise AssertionError(sql)
 
 
+class _TransportTypeConn(_FakeConn):
+    def execute(self, sql: str, *params):
+        if "FROM provider_model_candidates" in sql:
+            return [
+                {
+                    "provider_slug": "google",
+                    "model_slug": "gemini-3.1-pro-preview",
+                    "transport_type": "API",
+                    "priority": 1,
+                    "route_tier": "high",
+                    "route_tier_rank": 1,
+                    "latency_class": "reasoning",
+                    "latency_rank": 1,
+                    "capability_tags": ["build", "coding"],
+                    "task_affinities": {"primary": ["build"], "secondary": [], "specialized": [], "avoid": []},
+                    "benchmark_profile": {},
+                },
+            ]
+        if "FROM task_type_routing" in sql:
+            return []
+        return super().execute(sql, *params)
+
+
 def _route_rows() -> list[dict]:
     return [
         {
@@ -244,6 +268,116 @@ def test_provider_wide_reject_filters_entire_provider_from_chain() -> None:
         "gpt-5.4",
         "gemini-3.1-pro-preview",
     ]
+
+
+def test_catalog_transport_type_drives_adapter_in_auto_chain() -> None:
+    router = TaskTypeRouter(_TransportTypeConn([]))
+
+    chain = router.resolve_failover_chain("auto/build")
+
+    assert chain[0].provider_slug == "google"
+    assert chain[0].model_slug == "gemini-3.1-pro-preview"
+    assert chain[0].adapter_type == "llm_task"
+    assert chain[0].transport_type == "API"
+
+
+def test_effective_catalog_filter_matches_transport_type(monkeypatch) -> None:
+    import storage.postgres as postgres_storage
+
+    class _Repo:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def list_provider_control_plane_rows(self, **kwargs):
+            return (
+                SimpleNamespace(
+                    provider_slug="google",
+                    model_slug="gemini-3.1-pro-preview",
+                    transport_type="API",
+                    is_runnable=True,
+                ),
+            )
+
+    class _RouterShim:
+        _conn = object()
+
+        def _effective_runtime_profile_ref(self, runtime_profile_ref):
+            return runtime_profile_ref
+
+    monkeypatch.setattr(postgres_storage, "PostgresProviderControlPlaneRepository", _Repo)
+
+    rows = [
+        {
+            "provider_slug": "google",
+            "model_slug": "gemini-3.1-pro-preview",
+            "transport_type": "CLI",
+        },
+        {
+            "provider_slug": "google",
+            "model_slug": "gemini-3.1-pro-preview",
+            "transport_type": "API",
+        },
+    ]
+
+    filtered = TaskTypeRouter._apply_effective_provider_job_catalog_filter(
+        _RouterShim(),
+        "build",
+        rows,
+        runtime_profile_ref="praxis",
+    )
+
+    assert filtered == [rows[1]]
+
+
+def test_effective_catalog_filter_prefers_exact_candidate_ref(monkeypatch) -> None:
+    import storage.postgres as postgres_storage
+
+    class _Repo:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def list_provider_control_plane_rows(self, **kwargs):
+            return (
+                SimpleNamespace(
+                    provider_slug="google",
+                    model_slug="gemini-3.1-pro-preview",
+                    transport_type="API",
+                    candidate_ref="candidate.google.api",
+                    is_runnable=True,
+                ),
+            )
+
+    class _RouterShim:
+        _conn = object()
+
+        def _effective_runtime_profile_ref(self, runtime_profile_ref):
+            return runtime_profile_ref
+
+    monkeypatch.setattr(postgres_storage, "PostgresProviderControlPlaneRepository", _Repo)
+
+    rows = [
+        {
+            "candidate_ref": "candidate.google.cli",
+            "provider_slug": "google",
+            "model_slug": "gemini-3.1-pro-preview",
+            "transport_type": "API",
+        },
+        {
+            "candidate_ref": "candidate.google.api",
+            "provider_slug": "google",
+            "model_slug": "gemini-3.1-pro-preview",
+            "transport_type": "API",
+        },
+    ]
+
+    filtered = TaskTypeRouter._apply_effective_provider_job_catalog_filter(
+        _RouterShim(),
+        "build",
+        rows,
+        runtime_profile_ref="praxis",
+    )
+
+    assert filtered == [rows[1]]
 
 
 def test_explicit_slug_eligibility_returns_provider_disable_window() -> None:

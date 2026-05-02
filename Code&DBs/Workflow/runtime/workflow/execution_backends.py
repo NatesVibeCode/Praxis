@@ -586,6 +586,7 @@ def _execute_api_control_plane(
             api_endpoint=api_endpoint,
             api_key=api_key,
             api_key_env=api_key_env,
+            provider_slug=provider_slug,
             workdir=workdir,
             reasoning_effort=reasoning_effort,
         )
@@ -1034,6 +1035,7 @@ def execute_api(
             f"--api-protocol {shlex.quote(_api_protocol)} "
             f"--api-endpoint {shlex.quote(_api_endpoint)} "
             f"--api-key-env {shlex.quote(_api_key_env)} "
+            f"--provider-slug {shlex.quote(provider_slug)} "
             f"--workdir {shlex.quote(resolved_workdir)} "
             f"--model {shlex.quote(model_slug)} "
             f"--max-output-tokens {max_output_tokens} "

@@ -173,6 +173,20 @@ def _build_openai_body(request: LLMRequest) -> dict[str, Any]:
             for t in request.tools
         ]
 
+    if str(request.provider_slug or "").strip().lower() == "openrouter":
+        try:
+            from runtime.openrouter_policy import (
+                OpenRouterPolicyError,
+                apply_strict_openrouter_policy,
+            )
+
+            body = apply_strict_openrouter_policy(
+                body=body,
+                model_slug=request.model_slug,
+            )
+        except OpenRouterPolicyError as exc:
+            raise LLMClientError(exc.reason_code, str(exc)) from exc
+
     return _apply_request_contract(request, body)
 
 

@@ -77,6 +77,90 @@ _CLI_AGENT_UID = 1100
 _CLI_AGENT_GID = 1100
 _OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
 _GOOGLE_AUTH_SEED_PATH = str(container_auth_seed_dir() / "google-gemini-oauth_creds.json")
+_DOCKER_ENV_FILE_PREFIX = "praxis-sandbox-env-"
+_DOCKER_ENV_SPILL_PREFIX = "praxis-sandbox-env-spill-"
+_DOCKER_ENV_FILE_MAX_LINE_BYTES = 32_000
+_EXECUTION_BUNDLE_ENV = "PRAXIS_EXECUTION_BUNDLE"
+_EXECUTION_BUNDLE_FILE_ENV = "PRAXIS_EXECUTION_BUNDLE_FILE"
+
+
+def _write_docker_env_file(env_items: Mapping[str, object]) -> str:
+    """Write Docker env-file input so large bundles do not become argv."""
+
+    fd, path = tempfile.mkstemp(prefix=_DOCKER_ENV_FILE_PREFIX, suffix=".env")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            for raw_key, raw_value in sorted(env_items.items()):
+                key = str(raw_key or "").strip()
+                value = str(raw_value)
+                if not key or "=" in key or "\x00" in key:
+                    raise RuntimeError(f"invalid Docker env key: {key!r}")
+                if "\x00" in value or "\n" in value or "\r" in value:
+                    raise RuntimeError(f"Docker env value for {key} cannot contain line breaks")
+                handle.write(f"{key}={value}\n")
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+def _compact_execution_bundle_env(value: str, *, container_path: str) -> str:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, Mapping):
+        payload = {}
+    compact = {
+        key: payload[key]
+        for key in (
+            "run_id",
+            "workflow_id",
+            "job_label",
+            "mcp_tool_names",
+            "source_refs",
+            "access_policy",
+        )
+        if key in payload
+    }
+    compact["_spilled_bundle_file"] = container_path
+    rendered = json.dumps(compact, sort_keys=True, separators=(",", ":"), default=str)
+    if len(f"{_EXECUTION_BUNDLE_ENV}={rendered}".encode("utf-8")) <= _DOCKER_ENV_FILE_MAX_LINE_BYTES:
+        return rendered
+    return json.dumps(
+        {"_spilled_bundle_file": container_path},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _materialize_oversized_docker_env_values(
+    env_items: Mapping[str, object],
+) -> tuple[dict[str, str], str | None, str | None]:
+    normalized = {str(key): str(value) for key, value in env_items.items()}
+    oversized = {
+        key: value
+        for key, value in normalized.items()
+        if len(f"{key}={value}".encode("utf-8")) > _DOCKER_ENV_FILE_MAX_LINE_BYTES
+    }
+    if not oversized:
+        return normalized, None, None
+
+    spill_dir = tempfile.mkdtemp(prefix=_DOCKER_ENV_SPILL_PREFIX)
+    container_dir = f"/tmp/{_DOCKER_ENV_SPILL_PREFIX}{uuid4().hex}"
+    for key, value in sorted(oversized.items()):
+        spill_path = Path(spill_dir) / key
+        spill_path.write_text(value, encoding="utf-8")
+        container_path = f"{container_dir}/{key}"
+        normalized[f"{key}_FILE"] = container_path
+        if key == _EXECUTION_BUNDLE_ENV:
+            normalized[key] = _compact_execution_bundle_env(value, container_path=container_path)
+        else:
+            normalized[key] = f"@file:{container_path}"
+    return normalized, spill_dir, container_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -1628,8 +1712,6 @@ class DockerLocalSandboxProvider:
         # request.env so upstream defaults (e.g. HOME=/root inherited from the
         # worker container) do not override it.
         env_items = {**dict(request.env), "HOME": str(_SANDBOX_HOME)}
-        for key, value in sorted(env_items.items()):
-            docker_cmd.extend(["-e", f"{key}={value}"])
         # Forward host-shell auth env vars (CLAUDE_CODE_OAUTH_TOKEN etc.) that
         # the worker inherited — the ephemeral CLI container needs them for
         # non-file auth paths (Keychain-backed OAuth).
@@ -1637,7 +1719,17 @@ class DockerLocalSandboxProvider:
         for key, value in sorted(_cli_auth_env_forward(session_provider_slug).items()):
             if key in env_items:
                 continue
-            docker_cmd.extend(["-e", f"{key}={value}"])
+            env_items[key] = value
+        env_items, docker_env_spill_dir, docker_env_spill_container_dir = (
+            _materialize_oversized_docker_env_values(env_items)
+        )
+        if docker_env_spill_dir and docker_env_spill_container_dir:
+            docker_cmd.extend([
+                "-v",
+                f"{docker_env_spill_dir}:{docker_env_spill_container_dir}:ro",
+            ])
+        docker_env_file_path = _write_docker_env_file(env_items)
+        docker_cmd.extend(["--env-file", docker_env_file_path])
         if session.network_policy == "disabled":
             docker_cmd.append("--network=none")
         elif session.network_policy == "praxis_only":
@@ -1733,7 +1825,7 @@ class DockerLocalSandboxProvider:
         # DEBUG: log the exact command + env keys + stdin size for root-causing
         # silent hangs. Remove once the sandbox auth path stabilizes.
         try:
-            _env_keys = sorted({part.split("=", 1)[0] for flag_idx, part in enumerate(docker_cmd) if flag_idx > 0 and docker_cmd[flag_idx - 1] == "-e"})
+            _env_keys = sorted(str(key) for key in env_items)
             _stdin_size = len(request.stdin_text or "")
             _redacted_cmd = []
             for p in docker_cmd:
@@ -1762,26 +1854,33 @@ class DockerLocalSandboxProvider:
             pass
         start = _utc_now()
         start_monotonic = time.monotonic_ns()
-        proc = subprocess.Popen(
-            docker_cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        timed_out = False
         try:
-            stdout, stderr = proc.communicate(
-                input=request.stdin_text,
-                timeout=request.timeout_seconds,
+            proc = subprocess.Popen(
+                docker_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            proc.kill()
-            stdout, stderr = proc.communicate()
+            timed_out = False
+            try:
+                stdout, stderr = proc.communicate(
+                    input=request.stdin_text,
+                    timeout=request.timeout_seconds,
+                )
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                proc.kill()
+                stdout, stderr = proc.communicate()
         finally:
             stats_stop.set()
             stats_thread.join(timeout=3.0)
+            try:
+                os.unlink(docker_env_file_path)
+            except OSError:
+                pass
+            if docker_env_spill_dir:
+                shutil.rmtree(docker_env_spill_dir, ignore_errors=True)
 
         end = _utc_now()
         latency_ms = int((time.monotonic_ns() - start_monotonic) / 1_000_000)

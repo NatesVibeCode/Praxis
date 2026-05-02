@@ -422,6 +422,10 @@ def test_resolve_spec_jobs_honors_explicit_prefer_cost_over_complexity() -> None
         "openai/gpt-5.4-mini",
         "anthropic/claude-sonnet-4-6",
     ]
+    assert [entry["slug"] for entry in jobs[0]["_route_plan"].route_candidates] == [
+        "openai/gpt-5.4-mini",
+        "anthropic/claude-sonnet-4-6",
+    ]
 
 
 def test_resolve_spec_jobs_uses_explicit_prefer_cost_when_enabled() -> None:

@@ -29,6 +29,15 @@ def provider_route_privacy_posture(row: Mapping[str, Any]) -> dict[str, Any]:
     model_slug = _text(row.get("model_slug"))
     transport_type = _text(row.get("transport_type")).upper()
 
+    if not transport_type:
+        return {
+            "state": "blocked",
+            "dispatch_allowed": False,
+            "reason_code": "privacy.transport_unknown",
+            "requirements": list(_API_PRIVACY_REQUIREMENTS),
+            "missing": ["transport_type"],
+        }
+
     if transport_type != "API":
         return {
             "state": "not_required",

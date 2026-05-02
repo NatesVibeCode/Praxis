@@ -189,6 +189,55 @@ def test_succeeded_write_only_manifest_gap_does_not_block_firecheck(monkeypatch)
     assert result["blockers"] == []
 
 
+def test_ignored_workspace_manifest_pollution_does_not_block_firecheck(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
+    monkeypatch.setattr(
+        runtime_truth,
+        "_workspace_authority_admitted_paths",
+        lambda root: frozenset({"Code&DBs/Workflow/runtime/sandbox_runtime.py"}),
+    )
+    conn = _FakeConn(
+        manifest_records=[
+            {
+                "receipt_id": "receipt_polluted",
+                "run_id": "run_polluted",
+                "node_id": "job_polluted",
+                "status": "failed",
+                "failure_code": "context_overflow",
+                "workspace_manifest_audit": {
+                    "workspace_snapshot_ref": "workspace_snapshot:polluted",
+                    "workspace_materialization": "copy",
+                    "intended_manifest_paths": [
+                        ".claude/worktrees/old/Code&DBs/Workflow/runtime/sandbox_runtime.py",
+                        ".venv/lib/python3.14/site-packages/noise.py",
+                    ],
+                    "hydrated_manifest_paths": [
+                        "Code&DBs/Workflow/runtime/sandbox_runtime.py",
+                    ],
+                    "missing_intended_paths": [
+                        ".claude/worktrees/old/Code&DBs/Workflow/runtime/sandbox_runtime.py",
+                        ".venv/lib/python3.14/site-packages/noise.py",
+                    ],
+                    "observed_file_read_refs": [],
+                    "observed_file_read_mode": "provider_output_path_mentions",
+                },
+            }
+        ]
+    )
+
+    result = runtime_truth.build_firecheck(conn)
+    records = result["snapshot"]["manifest_audit"]["records"]
+
+    assert result["can_fire"] is True
+    assert result["fire_state"] == "ready"
+    assert result["blockers"] == []
+    assert records[0]["actionable_missing_intended_paths"] == []
+    assert records[0]["non_actionable_missing_intended_paths"] == [
+        ".claude/worktrees/old/Code&DBs/Workflow/runtime/sandbox_runtime.py",
+        ".venv/lib/python3.14/site-packages/noise.py",
+    ]
+
+
 def test_succeeded_manifest_gap_with_authoritative_read_proof_blocks_firecheck(monkeypatch) -> None:
     monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
     conn = _FakeConn(

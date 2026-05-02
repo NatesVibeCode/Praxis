@@ -149,7 +149,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    await screen.findByText(/3 workflows in scope/);
+    await screen.findByText(/3 workflows/);
     expect(screen.getByText('1 live - 1 saved - 1 draft')).toBeInTheDocument();
     expect(screen.getAllByText('Healthy').length).toBeGreaterThan(0);
     expect(screen.getByText('dashboard.health')).toBeInTheDocument();

@@ -228,6 +228,7 @@ def _call_chat_completion_protocol(
     # slug; ``call_llm`` reads ``request.provider_slug`` for the bucket lookup.
     effective_slug = (
         provider_slug
+        or ("openrouter" if "openrouter.ai" in str(api_endpoint or "").lower() else None)
         or _resolve_rate_limit_provider_slug(protocol_family)
         or protocol_family
     )
@@ -563,6 +564,7 @@ def call_transport(
     api_endpoint: str,
     api_key: str | None = None,
     api_key_env: str = "",
+    provider_slug: str | None = None,
     workdir: str | None = None,
     reasoning_effort: str | None = None,
 ) -> str:
@@ -580,6 +582,7 @@ def call_transport(
         "api_endpoint": api_endpoint,
         "api_key": api_key,
         "api_key_env": api_key_env,
+        "provider_slug": provider_slug,
         "workdir": workdir,
     }
     if reasoning_effort:

@@ -1973,11 +1973,13 @@ def _do_submit_workflow(
         if not failover_chain:
             failover_chain = [str(job.get("agent") or "auto/build").strip()]
         route_origin_slug = str(getattr(route_plan, "original_slug", "") or "").strip()
+        route_candidates = list(getattr(route_plan, "route_candidates", ()) or [])
         if label:
             route_plan_manifest[label] = {
                 "route_task_type": route_task_type,
                 "failover_chain": [str(item).strip() for item in failover_chain if str(item).strip()],
                 "route_origin_slug": route_origin_slug,
+                "route_candidates": route_candidates,
             }
     authority = _ensure_workflow_authority(
         conn,

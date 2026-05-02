@@ -335,6 +335,7 @@ def resolve_route_economics(
     raw_cost_per_m_tokens: float,
     budget_authority: BudgetAuthoritySnapshot,
     default_adapter: str | None = None,
+    strict_adapter: bool = False,
 ) -> dict[str, Any]:
     """Pick the cheapest viable adapter and compute effective marginal cost.
 
@@ -351,6 +352,10 @@ def resolve_route_economics(
     state on the same axis: table reachable, but an operator-declared
     invariant on its rows is failing. Paid-lane admission refuses rather
     than route off corrupt authority data.
+
+    When ``strict_adapter`` is true, ``adapter_type`` is treated as route
+    authority rather than a preference and economics will not substitute a
+    cheaper transport behind the router's back.
     """
     if default_adapter is None:
         default_adapter = resolve_default_adapter_type(provider_slug)
@@ -367,14 +372,15 @@ def resolve_route_economics(
     normalized_adapter_type = (adapter_type or "").strip().lower()
     if normalized_adapter_type and supports_adapter(provider_slug, normalized_adapter_type):
         candidate_adapters.append(normalized_adapter_type)
-    for candidate_adapter_type in (default_adapter, *_ADAPTER_COST_ORDER):
-        normalized_candidate = (candidate_adapter_type or "").strip().lower()
-        if (
-            normalized_candidate
-            and normalized_candidate not in candidate_adapters
-            and supports_adapter(provider_slug, normalized_candidate)
-        ):
-            candidate_adapters.append(normalized_candidate)
+    if not strict_adapter:
+        for candidate_adapter_type in (default_adapter, *_ADAPTER_COST_ORDER):
+            normalized_candidate = (candidate_adapter_type or "").strip().lower()
+            if (
+                normalized_candidate
+                and normalized_candidate not in candidate_adapters
+                and supports_adapter(provider_slug, normalized_candidate)
+            ):
+                candidate_adapters.append(normalized_candidate)
     if not candidate_adapters:
         raise RuntimeError(
             f"provider {provider_slug!r} has no supported adapter for routing economics"

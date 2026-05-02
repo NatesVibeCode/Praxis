@@ -5,12 +5,7 @@ import type { BuildPayload } from '../shared/types';
 import type { ComposeDraftSpec, ComposeSurfaceSpec, PraxisSurfaceBundleV4 } from './manifest';
 import {
   WorkspaceClauseEditor,
-  WorkspaceBoundaryFence,
-  WorkspaceCompiledReceiptGrid,
-  WorkspaceContractList,
   WorkspacePathScopePicker,
-  WorkspaceVerifierCard,
-  deriveRequirements,
   lineCountLabel,
   normalizeLineDraft,
   verifierDisplayName,
@@ -102,7 +97,7 @@ export function WorkspaceComposeSurface({
   const writeScopeLines = useMemo(() => normalizeLineDraft(writeScopeDraft), [writeScopeDraft]);
   const requirementLines = useMemo(() => normalizeLineDraft(requirementDraft), [requirementDraft]);
   const antiRequirementLines = useMemo(() => normalizeLineDraft(antiRequirementDraft), [antiRequirementDraft]);
-  const derivedRequirements = useMemo(() => deriveRequirements(intent), [intent]);
+
   const activeVerifier = useMemo(
     () => verifiers.find((verifier) => verifier.verifier_ref === verifierRef) ?? null,
     [verifierRef, verifiers],
@@ -257,8 +252,6 @@ export function WorkspaceComposeSurface({
     }
   };
 
-  const generatedManifest = record(generateResult?.manifest);
-  const generatedTitle = stringValue(generatedManifest.title) || stringValue(generatedManifest.name) || workspaceTitle;
   const intentWordCount = intent.trim() ? intent.trim().split(/\s+/).length : 0;
 
   return (
@@ -270,7 +263,7 @@ export function WorkspaceComposeSurface({
             <h1>Materialize something.</h1>
             <p>
               Write it like you would brief a colleague. Praxis compiles your prose into a sealed
-              contract on the right: scope, requirements, anti-requirements, proof gate, before any code is dispatched.
+              contract before any code is dispatched.
             </p>
           </div>
 
@@ -402,55 +395,6 @@ export function WorkspaceComposeSurface({
           </div>
         </section>
 
-        <aside className="workspace-compose__manifest" aria-label="Compiled contract preview">
-          <div className="workspace-compose__contract-kicker">contract · {contractState}</div>
-          <div className="workspace-compose__manifest-header">
-            <div className="workspace-compose__seal" aria-hidden="true" />
-            <div>
-              <div className="workspace-compose__manifest-name">{generatedTitle || surface.title}</div>
-              <div className="workspace-compose__manifest-meta">
-                draft · <b>{readyLabel}</b>
-                {previewIsFresh ? ' · fresh' : ''}
-              </div>
-            </div>
-          </div>
-
-          {generateResult?.typed_gap ? (
-            <div className="workspace-compose__gap">
-              <strong>Typed gap</strong>
-              <span>{stringValue(generateResult.typed_gap.reason) || 'No legal template matched this intent.'}</span>
-            </div>
-          ) : null}
-
-          <WorkspaceBoundaryFence readScope={readScopeLines} writeScope={writeScopeLines} />
-          <WorkspaceContractList
-            title="requirements"
-            items={requirementLines.length ? requirementLines : derivedRequirements}
-            empty="Write a task brief to derive requirements."
-            derived={!requirementLines.length}
-          />
-          <WorkspaceContractList title="anti-requirements" items={antiRequirementLines} empty="No anti-requirements yet." />
-
-          <div className="workspace-compose__mblock">
-            <h4>proof gate</h4>
-            <WorkspaceVerifierCard
-              verifierLabel={verifierLabel}
-              verifierCount={verifiers.length}
-              verifierMissing={verifierMissing}
-              operationReceiptId={operationReceiptId}
-              description={verifierDescription}
-            />
-          </div>
-
-          {buildPayload ? (
-            <WorkspaceCompiledReceiptGrid
-              generatedManifestId={generateResult?.manifest_id}
-              workflowId={workflowId}
-              runId={runId}
-              compiledSpec={buildPayload.materialized_spec ?? buildPayload.definition ?? {}}
-            />
-          ) : null}
-        </aside>
       </div>
 
       <StatusRail

@@ -32,7 +32,12 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow data` | `praxis_data` | `data` | `launch`, `read`, `write` | Run deterministic parsing, normalization, validation, mapping, dedupe, or reconcile jobs and optionally launch them through the workflow engine. |
 | `praxis workflow artifacts` | `praxis_artifacts` | `evidence` | `read` | Browse sandbox outputs, search artifact paths, or compare generated files. |
 | `praxis workflow bugs` | `praxis_bugs` | `evidence` | `launch`, `read`, `write` | Inspect the bug tracker, run keyword or hybrid search, file a new bug, or drive replay-ready bug workflows. |
+| `praxis workflow healer-catalog` | `praxis_healer_catalog` | `evidence` | `read` | List registered healer authority refs before picking one for praxis_healer_run, or to inspect what repairs are available after a verifier fails. Returns each healer's auto_mode, safety_mode, action_ref, and the verifier_refs it's bound to. |
+| `praxis workflow healer-register` | `praxis_healer_register` | `evidence` | `write` | Register (or update) a healer authority ref without authoring a SQL migration. Use when adding a new healer that will be bound to one or more verifiers. action_ref must name a built-in handler from runtime.verifier_builtins.run_builtin_healer. |
+| `praxis workflow healer-run` | `praxis_healer_run` | `evidence` | `write` | Manually trigger a healer to repair a verifier failure. verifier_ref is required; healer_ref is optional (auto-resolves from verifier bindings when exactly one is bound). The runtime reruns the bound verifier as post-verification — succeeded status means BOTH healer action AND post-verification passed. |
+| `praxis workflow healer-runs` | `praxis_healer_runs_list` | `evidence` | `read` | List past healing_runs newest-first to inspect repair history. Filter by healer_ref / verifier_ref (which verifier triggered the heal) / target / status / trailing-window. Use to confirm a heal succeeded, audit failure rates, or check whether a specific target has been auto-repaired recently. |
 | `praxis workflow verifier-catalog` | `praxis_verifier_catalog` | `evidence` | `read` | List registered verifier authority refs before picking one for a bug-resolve, code-change preflight, or workflow-packet review gate. Returns each verifier's verifier_ref, kind (platform / receipt / run / path), enabled state, and any bound suggested-healer refs. |
+| `praxis workflow verifier-register` | `praxis_verifier_register` | `evidence` | `write` | Register (or update) a verifier authority ref without authoring a SQL migration. Use when adding a new verifier — replaces the old hand-edited verifier_builtins.py + migration pattern. Optional bind_healer_refs creates verifier_healer_bindings in the same call. |
 | `praxis workflow verifier-run` | `praxis_verifier_run` | `evidence` | `write` | Run a registered verifier against a target as a deterministic review gate — receipt-backed, replayable, links to a verification_runs row. Use this from a workflow packet (integration_id=praxis_verifier_run, integration_action=run) to express a verify step without going through bug-resolve, or interactively to confirm a verifier passes against a specific target. |
 | `praxis workflow verifier-runs` | `praxis_verifier_runs_list` | `evidence` | `read` | List past verification_runs newest-first to confirm a verifier actually ran on a target. Filter by verifier_ref, target_kind, target_ref, status, or trailing window. Use before resolving a bug to FIXED to verify the evidence chain, or to inspect failure rates of a specific verifier. |
 | `praxis workflow integration` | `praxis_integration` | `integration` | `launch`, `read`, `write` | List integrations, inspect one, validate credentials, or invoke an integration action. |
@@ -144,8 +149,13 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow tools call praxis_receipts` | `praxis_receipts` | `advanced` | action: search, token_burn | `read` | - |
 | `praxis workflow artifacts` | `praxis_artifacts` | `stable` | action: stats, list, search, diff | `read` | - |
 | `praxis workflow bugs` | `praxis_bugs` | `stable` | action: list, file, search, duplicate_check, stats, show, packet, history, replay, backfill_replay, attach_evidence, patch_resume, resolve | `launch`, `read`, `write` | - |
+| `praxis workflow healer-catalog` | `praxis_healer_catalog` | `stable` | - | `read` | - |
+| `praxis workflow healer-register` | `praxis_healer_register` | `stable` | - | `write` | - |
+| `praxis workflow healer-run` | `praxis_healer_run` | `stable` | - | `write` | - |
+| `praxis workflow healer-runs` | `praxis_healer_runs_list` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_patterns` | `praxis_patterns` | `stable` | action: list, candidates, evidence, materialize | `read`, `write` | - |
 | `praxis workflow verifier-catalog` | `praxis_verifier_catalog` | `stable` | - | `read` | - |
+| `praxis workflow verifier-register` | `praxis_verifier_register` | `stable` | - | `write` | - |
 | `praxis workflow verifier-run` | `praxis_verifier_run` | `stable` | - | `write` | - |
 | `praxis workflow verifier-runs` | `praxis_verifier_runs_list` | `stable` | - | `read` | - |
 

@@ -970,10 +970,11 @@
   margin-top: 14px;
   margin-inline: auto;
   padding: 22px 22px 20px;
-  border: 1px solid var(--moon-white-a12);
-  border-radius: 12px;
-  background: linear-gradient(180deg, var(--moon-white-a05), var(--moon-black-a20));
-  box-shadow: var(--moon-shadow-line-mid), var(--moon-shadow-float-soft);
+  /* Brand bible: cards = 14px radius, hairline border, paper-over-dark gradient. */
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface-elevated), var(--bg-card);
+  box-shadow: var(--shadow-card);
 }
 .moon-compose--intro {
   width: min(640px, calc(100vw - 36px));

@@ -102,13 +102,62 @@
   --editor-toolbar-bg: #0f0f0f;
   --editor-text: #f5f1e8;
 
-  /* Layout */
+  /* Layout — radii match the Praxis brand bible (4 / 8 / 10 / 14 / 18 / 20 / 999) */
+  --radius-sm: 4px;
   --radius: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 20px;
+  --radius-pill: 999px;
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 24px;
   --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+
+  /* Backdrop ornament — three almost-subliminal radials per Praxis brand bible:
+   * cream top-left (warmth), cool blue top-right (depth), green bottom (life).
+   * NEVER a hero gradient. The blue is on-brand. */
+  --backdrop:
+    radial-gradient(circle at top left, rgba(243, 238, 228, 0.09), transparent 24%),
+    radial-gradient(circle at top right, rgba(88, 166, 255, 0.08), transparent 18%),
+    radial-gradient(circle at 50% 110%, rgba(63, 185, 80, 0.04), transparent 20%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 18%);
+
+  /* Brand-bible aliases for shadow / glow names (canonical) */
+  --shadow-card: 0 18px 38px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --glow-soft: 0 0 0 1px rgba(243, 238, 228, 0.16), 0 0 18px rgba(243, 238, 228, 0.1);
+  --glow-strong: 0 0 0 1px rgba(255, 255, 255, 0.22), 0 0 24px rgba(255, 255, 255, 0.14);
+  --glow-amber: 0 0 16px rgba(210, 153, 34, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.34);
+  --glow-success: 0 0 14px rgba(63, 185, 80, 0.24), 0 0 0 1px rgba(0, 0, 0, 0.34);
+  --glow-danger: 0 0 14px rgba(248, 81, 73, 0.24), 0 0 0 1px rgba(0, 0, 0, 0.34);
+
+  /* Type scale — brand bible canonical scale */
+  --fs-xxs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  --fs-2xl: 20px;
+  --fs-3xl: 28px;
+  --fs-4xl: 36px;
+
+  /* Tracking — brand bible canonical */
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0em;
+  --tracking-wide: 0.08em;
+  --tracking-xwide: 0.14em;
+  --tracking-micro: 0.04em;
+
+  /* Motion — brand bible canonical */
+  --motion-micro: 100ms ease;
+  --motion-fast: 160ms ease;
+  --motion-node: 180ms ease;
+  --motion-dock: 240ms ease;
 
   /* Typography — geometric grotesk + utility mono */
   --font-mono: 'IBM Plex Mono', 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
@@ -125,14 +174,14 @@
 
 body {
   min-height: 100vh;
-  background-image:
-    radial-gradient(circle at 18% -10%, rgba(243, 238, 228, 0.085), transparent 34%),
-    radial-gradient(circle at 78% 120%, rgba(210, 153, 34, 0.045), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 24%);
-  background-color: var(--bg);
+  /* Brand bible: never pure black. Use --bg (#080808) + the canonical
+   * --backdrop (3 almost-subliminal radials: cream / blue / green). */
+  background: var(--backdrop), var(--bg);
   color: var(--text);
+  /* Typography law (PRIMITIVES.md): Space Grotesk for UI voice,
+   * IBM Plex Mono for metadata rails — primitives override per-element. */
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--fs-md);
   line-height: 1.5;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

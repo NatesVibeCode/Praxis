@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import runtime.materialize_index as compile_index
-import runtime.materializer as compiler
+import runtime.materialize_index as materialize_index
+import runtime.materializer as materializer
 import runtime.operating_model_planner as planner
 from runtime.capability_catalog import CapabilityCatalogError
 from runtime.materialize_artifacts import MaterializeArtifactRecord
@@ -398,11 +398,11 @@ def test_get_verify_bindings_can_filter_to_one_job_label() -> None:
     ]
 
 
-def test_compile_spec_emits_verify_refs_and_persists_authority_rows() -> None:
-    from runtime.spec_materializer import compile_spec
+def test_materialize_spec_emits_verify_refs_and_persists_authority_rows() -> None:
+    from runtime.spec_materializer import materialize_spec
 
     conn = _VerifyRefsConn()
-    spec, warnings = compile_spec(
+    spec, warnings = materialize_spec(
         {
             "description": "Fix Python file",
             "write": ["app.py", "app_test.py"],
@@ -428,12 +428,12 @@ def test_compile_spec_emits_verify_refs_and_persists_authority_rows() -> None:
     assert spec.capabilities == ["debug", "mechanical_edit"]
 
 
-def test_compile_spec_fails_closed_when_capability_catalog_is_missing() -> None:
-    from runtime.spec_materializer import compile_spec
+def test_materialize_spec_fails_closed_when_capability_catalog_is_missing() -> None:
+    from runtime.spec_materializer import materialize_spec
 
     conn = _VerifyRefsConn(capability_rows=[])
     with pytest.raises(CapabilityCatalogError):
-        compile_spec(
+        materialize_spec(
             {
                 "description": "Fix Python file",
                 "write": ["app.py"],
@@ -580,7 +580,7 @@ def test_plan_definition_reuses_exact_plan_artifact_without_replanning(monkeypat
     materialized_spec = first_result["materialized_spec"]
     payload_json = json.dumps(materialized_spec, sort_keys=True, separators=(",", ":"), default=str)
     reusable = MaterializeArtifactRecord(
-        compile_artifact_id="compile_artifact.plan.reused1234567890",
+        materialize_artifact_id="materialize_artifact.plan.reused1234567890",
         artifact_kind="plan",
         artifact_ref=materialized_spec["plan_revision"],
         revision_ref=materialized_spec["plan_revision"],
@@ -589,7 +589,7 @@ def test_plan_definition_reuses_exact_plan_artifact_without_replanning(monkeypat
         content_hash=hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
         authority_refs=(definition["definition_revision"],),
         payload=materialized_spec,
-        decision_ref="decision.compile.plan.reused1234567890",
+        decision_ref="decision.materialize.plan.reused1234567890",
     )
 
     monkeypatch.setattr(
@@ -1436,6 +1436,7 @@ def test_spec_uses_graph_runtime_for_single_prompt_dispatch_jobs() -> None:
 
     nodes = {node.node_id: node for node in request.nodes}
     assert list(nodes) == ["run__context", "run", "run__parser", "run__writer"]
+    assert nodes["run__context"].adapter_type == "context_compiler"
     assert nodes["run"].adapter_type == "cli_llm"
     assert nodes["run"].inputs["provider_slug"] == "openai"
     assert nodes["run"].inputs["model_slug"] == "gpt-5.4-mini"
@@ -1532,29 +1533,29 @@ def test_compile_graph_workflow_request_infers_semantic_task_types_from_agent_ro
     assert "model_slug" not in nodes["draft_reply"].inputs
 
 
-def test_compile_prose_fails_closed_when_compile_index_snapshot_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(compiler, "_get_connection", lambda: _VerifyRefsConn())
+def test_materialize_prose_fails_closed_when_materialize_index_snapshot_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(materializer, "_get_connection", lambda: _VerifyRefsConn())
     monkeypatch.setattr(
-        compiler,
+        materializer,
         "load_compile_index_snapshot",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            compile_index.MaterializeIndexAuthorityError(
-                "compile_index.snapshot_missing",
-                "compile index snapshot is missing",
+            materialize_index.MaterializeIndexAuthorityError(
+                "materialize_index.snapshot_missing",
+                "materialize index snapshot is missing",
             )
         ),
     )
-    # snapshot_missing is refreshable — the compiler tries auto-refresh,
+    # snapshot_missing is refreshable; the materializer tries auto-refresh,
     # which fails with surface_manifest_unavailable in test context.
     monkeypatch.setattr(
-        compiler,
+        materializer,
         "refresh_compile_index",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            compile_index.MaterializeIndexAuthorityError(
-                "compile_index.surface_manifest_unavailable",
-                "compile index surface manifest could not be resolved",
+            materialize_index.MaterializeIndexAuthorityError(
+                "materialize_index.surface_manifest_unavailable",
+                "materialize index surface manifest could not be resolved",
             )
         ),
     )
-    with pytest.raises(RuntimeError, match="compile_index.surface_manifest_unavailable"):
-        compiler.compile_prose("research something")
+    with pytest.raises(RuntimeError, match="materialize_index.surface_manifest_unavailable"):
+        materializer.materialize_prose("research something")

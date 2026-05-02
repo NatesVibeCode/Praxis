@@ -22,6 +22,13 @@ from runtime.workspace_paths import workflow_root
 _DETACHED_WAIT_ATTEMPTS = 30
 _FOREGROUND_SUBMIT_FLAG = "--foreground-submit"
 _SCRATCH_AGENT_RUNTIME_PROFILE_REF = "scratch_agent"
+_DETACHED_RUNTIME_ENV_KEYS = (
+    "PRAXIS_WORKFLOW_MCP_URL",
+    "PRAXIS_WORKFLOW_MCP_SIGNING_SECRET",
+    "PRAXIS_WORKFLOW_MCP_SIGNING_KEY_ID",
+    "PRAXIS_WORKFLOW_MCP_SIGNING_KEYS_JSON",
+    "PRAXIS_WORKFLOW_MCP_TOKEN_TTL_SECONDS",
+)
 
 
 def _workflow_cli():
@@ -232,11 +239,35 @@ def _emit_live_stream_block(
         stdout.write(f"  status snapshot: ./scripts/praxis workflow run-status {run_id} --summary\n")
 
 
+def _read_repo_env_values(repo_root: Path, keys: tuple[str, ...]) -> dict[str, str]:
+    env_path = repo_root / ".env"
+    try:
+        content = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    wanted = set(keys)
+    values: dict[str, str] = {}
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key not in wanted:
+            continue
+        value = value.strip().strip("'\"")
+        if value:
+            values[key] = value
+    return values
+
+
 def _detached_launch_env(repo_root: Path) -> tuple[dict[str, str], str]:
     authority = workflow_database_authority_for_repo(repo_root, env=os.environ)
     env = dict(os.environ)
     env["WORKFLOW_DATABASE_URL"] = str(authority.database_url or "")
     env["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] = authority.source
+    for key, value in _read_repo_env_values(repo_root, _DETACHED_RUNTIME_ENV_KEYS).items():
+        env.setdefault(key, value)
     env["PATH"] = str(os.environ.get("PATH", ""))
     workflow_root = str(_workflow_root(repo_root))
     existing_pythonpath = str(os.environ.get("PYTHONPATH", "")).strip()

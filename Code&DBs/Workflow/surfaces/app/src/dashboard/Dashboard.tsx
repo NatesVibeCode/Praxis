@@ -323,9 +323,9 @@ function WorkflowCard({
         </div>
       }
     >
-      <p className="wf-card__desc">
-        {wf.description || 'No description yet. Use the editor to define authority, state, and execution rules.'}
-      </p>
+      {wf.description && (
+        <p className="wf-card__desc">{wf.description}</p>
+      )}
 
       <StatusRail
         items={[
@@ -362,16 +362,13 @@ function WorkflowSectionBlock({
 }) {
   return (
     <section className={`dash-section dash-section--${section.tone}`}>
-      <ListPanel
-        eyebrow={section.eyebrow}
-        title={section.title}
-        count={loading ? '…' : section.count}
-      >
-        <p className="dash-section__copy">{section.description}</p>
-      </ListPanel>
+      <header className="dash-section__bar">
+        <span className="dash-section__label">{section.title}</span>
+        <span className="dash-section__count-badge">{loading ? '…' : section.count}</span>
+      </header>
 
       {loading && section.count === 0 ? (
-        <div className="dash-section__loading">Refreshing workflow inventory…</div>
+        <div className="dash-section__loading">Refreshing…</div>
       ) : section.count > 0 ? (
         <div className="dash-section__grid">
           {section.workflows.map((workflow) => (
@@ -713,39 +710,36 @@ export function Dashboard({
       <main className="dash-main">
         <div className="dash-content">
           <input ref={instanceFileRef} type="file" hidden onChange={handleInstanceFileUpload} />
+
           <section className="dash-hero">
-            <div className="dash-hero__copy">
-              <h1 className="dash-hero__title">{heroTitle}</h1>
-              <p className="dash-hero__desc">{heroCopy}</p>
-
-              <div className="dash-hero__actions prx-button-row">
-                <Button tone="primary" size="sm" onClick={onDescribe}>Describe job</Button>
-                <Button size="sm" onClick={onNewWorkflow}>Blank builder</Button>
-                <Button size="sm" onClick={onChat}>Chat</Button>
-                <Button size="sm" onClick={() => instanceFileRef.current?.click()}>Add file</Button>
-              </div>
-
-              {error && (
-                <div className="dash-inline-alert">
-                  Live metrics are unavailable right now. The workflow inventory still works, but health data is stale.
-                </div>
-              )}
-            </div>
-
-            <div className="prx-tile-grid" aria-label="Dashboard authority and actions">
-              {overviewCards.map((card) => (
-                <MetricTile
-                  key={card.id}
-                  label={card.title}
-                  value={card.value}
-                  detail={card.detail}
-                  action={`${card.action} →`}
-                  onClick={card.onClick}
-                  aria-label={`${card.title}: ${card.value}`}
-                />
-              ))}
+            <h1 className="dash-hero__title">{heroTitle}</h1>
+            <div className="dash-hero__actions prx-button-row">
+              <Button tone="primary" size="sm" onClick={onDescribe}>Describe job</Button>
+              <Button size="sm" onClick={onNewWorkflow}>Blank builder</Button>
+              <Button size="sm" onClick={onChat}>Chat</Button>
+              <Button size="sm" onClick={() => instanceFileRef.current?.click()}>Add file</Button>
             </div>
           </section>
+
+          {error && (
+            <div className="dash-inline-alert">
+              Live metrics unavailable — health data may be stale.
+            </div>
+          )}
+
+          <div className="prx-tile-grid" aria-label="Dashboard metrics">
+            {overviewCards.map((card) => (
+              <MetricTile
+                key={card.id}
+                label={card.title}
+                value={card.value}
+                detail={card.detail}
+                action={`${card.action} →`}
+                onClick={card.onClick}
+                aria-label={`${card.title}: ${card.value}`}
+              />
+            ))}
+          </div>
 
           <div className="dash-receipts">
             <ReceiptCard
@@ -764,7 +758,7 @@ export function Dashboard({
               type="button"
               className="dash-receipt-button"
               onClick={onOpenCosts}
-              title="View token spend (stays under Overview)"
+              title="View token spend"
             >
               <ReceiptCard
                 state={health.tone === 'danger' ? 'refused' : 'verify'}
@@ -800,14 +794,12 @@ export function Dashboard({
                   />
                 ))
               ) : (
-                <ListPanel eyebrow="Next step" title="Pick the way you want to start">
-                  <div className="prx-button-row">
-                    <Button size="lg" tone="ghost" onClick={onDescribe}>Describe job</Button>
-                    <Button size="lg" tone="ghost" onClick={onNewWorkflow}>Blank builder</Button>
-                    <Button size="lg" tone="ghost" onClick={onChat}>Chat</Button>
-                    <Button size="lg" tone="ghost" onClick={() => instanceFileRef.current?.click()}>Add file</Button>
-                  </div>
-                </ListPanel>
+                <EmptyStateExplainer
+                  title="No workflows yet"
+                  why="Use the buttons above to describe a job, open the builder, or start a chat."
+                  actionLabel="Describe a job"
+                  onAction={onDescribe}
+                />
               )}
             </div>
 

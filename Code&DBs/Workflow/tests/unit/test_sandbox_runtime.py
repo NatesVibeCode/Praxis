@@ -31,6 +31,11 @@ CONTAINER_HOME = str(container_home())
 OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
 
 
+def _env_file_lines_from_docker_cmd(args: list[str]) -> list[str]:
+    path = Path(args[args.index("--env-file") + 1])
+    return path.read_text(encoding="utf-8").splitlines()
+
+
 @pytest.fixture(autouse=True)
 def _allow_existing_legacy_workspace_copy_tests(monkeypatch) -> None:
     monkeypatch.setenv("PRAXIS_ALLOW_LEGACY_WORKSPACE_COPY", "1")
@@ -1451,6 +1456,7 @@ def test_docker_local_exec_resolves_anthropic_credential_through_authority(
     DB-backed authority.
     """
     docker_cmds: list[list[str]] = []
+    env_file_lines: list[list[str]] = []
 
     # Host env carries a *different* token. The authority returns the real one.
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-shell-leak-not-allowed")
@@ -1475,6 +1481,7 @@ def test_docker_local_exec_resolves_anthropic_credential_through_authority(
         "runtime.sandbox_runtime.subprocess.Popen",
         lambda args, **kwargs: (
             docker_cmds.append(list(args))
+            or env_file_lines.append(_env_file_lines_from_docker_cmd(list(args)))
             or type(
                 "_Proc",
                 (),
@@ -1520,14 +1527,104 @@ def test_docker_local_exec_resolves_anthropic_credential_through_authority(
         )
 
         run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
-        env_values = [
-            value
-            for index, value in enumerate(run_cmd)
-            if index > 0 and run_cmd[index - 1] == "-e"
-        ]
-        assert "CLAUDE_CODE_OAUTH_TOKEN=from-db-anthropic-token" in env_values
-        assert "CLAUDE_CODE_OAUTH_TOKEN=host-shell-leak-not-allowed" not in env_values
-        assert "ANTHROPIC_AUTH_TOKEN=host-shell-fallback-not-allowed" not in env_values
+        assert "--env-file" in run_cmd
+        assert "CLAUDE_CODE_OAUTH_TOKEN=from-db-anthropic-token" in env_file_lines[0]
+        assert "CLAUDE_CODE_OAUTH_TOKEN=host-shell-leak-not-allowed" not in env_file_lines[0]
+        assert "ANTHROPIC_AUTH_TOKEN=host-shell-fallback-not-allowed" not in env_file_lines[0]
+    finally:
+        provider.destroy_session(session, "completed")
+
+
+def test_docker_local_exec_uses_env_file_for_large_execution_bundle(monkeypatch, tmp_path) -> None:
+    docker_cmds: list[list[str]] = []
+    env_file_lines: list[list[str]] = []
+    spill_file_payloads: list[str] = []
+
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_image_available", lambda image: True)
+    monkeypatch.setattr("runtime.sandbox_runtime.os.path.isfile", lambda path: False)
+
+    def _fake_popen(args, **kwargs):
+        args = list(args)
+        docker_cmds.append(args)
+        env_file_lines.append(_env_file_lines_from_docker_cmd(args))
+        spill_mount = next(
+            (
+                args[index + 1]
+                for index, value in enumerate(args[:-1])
+                if value == "-v" and "praxis-sandbox-env-spill-" in args[index + 1]
+            ),
+            "",
+        )
+        if spill_mount:
+            spill_source = spill_mount.split(":", 1)[0]
+            spill_file_payloads.append((Path(spill_source) / "PRAXIS_EXECUTION_BUNDLE").read_text(encoding="utf-8"))
+        return type(
+            "_Proc",
+            (),
+            {
+                "returncode": 0,
+                "communicate": staticmethod(lambda input=None, timeout=None: ("ok", "")),
+            },
+        )()
+
+    monkeypatch.setattr("runtime.sandbox_runtime.subprocess.Popen", _fake_popen)
+
+    provider = DockerLocalSandboxProvider()
+    session = provider.create_session(
+        type(
+            "Spec",
+            (),
+            {
+                "sandbox_session_id": "sandbox_session:run.alpha:job.large-env",
+                "sandbox_group_id": "group:run.alpha",
+                "network_policy": "disabled",
+                "workspace_materialization": "copy",
+                "timeout_seconds": 30,
+                "metadata": {"provider_slug": "google", "auth_mount_policy": "none"},
+            },
+        )()
+    )
+
+    try:
+        provider.exec(
+            session,
+            type(
+                "Request",
+                (),
+                {
+                    "command": "echo hi",
+                    "stdin_text": "",
+                    "env": {
+                        "PATH": "/usr/bin:/bin",
+                        "PRAXIS_EXECUTION_BUNDLE": json.dumps({"context": "x" * 200_000}),
+                    },
+                    "timeout_seconds": 30,
+                    "execution_transport": "cli",
+                    "image": None,
+                },
+            )(),
+        )
+
+        run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
+        assert "--env-file" in run_cmd
+        assert "-e" not in run_cmd
+        assert not any("PRAXIS_EXECUTION_BUNDLE=" in part for part in run_cmd)
+        assert all(len(line.encode("utf-8")) < 32_000 for line in env_file_lines[0])
+        assert any(line.startswith("PRAXIS_EXECUTION_BUNDLE=") for line in env_file_lines[0])
+        assert any(line.startswith("PRAXIS_EXECUTION_BUNDLE_FILE=/tmp/") for line in env_file_lines[0])
+        assert "\"_spilled_bundle_file\"" in next(
+            line for line in env_file_lines[0] if line.startswith("PRAXIS_EXECUTION_BUNDLE=")
+        )
+        assert spill_file_payloads == [json.dumps({"context": "x" * 200_000})]
+        assert any(line == f"HOME={CONTAINER_HOME}" for line in env_file_lines[0])
+        assert not Path(run_cmd[run_cmd.index("--env-file") + 1]).exists()
+        spill_mount = next(
+            run_cmd[index + 1]
+            for index, value in enumerate(run_cmd[:-1])
+            if value == "-v" and "praxis-sandbox-env-spill-" in run_cmd[index + 1]
+        )
+        assert not Path(spill_mount.split(":", 1)[0]).exists()
     finally:
         provider.destroy_session(session, "completed")
 

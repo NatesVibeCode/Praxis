@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `460`.
+Public route count: `8`. All route count: `464`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -79,7 +79,6 @@ Public route count: `8`. All route count: `460`.
 | `POST` | `/api/bug_resolve` | `internal` | `operations` | bug_resolve |
 | `GET` | `/api/bugs` | `internal` | - | bugs_get |
 | `GET` | `/api/bugs/replay-ready` | `internal` | - | bugs_replay_ready_get |
-| `POST` | `/api/candidate_identity_phase_b` | `internal` | `operations` | candidate_identity_phase_b |
 | `GET` | `/api/catalog` | `internal` | - | Return live catalog items from platform registries + static primitives. |
 | `GET` | `/api/catalog/operations` | `internal` | - | Return DB-backed CQRS operation definitions and source policies. |
 | `GET` | `/api/catalog/review-decisions` | `internal` | - | catalog_review_decisions_get |
@@ -180,6 +179,10 @@ Public route count: `8`. All route count: `460`.
 | `GET` | `/api/handoff/latest` | `internal` | - | handoff_latest_get |
 | `GET` | `/api/handoff/lineage` | `internal` | - | handoff_lineage_get |
 | `GET` | `/api/handoff/status` | `internal` | - | handoff_status_get |
+| `GET` | `/api/healer_catalog_list` | `internal` | `operations` | healer.catalog.list |
+| `POST` | `/api/healer_register` | `internal` | `operations` | healer.register |
+| `POST` | `/api/healer_run` | `internal` | `operations` | healer.run |
+| `GET` | `/api/healer_runs_list` | `internal` | `operations` | healer.runs.list |
 | `GET` | `/api/health` | `internal` | - | Platform health from bounded Postgres probes. |
 | `GET` | `/api/integration-action/contracts` | `internal` | `operations` | integration_action_contract_read |
 | `POST` | `/api/integration-action/contracts` | `internal` | `operations` | integration_action_contract_record |
@@ -399,6 +402,7 @@ Public route count: `8`. All route count: `460`.
 | `POST` | `/api/typed_gap/emit` | `internal` | `operations` | typed_gap.emit |
 | `POST` | `/api/ui/telemetry` | `internal` | - | Append a frontend prx-* primitive event to the UI telemetry log. |
 | `GET` | `/api/ui/telemetry/recent` | `internal` | - | Return the last N rows from the UI telemetry log for inspection. |
+| `POST` | `/api/verifier_register` | `internal` | `operations` | verifier.register |
 | `POST` | `/api/verifier_run` | `internal` | `operations` | verifier.run |
 | `GET` | `/api/verifier_runs_list` | `internal` | `operations` | verifier.runs.list |
 | `GET` | `/api/verifiers` | `internal` | `operations` | verifier.catalog.list |

@@ -75,6 +75,90 @@ Removing the class definition AND the consuming JSX — both — is the standard
 
 ---
 
+## Brand foundations
+
+The canonical Praxis brand bible lives at `Skills/praxis-design/README.md` (and the snapshot in `~/Downloads/New Folder With Items/`). This contract enforces it inside the React app. The non-negotiable foundations:
+
+**Background.** Never pure black. Body / shell use `var(--bg)` (`#080808`) layered with `var(--backdrop)` — three almost-subliminal radials: cream top-left (`rgba(243,238,228,0.09)`), **cool blue** top-right (`rgba(88,166,255,0.08)` — yes, blue is on-brand here), green bottom (`rgba(63,185,80,0.04)`). The blue is a depth tint, not a hero gradient. Never bluish-purple. Never a hero gradient covering the viewport.
+
+**Cards / panels.** 14px radius (`var(--radius-lg)`), 1px hairline border `rgba(255,255,255,0.08)`, **paper-over-dark gradient interior** (`var(--surface-elevated)`), `var(--shadow-card)` soft shadow plus the canonical `var(--glow-soft)` inner-line glow on hover. Never colored left-borders. Never tilted.
+
+**Buttons.** 10px radius (`var(--radius-md)`), pill border, three tones (primary / ghost / danger), three sizes (sm / md / lg).
+
+**Foreground.** `var(--text)` `#f5f1e8` for primary, `var(--text-muted)` `#9b9488` for muted, `--fg3` (`#706b62`) for dim, `--fg-faint` (`#3a3a3a`) for faintest rules. **Never pure white** for body text.
+
+**Accent.** `var(--accent)` `#f3eee4` (pale sand). The primary brand tint. Used sparingly: active tab underlines, button fills (inverted), focus rings, the halo inside the logomark's central aperture.
+
+**Amber authority** (`var(--warning)` `#d29922`). Reserved for warnings, gate states, and the Moon build canvas's active node glow. Never decorative.
+
+**Semantic status.** `--success` `#3fb950`, `--warning` `#d29922`, `--danger` `#f85149`. Canvas softens danger to `#ff8a6a` ("tint-of-concern, not alarm").
+
+**Spacing rhythm.** 4px base. `--space-xs` 4 / `--space-sm` 8 / `--space-md` 16 / `--space-lg` 24 / `--space-xl` 32 / `--space-2xl` 48 / `--space-3xl` 64.
+
+**Radii ladder.** 4 → 8 → 10 → 14 → 18 → 20 → 999. Cards = 14, buttons = 10, dock items = 18, dock rails = 20.
+
+**Motion.** `--motion-micro` 100ms / `--motion-fast` 160ms / `--motion-node` 180ms / `--motion-dock` 240ms. All plain `ease`. No bounces. No overshoot. Hover = border-color + bg tint + `translateY(-1px)`.
+
+**Focus ring.** Double ring: `box-shadow: 0 0 0 3px rgba(243,238,228,0.12), 0 0 0 1px rgba(243,238,228,0.30);`. Apply to every interactive primitive.
+
+**Iconography.** Praxis ships **no icon system**. Inline status glyphs only: `>`, `✓`, `!`, `·` — unicode characters in mono. When an artifact needs UI iconography (sidebars, toolbars), use **Lucide** (`lucide-static`) at stroke-width 1.5, color `currentColor`, scaled 16-22px. Never Font Awesome, Material Icons, or any other icon font. Prefer type labels over icons.
+
+**Voice.** Engineer-to-engineer. Declarative, concrete, unsentimental. **Sentence case** for headlines and in-UI labels. **ALL CAPS + wide tracking** (`var(--tracking-xwide)` 0.14em) for metadata rails — always mono, always `var(--text-muted)`. **snake_case** for routes / agent identifiers (`auto/build`, `praxis workflow run`). Avoid *we* — speak in third person about Praxis. **No emoji**, ever, anywhere in product or copy.
+
+**Banned words.** *Autonomous engineering control plane* (deprecated thesis). *Canary* (jargon — say "in practice"). *Workflow runner*, *agent platform*, *unlock*, *supercharge*, *effortless*, *magic*, *seamless*. Praxis is the opposite of magic.
+
+**Load-bearing phrases** — reuse verbatim, do not drift:
+- *Confidence as infrastructure.*
+- *Trust, materialized.*
+- *Every task gets a working world, not a prompt.*
+- *Anti-patterns are part of the patterns.*
+- *The environment, not the prompt, enforces what matters.*
+- *Private beta launching 2026.*
+
+---
+
+## Typography law
+
+Two typefaces. The brand bible: **Space Grotesk for display + UI**, **IBM Plex Mono for metadata, status lines, tokens, routes, and timestamps**. Mono is *narrower* than the prior loose interpretation. Most of what users read is sans.
+
+- **Space Grotesk** (`var(--font-sans)`) — display + UI voice. Hero titles, section h2 titles, body copy that reads as prose, button labels, **metric values** ("99 workflows", "Recover"), **detail copy** ("1 live · 2 saved · 96 draft"), **action labels** ("Open builder →"), workflow card names, descriptions, anything a human would read out loud.
+- **IBM Plex Mono** (`var(--font-mono)`) — **only** for: tracked-uppercase metadata kickers (`WORKFLOW INVENTORY`), status lines (`STATUS · PRIVATE BETA`), tokens / routes / agent identifiers (`auto/build`, `praxis workflow run`), timestamps (`2026-04-30 · 12:04:31`), receipt hashes (`r_8af3·9c1d·5fb2·4a18`), receipt key/value rows where the value is a literal field, and ALL CAPS section labels. Always dim (`var(--text-muted)`) unless it's a value cell in a receipt.
+
+The rule: **if it's a literal identifier, hash, route, timestamp, status badge, or tracked-uppercase eyebrow, it's mono. Everything else is sans.** Including numbers — "99 workflows" is sans because it's a display value, not a hash.
+
+Concrete mapping:
+
+| Element | Font | Notes |
+|---|---|---|
+| `<h1>` hero title | Space Grotesk | `font-weight: 700`, `letter-spacing: -0.01em` |
+| `<h2>` section title | Space Grotesk | `font-weight: 500`, 18px |
+| `<p.note>` body copy | Space Grotesk | 12-14px, `var(--text-muted)`, narrow column |
+| `<Button>` label | Space Grotesk | from `prx-button` rule |
+| Section strip kicker (`▮▮ · LABEL · ▮▮`) | IBM Plex Mono | tracked uppercase, 11px |
+| Metric tile label (`WORKFLOW INVENTORY`) | IBM Plex Mono | tracked uppercase, 11px, `--text-muted` |
+| Metric tile value (`99 workflows`, `Recover`) | **Space Grotesk** | 28px semibold (`--fs-3xl`), tight tracking |
+| Metric tile detail (`1 live · 2 saved · 96 draft`) | **Space Grotesk** | 13px regular |
+| Metric tile action (`Open builder →`) | **Space Grotesk** | 13px medium |
+| Receipt card kicker (`▮▮ WORKFLOW.INVENTORY ▮▮`) | IBM Plex Mono | from `prx-receipt` rule |
+| Receipt key / value rows | IBM Plex Mono | tabular numerals |
+| Receipt hash + seal footer | IBM Plex Mono | 10-11px |
+| Status row title (`workflow.run.1a9b...`) | **Space Grotesk** | 13px medium. (Title is *displayed* — even if it's a slug-shaped name, treat it as readable text. Use mono only when the row's purpose is to show a literal hash.) |
+| Status row detail (`failed · no job receipts yet`) | **Space Grotesk** | 12px regular. Add `detailMono` prop to opt into mono when the detail is a path/hash. |
+| Status row meta (`1h ago`, `5 sealed`) | IBM Plex Mono | 10px tracked |
+| Workflow card title | Space Grotesk | the workflow's human name |
+| Workflow card description | Space Grotesk | prose body |
+| Workflow card stat-rail labels (`LATEST RUN`) | IBM Plex Mono | from StatusRail |
+| Workflow card stat-rail values (`No run history yet`) | IBM Plex Mono | mono — these are state |
+| Source chip label | Space Grotesk | the human name |
+| Source chip subtitle (`READ_ONLY`, `CONNECTED · 24 ROWS`) | IBM Plex Mono | tracked, status |
+| LedDot, GateBadge, TokenChip | n/a (visual) | no text inside |
+
+Tabular numerals (`font-feature-settings: "tnum" 1`) are mandatory anywhere mono numerals are stacked vertically (metric values, receipt rows, status row counts) so digits align column-wise.
+
+If a new primitive shows technical data and renders text, it MUST set `font-family: var(--font-mono)` in its CSS or the page reads as a generic dashboard.
+
+---
+
 ## Containment audit (run before adding ANY border / radius / bg-tint)
 
 Answer YES to exactly one. If none match, no frame — type and whitespace carry it.

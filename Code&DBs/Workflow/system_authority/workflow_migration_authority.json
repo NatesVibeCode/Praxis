@@ -426,7 +426,11 @@
     "410_workflow_repair_queue.sql",
     "411_register_workflow_repair_queue_operations.sql",
     "412_register_verifier_run_command_operation.sql",
-    "413_register_healer_run_command_operation.sql"
+    "413_register_healer_run_command_operation.sql",
+    "414_register_verifier_register_command_operation.sql",
+    "415_register_healer_register_command_operation.sql",
+    "416_candidate_ref_routing_authority.sql",
+    "417_candidate_ref_orphan_repair.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -11724,6 +11728,130 @@
         "object_type": "row",
         "object_name": "data_dictionary_objects.healer_run_completed_event"
       }
+    ],
+    "414_register_verifier_register_command_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.verifier.register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.verifier.registered"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.verifier.register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.verifier.register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.verifier_registered_event"
+      }
+    ],
+    "415_register_healer_register_command_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.healer.register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.healer.registered"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.healer.register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.healer.register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.healer_registered_event"
+      }
+    ],
+    "416_candidate_ref_routing_authority.sql": [
+      {
+        "object_type": "column",
+        "object_name": "provider_model_candidates.transport_type"
+      },
+      {
+        "object_type": "column",
+        "object_name": "provider_model_candidates.host_provider_slug"
+      },
+      {
+        "object_type": "column",
+        "object_name": "provider_model_candidates.variant"
+      },
+      {
+        "object_type": "column",
+        "object_name": "provider_model_candidates.effort_slug"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.candidate_ref"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.host_provider_slug"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.variant"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.effort_slug"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "provider_model_candidates.provider_model_candidates_transport_type_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "task_type_routing.task_type_routing_candidate_ref_nonblank"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "task_type_routing.task_type_routing_candidate_ref_fkey"
+      },
+      {
+        "object_type": "index",
+        "object_name": "provider_model_candidates_identity_lookup_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "task_type_routing_candidate_ref_idx"
+      },
+      {
+        "object_type": "function",
+        "object_name": "validate_task_type_routing_candidate_ref"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "task_type_routing.task_type_routing_candidate_ref_identity_check"
+      },
+      {
+        "object_type": "view",
+        "object_name": "task_type_routing_orphans"
+      }
+    ],
+    "417_candidate_ref_orphan_repair.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.417_candidate_ref_orphan_repair.sql"
+      },
+      {
+        "object_type": "view",
+        "object_name": "task_type_routing_orphans"
+      },
+      {
+        "object_type": "view",
+        "object_name": "task_type_routing_admission_audit"
+      }
     ]
   },
   "policy_buckets": {
@@ -12154,7 +12282,11 @@
       "410_workflow_repair_queue.sql",
       "411_register_workflow_repair_queue_operations.sql",
       "412_register_verifier_run_command_operation.sql",
-      "413_register_healer_run_command_operation.sql"
+      "413_register_healer_run_command_operation.sql",
+      "414_register_verifier_register_command_operation.sql",
+      "415_register_healer_register_command_operation.sql",
+      "416_candidate_ref_routing_authority.sql",
+      "417_candidate_ref_orphan_repair.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

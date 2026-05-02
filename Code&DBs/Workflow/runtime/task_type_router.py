@@ -15,7 +15,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 from asyncpg import PostgresError
 from registry.provider_execution_registry import (
@@ -261,6 +261,72 @@ def _resolve_semantic_auto_route(task_type: str) -> str:
     return _SEMANTIC_AUTO_ROUTE_ALIASES.get(task_type, task_type)
 
 
+def _normalize_transport_type(value: object) -> str:
+    normalized = str(value or "").strip().upper()
+    return normalized if normalized in {"CLI", "API"} else ""
+
+
+def _adapter_type_for_transport(transport_type: object) -> str | None:
+    normalized = _normalize_transport_type(transport_type)
+    if normalized == "CLI":
+        return "cli_llm"
+    if normalized == "API":
+        return "llm_task"
+    return None
+
+
+def _transport_type_for_adapter(adapter_type: object) -> str:
+    normalized = str(adapter_type or "").strip().lower()
+    if normalized == "cli_llm":
+        return "CLI"
+    if normalized == "llm_task":
+        return "API"
+    return ""
+
+
+def _candidate_adapter_type(
+    candidate: dict[str, Any],
+    *,
+    default_adapter: str,
+) -> str:
+    explicit_adapter = str(candidate.get("adapter_type") or "").strip().lower()
+    if explicit_adapter:
+        return explicit_adapter
+    transport_adapter = _adapter_type_for_transport(candidate.get("transport_type"))
+    if transport_adapter:
+        return transport_adapter
+    return str(default_adapter or "").strip().lower()
+
+
+def _route_candidate_payload(decision: "TaskRouteDecision") -> dict[str, Any]:
+    provider_slug = str(getattr(decision, "provider_slug", "") or "").strip()
+    model_slug = str(getattr(decision, "model_slug", "") or "").strip()
+    return {
+        "slug": f"{provider_slug}/{model_slug}",
+        "candidate_ref": str(getattr(decision, "candidate_ref", "") or "").strip(),
+        "provider_slug": provider_slug,
+        "host_provider_slug": str(getattr(decision, "host_provider_slug", "") or "").strip(),
+        "model_slug": model_slug,
+        "transport_type": _normalize_transport_type(getattr(decision, "transport_type", "")),
+        "adapter_type": str(getattr(decision, "adapter_type", "") or "").strip(),
+        "variant": str(getattr(decision, "variant", "") or "").strip(),
+        "effort_slug": str(getattr(decision, "effort_slug", "") or "").strip(),
+        "task_type": str(getattr(decision, "task_type", "") or "").strip(),
+        "rank": int(getattr(decision, "rank", 0) or 0),
+    }
+
+
+def _route_identity_tuple(row: Mapping[str, Any]) -> tuple[str, str, str, str, str, str]:
+    return (
+        str(row.get("provider_slug") or "").strip(),
+        str(row.get("model_slug") or "").strip(),
+        _normalize_transport_type(row.get("transport_type")),
+        str(row.get("host_provider_slug") or "").strip(),
+        str(row.get("variant") or "").strip(),
+        str(row.get("effort_slug") or "").strip(),
+    )
+
+
 def _coerce_json_object(value: object, *, field_name: str) -> dict[str, Any]:
     if isinstance(value, str):
         try:
@@ -346,7 +412,12 @@ class TaskRouteDecision:
     cost_per_m_tokens: float
     rationale: str
     was_auto: bool
+    candidate_ref: str = ""
     adapter_type: str = "cli_llm"
+    transport_type: str = "CLI"
+    host_provider_slug: str = ""
+    variant: str = ""
+    effort_slug: str = ""
     billing_mode: str = "metered_api"
     budget_bucket: str = "unknown"
     effective_marginal_cost: float = 0.0
@@ -446,6 +517,7 @@ class RoutePlan:
     backoff_seconds: tuple[int, ...]    # backoff schedule for same-model retries
     task_type: str
     original_slug: str
+    route_candidates: tuple[dict[str, Any], ...] = ()
 
     @staticmethod
     def default_failover_codes() -> frozenset[str]:
@@ -734,15 +806,30 @@ class TaskTypeRouter:
         if task_type:
             self._check_permission(task_type, model, provider)
         provider_policy_id: str | None = None
+        candidate_ref = ""
         candidate_adapter_type: str | None = None
+        candidate_transport_type = ""
+        candidate_host_provider_slug = ""
+        candidate_variant = ""
+        candidate_effort_slug = ""
+        candidate_strict_adapter = False
         candidate_cost_per_m_tokens = 0.0
         for candidate in self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref):
             if (
                 str(candidate.get("provider_slug") or "") == provider
                 and str(candidate.get("model_slug") or "") == model
             ):
+                candidate_ref = str(candidate.get("candidate_ref") or "").strip()
                 provider_policy_id = str(candidate.get("provider_policy_id") or "").strip() or None
-                candidate_adapter_type = str(candidate.get("adapter_type") or "").strip() or None
+                candidate_transport_type = _normalize_transport_type(candidate.get("transport_type"))
+                candidate_adapter_type = _candidate_adapter_type(
+                    candidate,
+                    default_adapter=self._default_adapter_for_provider(provider),
+                )
+                candidate_host_provider_slug = str(candidate.get("host_provider_slug") or "").strip()
+                candidate_variant = str(candidate.get("variant") or "").strip()
+                candidate_effort_slug = str(candidate.get("effort_slug") or "").strip()
+                candidate_strict_adapter = bool(candidate_transport_type)
                 candidate_cost_per_m_tokens = float(candidate.get("cost_per_m_tokens") or 0.0)
                 break
         # BUG-6B34915A: explicit routes must consult the same budget-window
@@ -757,6 +844,7 @@ class TaskTypeRouter:
                 raw_cost_per_m_tokens=candidate_cost_per_m_tokens,
                 budget_authority=budget_authority,
                 default_adapter=candidate_adapter_type or self._default_adapter_for_provider(provider),
+                strict_adapter=candidate_strict_adapter,
             )
         except RuntimeError as exc:
             message = str(exc)
@@ -780,6 +868,28 @@ class TaskTypeRouter:
         resolved_adapter_type = str(
             economics.get("adapter_type") or self._default_adapter_for_provider(provider)
         )
+        resolved_transport_type = (
+            candidate_transport_type
+            or _transport_type_for_adapter(resolved_adapter_type)
+            or "API"
+        )
+        if (
+            candidate_transport_type
+            and _transport_type_for_adapter(resolved_adapter_type) != candidate_transport_type
+        ):
+            raise TaskRouteAuthorityError(
+                (
+                    f"candidate transport {candidate_transport_type} for {provider}/{model} "
+                    f"does not match resolved adapter {resolved_adapter_type}"
+                ),
+                reason_code="provider_authority.transport_adapter_mismatch",
+                details={
+                    "provider_slug": provider,
+                    "model_slug": model,
+                    "transport_type": candidate_transport_type,
+                    "adapter_type": resolved_adapter_type,
+                },
+            )
         reasoning_effort = self._reasoning_effort_fields(
             task_type=task_type or "build",
             provider_slug=provider,
@@ -796,7 +906,12 @@ class TaskTypeRouter:
             cost_per_m_tokens=0,
             rationale="explicit slug",
             was_auto=False,
+            candidate_ref=candidate_ref,
             adapter_type=resolved_adapter_type,
+            transport_type=resolved_transport_type,
+            host_provider_slug=candidate_host_provider_slug,
+            variant=candidate_variant,
+            effort_slug=candidate_effort_slug,
             billing_mode=str(economics.get("billing_mode") or "metered_api"),
             budget_bucket=str(economics.get("budget_bucket") or "unknown"),
             effective_marginal_cost=_row_effective_marginal_cost(economics),
@@ -881,9 +996,14 @@ class TaskTypeRouter:
 
     def _load_active_catalog_candidates(self) -> list[dict[str, Any]]:
         rows = self._conn.execute(
-            """SELECT DISTINCT ON (provider_slug, model_slug)
+            """SELECT DISTINCT ON (provider_slug, model_slug, transport_type)
+                      candidate_ref,
                       provider_slug,
                       model_slug,
+                      transport_type,
+                      host_provider_slug,
+                      variant,
+                      effort_slug,
                       priority,
                       route_tier,
                       route_tier_rank,
@@ -894,7 +1014,7 @@ class TaskTypeRouter:
                       benchmark_profile
                FROM provider_model_candidates
                WHERE status = 'active'
-               ORDER BY provider_slug, model_slug, priority ASC, created_at DESC""",
+               ORDER BY provider_slug, model_slug, transport_type, priority ASC, created_at DESC""",
         )
         candidates: list[dict[str, Any]] = []
         for row in rows or []:
@@ -902,8 +1022,13 @@ class TaskTypeRouter:
             task_affinities = _parse_json_field(row.get("task_affinities"), {})
             benchmark_profile = _parse_json_field(row.get("benchmark_profile"), {})
             candidates.append({
+                "candidate_ref": str(row.get("candidate_ref") or ""),
                 "provider_slug": str(row["provider_slug"]),
                 "model_slug": str(row["model_slug"]),
+                "transport_type": _normalize_transport_type(row.get("transport_type")),
+                "host_provider_slug": str(row.get("host_provider_slug") or ""),
+                "variant": str(row.get("variant") or ""),
+                "effort_slug": str(row.get("effort_slug") or ""),
                 "priority": int(row.get("priority") or 999),
                 "provider_policy_id": str(row.get("provider_policy_id") or "").strip() or None,
                 "adapter_type": str(row.get("adapter_type") or "").strip() or None,
@@ -924,7 +1049,12 @@ class TaskTypeRouter:
             "candidate_ref": candidate.candidate_ref, "provider_ref": candidate.provider_ref,
             "provider_name": candidate.provider_name, "provider_slug": candidate.provider_slug,
             "provider_policy_id": candidate.provider_policy_id,
-            "model_slug": candidate.model_slug, "priority": candidate.priority,
+            "model_slug": candidate.model_slug,
+            "transport_type": _normalize_transport_type(candidate.transport_type),
+            "host_provider_slug": candidate.host_provider_slug,
+            "variant": candidate.variant,
+            "effort_slug": candidate.effort_slug,
+            "priority": candidate.priority,
             "balance_weight": candidate.balance_weight,
             "route_tier": _normalize_auto_route_key(candidate.route_tier or ""),
             "route_tier_rank": int(candidate.route_tier_rank or 99),
@@ -996,23 +1126,46 @@ class TaskTypeRouter:
             runtime_profile_ref=effective_runtime_profile_ref,
             job_type=task_type,
         )
-        allowed = {
+        allowed_slugs = {
             f"{row.provider_slug}/{row.model_slug}"
             for row in catalog_rows
             if row.is_runnable
         }
-        if not allowed:
+        allowed_candidate_refs = {
+            str(getattr(row, "candidate_ref", "") or "").strip()
+            for row in catalog_rows
+            if row.is_runnable and str(getattr(row, "candidate_ref", "") or "").strip()
+        }
+        allowed_exact = {
+            (
+                f"{row.provider_slug}/{row.model_slug}",
+                _normalize_transport_type(getattr(row, "transport_type", "")),
+            )
+            for row in catalog_rows
+            if row.is_runnable and _normalize_transport_type(getattr(row, "transport_type", ""))
+        }
+        if not allowed_slugs:
             raise provider_authority_fail(
                 "provider_authority.effective_catalog_empty",
                 "effective provider job catalog returned no runnable candidates",
                 runtime_profile_ref=effective_runtime_profile_ref,
                 task_type=task_type,
             )
-        filtered = [
-            row
-            for row in rows
-            if f"{row.get('provider_slug')}/{row.get('model_slug')}" in allowed
-        ]
+        def _row_allowed(row: dict[str, Any]) -> bool:
+            slug = f"{row.get('provider_slug')}/{row.get('model_slug')}"
+            row_transport = _normalize_transport_type(row.get("transport_type"))
+            row_candidate_ref = str(row.get("candidate_ref") or "").strip()
+            if row_candidate_ref and allowed_candidate_refs:
+                if row_candidate_ref not in allowed_candidate_refs:
+                    return False
+                if row_transport and allowed_exact:
+                    return (slug, row_transport) in allowed_exact
+                return True
+            if row_transport and allowed_exact:
+                return (slug, row_transport) in allowed_exact
+            return slug in allowed_slugs
+
+        filtered = [row for row in rows if _row_allowed(row)]
         dropped = len(rows) - len(filtered)
         if dropped:
             logger.info(
@@ -1098,7 +1251,16 @@ class TaskTypeRouter:
         runtime_profile_ref: str | None = None,
     ) -> list[dict[str, Any]]:
         route_rows = self._load_task_route_rows(task_type)
-        state_by_key = {(str(row["provider_slug"]), str(row["model_slug"])): row for row in route_rows}
+        state_by_candidate_ref = {
+            str(row.get("candidate_ref") or "").strip(): row
+            for row in route_rows
+            if str(row.get("candidate_ref") or "").strip()
+        }
+        state_by_identity = {_route_identity_tuple(row): row for row in route_rows}
+        state_by_slug = {
+            (str(row["provider_slug"]), str(row["model_slug"])): row
+            for row in route_rows
+        }
         catalog_candidates = list(self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref))
         budget_authority = self._load_budget_authority_snapshot()
         built_rows: list[dict[str, Any]] = []
@@ -1116,7 +1278,12 @@ class TaskTypeRouter:
                 continue
 
             key = (candidate["provider_slug"], candidate["model_slug"])
-            state_row = state_by_key.get(key)
+            candidate_ref = str(candidate.get("candidate_ref") or "").strip()
+            state_row = (
+                state_by_candidate_ref.get(candidate_ref)
+                or state_by_identity.get(_route_identity_tuple(candidate))
+                or state_by_slug.get(key)
+            )
             explicit_override = state_row if (
                 state_row is not None and str(state_row.get("route_source") or "explicit") == "explicit"
             ) else None
@@ -1148,43 +1315,53 @@ class TaskTypeRouter:
             row_max_tokens = state_row.get("max_tokens") if state_row is not None else None
             raw_cost_per_m_tokens = _base_cost_per_m_tokens(candidate, state_row=state_row)
             provider_slug = str(candidate["provider_slug"])
+            default_adapter = self._default_adapter_for_provider(provider_slug)
+            candidate_adapter = _candidate_adapter_type(
+                candidate,
+                default_adapter=default_adapter,
+            )
+            candidate_transport = _normalize_transport_type(candidate.get("transport_type"))
             try:
                 economics = _resolve_route_economics(
                     provider_slug=provider_slug,
-                    adapter_type=str(candidate["adapter_type"]) if candidate.get("adapter_type") else None,
+                    adapter_type=candidate_adapter,
                     provider_policy_id=str(candidate["provider_policy_id"]) if candidate.get("provider_policy_id") else None,
                     raw_cost_per_m_tokens=raw_cost_per_m_tokens,
                     budget_authority=budget_authority,
-                    default_adapter=self._default_adapter_for_provider(provider_slug),
+                    default_adapter=candidate_adapter or default_adapter,
+                    strict_adapter=bool(candidate_transport),
                 )
             except RuntimeError as exc:
                 logger.debug("skipping candidate %s/%s: %s", provider_slug, candidate.get("model_slug"), exc)
+                continue
+            resolved_adapter = str(economics.get("adapter_type") or candidate_adapter or default_adapter).strip().lower()
+            row_transport_type = candidate_transport or _transport_type_for_adapter(resolved_adapter) or "API"
+            if (
+                candidate_transport
+                and _transport_type_for_adapter(resolved_adapter) != candidate_transport
+            ):
+                logger.debug(
+                    "skipping candidate %s/%s: transport_type=%s mismatches adapter_type=%s",
+                    provider_slug,
+                    candidate.get("model_slug"),
+                    candidate_transport,
+                    resolved_adapter,
+                )
                 continue
             rationale = str(explicit_override.get("rationale") or "") if explicit_override is not None else (
                 f"auto-derived: {affinity_bucket} affinity for {task_type}; "
                 f"route_tier={candidate.get('route_tier') or 'unknown'}; "
                 f"latency={candidate.get('latency_class') or 'unknown'}"
             )
-            # Carry transport_type from the candidate's adapter_type so the
-            # derived-route upsert lands on the right transport. Hardcoding
-            # 'CLI' here (the historical bug) made every derived row trip
-            # trigger 378 for HTTP-only providers; defaulting to 'API' on a
-            # missing adapter_type tripped it the OTHER way for CLI-only
-            # providers (anthropic). Resolve through the provider-aware
-            # registry so the default matches what the provider actually
-            # admits.
-            raw_candidate_adapter = candidate.get("adapter_type")
-            resolved_adapter = (
-                str(raw_candidate_adapter).strip().lower()
-                if raw_candidate_adapter
-                else self._default_adapter_for_provider(str(candidate["provider_slug"])).lower()
-            )
-            row_transport_type = "CLI" if resolved_adapter == "cli_llm" else "API"
             built_rows.append({
                 "task_type": task_type,
+                "candidate_ref": str(candidate.get("candidate_ref") or ""),
                 "provider_slug": candidate["provider_slug"],
+                "host_provider_slug": str(candidate.get("host_provider_slug") or ""),
                 "model_slug": candidate["model_slug"],
                 "transport_type": row_transport_type,
+                "variant": str(candidate.get("variant") or ""),
+                "effort_slug": str(candidate.get("effort_slug") or ""),
                 "permitted": True,
                 "rank": int(explicit_override.get("rank") or 99) if explicit_override is not None else _derived_rank_from_score(task_rank_score),
                 "benchmark_score": benchmark_score,
@@ -1225,6 +1402,10 @@ class TaskTypeRouter:
                 model_slug=str(row["model_slug"]),
                 provider_slug=str(row["provider_slug"]),
                 transport_type=str(row.get("transport_type") or "API"),
+                candidate_ref=str(row.get("candidate_ref") or "") or None,
+                host_provider_slug=str(row.get("host_provider_slug") or ""),
+                variant=str(row.get("variant") or ""),
+                effort_slug=str(row.get("effort_slug") or ""),
                 permitted=bool(row.get("permitted", True)),
                 rank=int(row.get("effective_rank") or row.get("rank") or 99),
                 benchmark_score=float(row.get("benchmark_score") or 0.0),
@@ -1268,6 +1449,7 @@ class TaskTypeRouter:
                 task_type=task_type,
                 provider_slug=str(row["provider_slug"]),
                 model_slug=str(row["model_slug"]),
+                candidate_ref=str(row.get("candidate_ref") or "") or None,
                 benchmark_score=score,
                 benchmark_name=name,
             )
@@ -1365,21 +1547,47 @@ class TaskTypeRouter:
             profile_rank = int(candidate.get(profile_rank_column) or 99)
             raw_cost_per_m_tokens = _base_cost_per_m_tokens(candidate, state_row=None)
             provider_slug = str(candidate["provider_slug"])
+            default_adapter = self._default_adapter_for_provider(provider_slug)
+            candidate_adapter = _candidate_adapter_type(
+                candidate,
+                default_adapter=default_adapter,
+            )
+            candidate_transport = _normalize_transport_type(candidate.get("transport_type"))
             try:
                 economics = _resolve_route_economics(
                     provider_slug=provider_slug,
-                    adapter_type=str(candidate["adapter_type"]) if candidate.get("adapter_type") else None,
+                    adapter_type=candidate_adapter,
                     provider_policy_id=str(candidate["provider_policy_id"]) if candidate.get("provider_policy_id") else None,
                     raw_cost_per_m_tokens=raw_cost_per_m_tokens,
                     budget_authority=budget_authority,
-                    default_adapter=self._default_adapter_for_provider(provider_slug),
+                    default_adapter=candidate_adapter or default_adapter,
+                    strict_adapter=bool(candidate_transport),
                 )
             except RuntimeError as exc:
                 logger.debug("skipping candidate %s/%s: %s", provider_slug, candidate.get("model_slug"), exc)
                 continue
+            resolved_adapter = str(economics.get("adapter_type") or candidate_adapter or default_adapter).strip().lower()
+            row_transport_type = candidate_transport or _transport_type_for_adapter(resolved_adapter) or "API"
+            if (
+                candidate_transport
+                and _transport_type_for_adapter(resolved_adapter) != candidate_transport
+            ):
+                logger.debug(
+                    "skipping candidate %s/%s: transport_type=%s mismatches adapter_type=%s",
+                    provider_slug,
+                    candidate.get("model_slug"),
+                    candidate_transport,
+                    resolved_adapter,
+                )
+                continue
             rows.append({
+                "candidate_ref": str(candidate.get("candidate_ref") or ""),
                 "provider_slug": candidate["provider_slug"],
+                "host_provider_slug": str(candidate.get("host_provider_slug") or ""),
                 "model_slug": candidate["model_slug"],
+                "transport_type": row_transport_type,
+                "variant": str(candidate.get("variant") or ""),
+                "effort_slug": str(candidate.get("effort_slug") or ""),
                 "rank": profile_rank,
                 "benchmark_score": 0.0,
                 "benchmark_name": "",
@@ -1440,10 +1648,19 @@ class TaskTypeRouter:
                     else str(row.get("rationale") or "")
                 ),
                 was_auto=True,
+                candidate_ref=str(row.get("candidate_ref") or ""),
                 adapter_type=str(
                     row.get("adapter_type")
                     or self._default_adapter_for_provider(str(row.get("provider_slug") or ""))
                 ),
+                transport_type=str(
+                    row.get("transport_type")
+                    or _transport_type_for_adapter(row.get("adapter_type"))
+                    or "API"
+                ),
+                host_provider_slug=str(row.get("host_provider_slug") or ""),
+                variant=str(row.get("variant") or ""),
+                effort_slug=str(row.get("effort_slug") or ""),
                 billing_mode=str(row.get("billing_mode") or "metered_api"),
                 budget_bucket=str(row.get("budget_bucket") or "unknown"),
                 effective_marginal_cost=_row_effective_marginal_cost(row),
@@ -1585,13 +1802,15 @@ class TaskTypeRouter:
         if not rows:
             return rows
         provider_slugs = sorted({str(row["provider_slug"]) for row in rows})
-        # Resolve the default adapter each provider would use. For most
-        # providers this is a single constant, but we compute per-provider
-        # to respect any router-injected overrides.
-        adapter_by_provider: dict[str, str] = {}
-        for provider_slug in provider_slugs:
+        adapter_by_row: dict[int, str] = {}
+        for index, row in enumerate(rows):
+            provider_slug = str(row["provider_slug"])
+            explicit_adapter = str(row.get("adapter_type") or "").strip()
+            if explicit_adapter:
+                adapter_by_row[index] = explicit_adapter
+                continue
             try:
-                adapter_by_provider[provider_slug] = _resolve_default_adapter_for_router(
+                adapter_by_row[index] = _resolve_default_adapter_for_router(
                     self, provider_slug
                 )
             except Exception:
@@ -1600,8 +1819,8 @@ class TaskTypeRouter:
                     task_type,
                     provider_slug,
                 )
-                adapter_by_provider[provider_slug] = ""
-        adapter_types = sorted({a for a in adapter_by_provider.values() if a})
+                adapter_by_row[index] = ""
+        adapter_types = sorted({a for a in adapter_by_row.values() if a})
         if not adapter_types:
             return []
         try:
@@ -1624,9 +1843,9 @@ class TaskTypeRouter:
             for r in admission_rows
         }
         kept: list[Any] = []
-        for row in rows:
+        for index, row in enumerate(rows):
             provider_slug = str(row["provider_slug"])
-            adapter_type = adapter_by_provider.get(provider_slug, "")
+            adapter_type = adapter_by_row.get(index, "")
             if not adapter_type:
                 kept.append(row)
                 continue
@@ -1898,6 +2117,15 @@ class TaskTypeRouter:
                 else:
                     primary = chain[0]
                     slugs = tuple(f"{d.provider_slug}/{d.model_slug}" for d in chain)
+                decision_by_slug = {
+                    f"{decision.provider_slug}/{decision.model_slug}": decision
+                    for decision in chain
+                }
+                route_candidates = tuple(
+                    _route_candidate_payload(decision_by_slug[slug])
+                    for slug in slugs
+                    if slug in decision_by_slug
+                )
 
                 plan = RoutePlan(
                     primary=slugs[0],
@@ -1908,13 +2136,17 @@ class TaskTypeRouter:
                     backoff_seconds=(5, 15),
                     task_type=primary.task_type,
                     original_slug=slug,
+                    route_candidates=route_candidates,
                 )
 
                 job["agent"] = plan.primary
                 job["_route_plan"] = plan
                 job["_route_decision"] = {
                     "original": slug, "resolved": job["agent"],
-                    "rank": primary.rank, "rationale": primary.rationale,
+                    "rank": primary.rank,
+                    "rationale": primary.rationale,
+                    "transport_type": getattr(primary, "transport_type", ""),
+                    "adapter_type": getattr(primary, "adapter_type", ""),
                 }
         return jobs
 

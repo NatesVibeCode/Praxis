@@ -611,7 +611,7 @@ def _compile_single_prompt_dispatch_graph(
     parser_node_id = f"{label}__parser"
     state.add_node(
         node_id=context_node_id,
-        adapter_type="context_materializer",
+        adapter_type="context_compiler",
         display_name=f"{display_name} context",
         inputs=context_inputs,
     )
